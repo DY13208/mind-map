@@ -12,7 +12,7 @@ assert.deepEqual(compiler.compile(parsed.template.content).errors, [])
 assert(!parsed.template.content.includes('mobileEditorDock'), 'touch editor must not render a duplicate bottom menu')
 assert(parsed.template.content.includes('direction="ltr"'), 'node actions open from the left')
 const panels = ['nodeStyle', 'baseStyle', 'theme', 'structure', 'outline', 'setting'].map(value => ({ value, name: value }))
-const context = { module: { exports: {} }, editorViewport: viewport, MobileCircleMenu: {}, openNotifications() {}, sidebarTriggerList: { zh: panels } }
+const context = { module: { exports: {} }, editorViewport: viewport, MobileEditorMenu: {}, openNotifications() {}, sidebarTriggerList: { zh: panels } }
 vm.runInNewContext(parsed.script.content.replace(/^import .*$/gm, '').replace('export default', 'module.exports='), context)
 const component = context.module.exports
 const classes = new Set(), listeners = new Map()
@@ -61,15 +61,15 @@ viewport.methods.updateEditorViewport.call(q); assert.equal(q.isTouchEditor, tru
 q._editorViewportQuery.matches = false; viewport.methods.updateEditorViewport.call(q); assert.equal(q.isTouchEditor, false)
 console.log('PASS touch editor selection/history seeding, add/undo guards, readonly, panels, long press, keyboard state, responsive cleanup and event disposal')
 
-const circle = compiler.parseComponent(fs.readFileSync(path.resolve(__dirname, '../src/pages/Edit/components/MobileCircleMenu.vue'), 'utf8'))
-assert.deepEqual(compiler.compile(circle.template.content).errors, [])
-const circleContext = { module: { exports: {} } }
-vm.runInNewContext(circle.script.content.replace('export default', 'module.exports='), circleContext)
-const radial = circleContext.module.exports, selected = []
-const menu = { ...radial.data(), ...radial.methods, $emit: (name, key) => selected.push([name, key]), $nextTick: fn => fn(), $refs: { trigger: { focus() {} } } }
+const menuComponent = compiler.parseComponent(fs.readFileSync(path.resolve(__dirname, '../src/pages/Edit/components/MobileEditorMenu.vue'), 'utf8'))
+assert.deepEqual(compiler.compile(menuComponent.template.content).errors, [])
+const menuContext = { module: { exports: {} } }
+vm.runInNewContext(menuComponent.script.content.replace('export default', 'module.exports='), menuContext)
+const menuOptions = menuContext.module.exports, selected = []
+const menu = { ...menuOptions.data(), ...menuOptions.methods, $emit: (name, key) => selected.push([name, key]), $nextTick: fn => fn(), $refs: { trigger: { focus() {} } } }
 menu.open = true; menu.select('file'); assert.equal(menu.open, false); assert.deepEqual(selected, [['select', 'file']])
 menu.open = true; menu.close(); assert.equal(menu.open, false)
-assert.equal(radial.computed.items.call(menu).length, 6)
+assert.equal(menuOptions.computed.items.call(menu).length, 6)
 const contextSource = compiler.parseComponent(fs.readFileSync(path.resolve(__dirname, '../src/pages/Edit/components/Contextmenu.vue'), 'utf8')).script.content
 const contextMenuScope = { MenuIcon: {}, mapState: () => ({}), mapMutations: () => ({}) }
 vm.runInNewContext(contextSource.replace(/^import[\s\S]*?from ['"][^'"]+['"];?\s*$/gm, '').replace('export default', 'component ='), contextMenuScope)
@@ -79,5 +79,5 @@ const contextMethods = contextMenuScope.component.methods
   assert.equal(await contextMethods.canExecuteCommand.call(readonlyMenu, 'REMOVE_NODE'), false)
   assert.equal(await contextMethods.canExecuteCommand.call(readonlyMenu, 'INSERT_CHILD_NODE'), false)
   assert.equal(await contextMethods.canExecuteCommand.call(readonlyMenu, 'EXPAND_ALL'), true)
-  console.log('PASS circle selection/close and readonly context command guards')
+  console.log('PASS menu selection/close and readonly context command guards')
 })().catch(error => { console.error(error); process.exitCode = 1 })

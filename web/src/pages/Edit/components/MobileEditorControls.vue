@@ -1,6 +1,6 @@
 <template>
   <div v-if="isTouchEditor && mindMap" class="mobileEditorControls">
-    <MobileCircleMenu v-if="isPhoneReader" :is-dark="isDark" @select="circleAction" @toggle="onCircleToggle" />
+    <MobileEditorMenu v-if="isPhoneReader" :is-dark="isDark" @select="menuAction" @toggle="onMenuToggle" />
     <div v-else class="mobileCanvasControls" aria-label="画布控制">
       <button aria-label="放大" @click="mindMap.view.enlarge()"><i class="el-icon-plus" /></button>
       <button aria-label="缩小" @click="mindMap.view.narrow()"><i class="el-icon-minus" /></button>
@@ -12,33 +12,33 @@
       <p v-if="sheet === 'node' && !activeNodes.length">请先点击选择一个节点</p>
       <div class="mobileActionGrid">
         <template v-if="sheet === 'node'">
-          <button :disabled="!canEdit" @click="command('INSERT_CHILD_NODE')">新增子节点</button>
-          <button :disabled="!canEdit || activeNodes.some(n => n.isRoot)" @click="command('INSERT_NODE')">新增同级节点</button>
-          <button :disabled="!canEdit" @click="editText">编辑文字</button>
-          <button :disabled="!activeNodes.length" @click="nodeEvent('showNodeComment')">节点评论</button>
-          <button :disabled="!canEdit" @click="nodeEvent('selectAttachment', true)">附件</button>
-          <button :disabled="!canEdit" @click="nodeEvent('showNodeLink')">超链接</button>
-          <button :disabled="!activeNodes.length" @click="context">全部节点操作</button>
-          <button :disabled="!canEdit || activeNodes.some(n => n.isRoot)" @click="remove">删除节点</button>
+          <button :disabled="!canEdit" @click="command('INSERT_CHILD_NODE')"><i aria-hidden="true" class="el-icon-plus" />新增子节点</button>
+          <button :disabled="!canEdit || activeNodes.some(n => n.isRoot)" @click="command('INSERT_NODE')"><i aria-hidden="true" class="el-icon-circle-plus-outline" />新增同级节点</button>
+          <button :disabled="!canEdit" @click="editText"><i aria-hidden="true" class="el-icon-edit" />编辑文字</button>
+          <button :disabled="!activeNodes.length" @click="nodeEvent('showNodeComment')"><i aria-hidden="true" class="el-icon-chat-dot-round" />节点评论</button>
+          <button :disabled="!canEdit" @click="nodeEvent('selectAttachment', true)"><i aria-hidden="true" class="el-icon-paperclip" />附件</button>
+          <button :disabled="!canEdit" @click="nodeEvent('showNodeLink')"><i aria-hidden="true" class="el-icon-link" />超链接</button>
+          <button :disabled="!activeNodes.length" @click="context"><i aria-hidden="true" class="el-icon-more" />全部节点操作</button>
+          <button :disabled="!canEdit || activeNodes.some(n => n.isRoot)" @click="remove"><i aria-hidden="true" class="el-icon-delete" />删除节点</button>
         </template>
         <template v-else-if="sheet === 'canvas'">
-          <button @click="canvasAction('enlarge')">放大</button><button @click="canvasAction('narrow')">缩小</button>
-          <button @click="canvasAction('fit')">适应画布</button><button @click="canvasAction('center')">定位中心</button>
-          <button v-if="isPhoneReader" :disabled="readonly" :aria-pressed="String(phoneNodeDragEnabled)" @click="phoneNodeDragEnabled = !phoneNodeDragEnabled">{{ phoneNodeDragEnabled ? '关闭节点拖动（浏览优先）' : '启用节点拖动' }}</button>
+          <button @click="canvasAction('enlarge')"><i aria-hidden="true" class="el-icon-zoom-in" />放大</button><button @click="canvasAction('narrow')"><i aria-hidden="true" class="el-icon-zoom-out" />缩小</button>
+          <button @click="canvasAction('fit')"><i aria-hidden="true" class="el-icon-full-screen" />适应画布</button><button @click="canvasAction('center')"><i aria-hidden="true" class="el-icon-aim" />定位中心</button>
+          <button v-if="isPhoneReader" :disabled="readonly" :aria-pressed="String(phoneNodeDragEnabled)" @click="phoneNodeDragEnabled = !phoneNodeDragEnabled"><i aria-hidden="true" class="el-icon-rank" />{{ phoneNodeDragEnabled ? '关闭节点拖动（浏览优先）' : '启用节点拖动' }}</button>
         </template>
         <template v-else-if="sheet === 'appearance'">
-          <button v-for="item in appearancePanels" :key="item.value" :disabled="readonly" @click="panel(item.value)">{{ item.name }}</button>
+          <button v-for="item in appearancePanels" :key="item.value" :disabled="readonly" @click="panel(item.value)"><i aria-hidden="true" class="iconfont" :class="item.icon" />{{ item.name }}</button>
         </template>
         <template v-else>
-          <button :disabled="readonly || !canUndo" @click="history('BACK')">撤销</button>
-          <button :disabled="readonly || !canRedo" @click="history('FORWARD')">重做</button>
-          <button @click="nodeMenu">节点操作</button>
-          <button @click="emit('open_mobile_file_menu')">文件操作</button>
-          <button @click="panel('outline')">大纲</button>
-          <button @click="emit('show_search')">搜索节点</button>
-          <button @click="emit('showShareAcl')">分享与权限</button>
-          <button v-for="item in extraPanels" :key="item.value" @click="panel(item.value)">{{ item.name }}</button>
-          <button @click="emit('showExport')">导出</button>
+          <button :disabled="readonly || !canUndo" @click="history('BACK')"><i aria-hidden="true" class="el-icon-back" />撤销</button>
+          <button :disabled="readonly || !canRedo" @click="history('FORWARD')"><i aria-hidden="true" class="el-icon-right" />重做</button>
+          <button @click="nodeMenu"><i aria-hidden="true" class="el-icon-s-grid" />节点操作</button>
+          <button @click="emit('open_mobile_file_menu')"><i aria-hidden="true" class="el-icon-folder-opened" />文件操作</button>
+          <button @click="panel('outline')"><i aria-hidden="true" class="el-icon-tickets" />大纲</button>
+          <button @click="emit('show_search')"><i aria-hidden="true" class="el-icon-search" />搜索节点</button>
+          <button @click="emit('showShareAcl')"><i aria-hidden="true" class="el-icon-lock" />分享与权限</button>
+          <button v-for="item in extraPanels" :key="item.value" @click="panel(item.value)"><i aria-hidden="true" class="iconfont" :class="item.icon" />{{ item.name }}</button>
+          <button @click="emit('showExport')"><i aria-hidden="true" class="el-icon-download" />导出</button>
         </template>
       </div>
     </el-drawer>
@@ -47,10 +47,10 @@
 <script>
 import editorViewport from '@/utils/editorViewport'
 import { sidebarTriggerList } from '@/config'
-import MobileCircleMenu from './MobileCircleMenu.vue'
+import MobileEditorMenu from './MobileEditorMenu.vue'
 import { openNotifications } from '@/services/accessNotificationState'
 export default {
-  components: { MobileCircleMenu },
+  components: { MobileEditorMenu },
   mixins: [editorViewport],
   props: { mindMap: Object },
   data: () => ({ sheet: '', activeNodes: [], canUndo: false, canRedo: false, collabHistoryEnabled: false, phoneNodeDragEnabled: false }),
@@ -108,7 +108,7 @@ export default {
     this._pressedNode = null
   },
   methods: {
-    onCircleToggle(open) {
+    onMenuToggle(open) {
       if (!open) return
       this.closeSheet()
       this.$bus.$emit('close_mobile_file_menu')
@@ -116,7 +116,7 @@ export default {
       this.$bus.$emit('closeSideBar')
     },
     applyPhoneGestures() { this.mindMap.updateConfig({ touchNodeDragEnabled: this.isPhoneReader ? this.phoneNodeDragEnabled : this._originalTouchNodeDrag }) },
-    circleAction(key) {
+    menuAction(key) {
       if (key === 'file') this.emit('open_mobile_file_menu')
       else if (key === 'messages') { this.closeSheet(); openNotifications('requests') }
       else this.openSheet(key)

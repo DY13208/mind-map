@@ -93,14 +93,15 @@
   bottom: calc(100vh - var(--mm-viewport-height) - var(--mm-viewport-top) + 8px + env(safe-area-inset-bottom)) !important;
   left: max(8px, env(safe-area-inset-left)) !important; height: auto !important;
   max-width: calc(100vw - 72px); box-sizing: border-box; border-radius: 14px;
-  padding: 12px 16px; overflow-y: auto; overscroll-behavior: contain; color: #153052;
-  header { display: flex; align-items: center; justify-content: space-between; }
-  button { min-height: 48px; border: 0; border-radius: 10px; background: #f1f5f3; color: inherit; font-size: 14px; padding: 8px 12px; }
+  padding: 0 8px 8px; overflow-y: auto; overscroll-behavior: contain; color: #153052;
+  header { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; min-height: 48px; padding-left: 12px; border-bottom: 1px solid #e8e8e8; background: #fff; strong { font-size: 14px; font-weight: 600; } }
+  .mobileActionGrid > button, header > button { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 44px; border: 0; border-radius: 6px; background: transparent; color: inherit; text-align: left; font-size: 14px; line-height: 20px; padding: 10px 12px; i { flex-shrink: 0; width: 20px; font-size: 18px; text-align: center; } &:active:not(:disabled) { background: #eef5f1; } }
   button:disabled { opacity: .4; }
-  header button { min-width: 44px; background: transparent; }
-  .mobileActionGrid { display: grid; grid-template-columns: 1fr; gap: 10px; padding-top: 12px; }
+  header button { width: 44px; min-width: 44px; justify-content: center; padding: 0; }
+  .el-drawer__body > p { margin: 12px 12px 4px; color: #6c788a; font-size: 12px; line-height: 20px; }
+  .mobileActionGrid { display: flex; flex-direction: column; padding-top: 6px; }
   .collabDiag { max-height: 160px; overflow: auto; font-size: 12px; overflow-wrap: anywhere; }
-  &.isDark { background: #262a2e; color: #edf2f7; button { background: #363b3f; } header button { background: transparent; } }
+  &.isDark { background: #262a2e; color: #edf2f7; header { background: #262a2e; border-bottom-color: #ffffff1a; } .el-drawer__body > p { color: #b5bec9; } .mobileActionGrid > button:active:not(:disabled) { background: #ffffff0d; } }
 }
 .touchEditorMapTree { padding: 0; .mapFileTree { width: 100%; height: 100%; max-height: none; box-sizing: border-box; } .treeHead button { min-width: 44px; } }
 .mobileNodeEditing .container.isTouchEditor {
@@ -123,20 +124,32 @@
   .contextmenuContainer .item, .contextmenuContainer .submenu .item { min-height: 44px; height: auto; }
   .contextmenuContainer .desc { display: none; }
 }
-.mobileCircleMenu {
+.mobileEditorMenu {
   position: fixed; right: max(12px, env(safe-area-inset-right)); bottom: calc(100vh - var(--mm-viewport-height) - var(--mm-viewport-top) + max(12px, env(safe-area-inset-bottom)));
-  width: 296px; height: 296px; z-index: 49; pointer-events: none; color: #153052;
-  .circleMenuBackdrop { position: fixed; inset: 0; border: 0; background: #10253612; pointer-events: auto; }
-  .circleMenuOrbit { position: absolute; inset: 0; border-radius: 50%; transition: background-color .18s; }
-  .circleMenuTrigger { position: absolute; right: 0; bottom: 0; width: 44px; height: 44px; border-radius: 50%; border: 1px solid #ffffff40; background: #08785499; color: #fff; font-size: 20px; box-shadow: 0 3px 12px #123c3520; -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); pointer-events: auto; transition: transform .2s ease; }
-  .circleMenuItem { position: absolute; left: 124px; top: 124px; width: 48px; height: 48px; border: 0; border-radius: 50%; background: #fff; color: inherit; box-shadow: 0 3px 12px #10253618; display: grid; place-items: center; opacity: 0; visibility: hidden; transform: translate(0, 0) scale(.7); transition: transform .22s cubic-bezier(.2,.8,.2,1), opacity .15s, visibility .15s; i { font-size: 22px; } span { position: absolute; top: 52px; left: -8px; right: -8px; font-size: 12px; font-weight: 500; white-space: nowrap; } }
-  &.open {
-    .circleMenuOrbit { background: #f4f7f5f5; box-shadow: 0 4px 24px #10253614; }
-    .circleMenuTrigger { transform: translate(-126px, -126px); }
-    .circleMenuItem { opacity: 1; visibility: visible; pointer-events: auto; transform: translate(var(--circle-x), var(--circle-y)) scale(1); transition-delay: var(--circle-delay); }
+  width: 44px; height: 44px; z-index: 49; pointer-events: none; color: #153052;
+  .editorMenuBackdrop { position: fixed; inset: 0; border: 0; background: transparent; pointer-events: auto; }
+  .editorMenuPanel {
+    position: absolute; right: 0; bottom: 56px; display: flex; flex-direction: column;
+    box-sizing: border-box; width: 216px; max-width: calc(100vw - 24px - env(safe-area-inset-left) - env(safe-area-inset-right));
+    max-height: calc(var(--mm-viewport-height) - 136px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    border: 1px solid #10182814; border-radius: 12px; background: #fff; box-shadow: 0 8px 24px #10182814; pointer-events: auto; overflow: hidden;
   }
-  &.isDark { color: #edf2f7; .circleMenuItem { background: #363b3f; } &.open .circleMenuOrbit { background: #262a2ef5; } }
+  .editorMenuHeading { flex-shrink: 0; padding: 12px 16px; font-size: 12px; line-height: 18px; color: #6c788a; border-bottom: 1px solid #e8e8e8; }
+  .editorMenuItems { min-height: 0; padding: 4px; overflow-y: auto; overscroll-behavior: contain; }
+  .editorMenuItem {
+    display: flex; align-items: center; gap: 12px; width: 100%; min-height: 44px; border: 0; border-radius: 6px; background: transparent; color: inherit; text-align: left; font-size: 14px; line-height: 20px; padding: 10px 12px; touch-action: manipulation;
+    .editorMenuIcon { width: 20px; flex-shrink: 0; font-size: 18px; text-align: center; }
+    span { flex: 1; }
+    .editorMenuArrow { font-size: 12px; color: #909ba7; }
+    &.separated { margin-top: 4px; border-top: 1px solid #e8e8e8; border-radius: 0 0 6px 6px; }
+    &:active { background: #eef5f1; }
+  }
+  .editorMenuTrigger { position: absolute; right: 0; bottom: 0; width: 44px; height: 44px; border-radius: 50%; border: 1px solid #ffffff40; background: #08785499; color: #fff; font-size: 20px; box-shadow: 0 3px 12px #123c3520; -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); pointer-events: auto; touch-action: manipulation; }
+  &.isDark { color: #edf2f7; .editorMenuPanel { background: #262a2e; border-color: #ffffff1a; box-shadow: 0 8px 24px #00000059; } .editorMenuHeading { color: #b5bec9; } .editorMenuHeading, .editorMenuItem.separated { border-color: #ffffff1a; } .editorMenuItem:active { background: #ffffff0d; } }
   button:focus-visible { outline: 2px solid #087854; outline-offset: 3px; }
 }
-.mobileNodeEditing .mobileCircleMenu { display: none; }
-@media (prefers-reduced-motion: reduce) { .mobileCircleMenu .circleMenuTrigger, .mobileCircleMenu .circleMenuItem, .mobileCircleMenu .circleMenuOrbit { transition: none; } }
+.mobileNodeEditing .mobileEditorMenu { display: none; }
+@media (hover: hover) {
+  .mobileEditorMenu .editorMenuItem:hover, .touchEditorActionSidebar .mobileActionGrid > button:hover:not(:disabled) { background: #f5f7f7; }
+  .mobileEditorMenu.isDark .editorMenuItem:hover, .touchEditorActionSidebar.isDark .mobileActionGrid > button:hover:not(:disabled) { background: #ffffff0d; }
+}

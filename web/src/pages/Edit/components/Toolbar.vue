@@ -284,8 +284,10 @@
     <el-drawer :visible.sync="mobileMenuOpen" direction="ltr" size="320px" :with-header="false" :modal="false" :lock-scroll="false" append-to-body class="touchEditorDrawer" :custom-class="isDark ? 'touchEditorActionSidebar isDark' : 'touchEditorActionSidebar'">
       <header><strong>脑图操作</strong><button aria-label="关闭脑图操作" @click="mobileMenuOpen = false"><i class="el-icon-close" /></button></header>
       <div v-if="displayedSaveChip === 'failed'" class="collabDiag" role="alert"><p v-for="row in collabDiagRows" :key="row.key">{{ row.key }}：{{ row.value }}</p></div>
-      <div class="mobileActionGrid"><button v-for="item in fileToolbarActions" :key="item.key" :disabled="item.disabled" @click="mobileMenuOpen = false; onFileMenuSelect(item.key)">{{ item.label }}</button></div>
-      <button v-if="isPhoneReader" type="button" @click="toggleTouchMapTree">脑图目录</button>
+      <div class="mobileActionGrid">
+        <button v-for="item in fileToolbarActions" :key="item.key" :disabled="item.disabled" @click="mobileMenuOpen = false; onFileMenuSelect(item.key)"><i aria-hidden="true" :class="item.icon" />{{ item.label }}</button>
+        <button v-if="isPhoneReader" type="button" @click="toggleTouchMapTree"><i aria-hidden="true" class="el-icon-folder-opened" />脑图目录</button>
+      </div>
     </el-drawer>
     <el-drawer v-if="isTouchEditor" :visible.sync="mapTreeShow" direction="ltr" size="320px" :with-header="false" :modal="false" :lock-scroll="false" append-to-body class="touchEditorDrawer" :custom-class="isDark ? 'touchEditorActionSidebar touchEditorMapTree isDark' : 'touchEditorActionSidebar touchEditorMapTree'">
       <MapFileTree v-if="mapTreeShow" :current-room-key="currentRoomKey()" :is-dark="isDark" @open="openMapFromTree" @close="mapTreeShow = false" />
