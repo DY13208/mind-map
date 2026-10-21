@@ -3,15 +3,9 @@
     <button v-if="isMobileViewport && foldersOpen" class="kb-folder-backdrop" aria-label="关闭文件夹面板" tabindex="-1" @click="closeFolders" />
     <aside v-show="!isMobileViewport || foldersOpen" class="kb-card kb-files-side" :role="isMobileViewport ? 'dialog' : null" :aria-modal="isMobileViewport ? 'true' : null" aria-label="文件夹导航" @keydown="onFolderKeydown">
       <button v-if="isMobileViewport" class="kb-folder-close" aria-label="关闭文件夹面板" @click="closeFolders"><i class="el-icon-close" /></button>
-      <KbFolderTree ref="tree" v-model="folderId" @path="onFolderPath" @roots="onRootFolders" @acl="openAcl" />
+      <KbFolderTree ref="tree" v-model="folderId" @path="onFolderPath" @acl="openAcl" />
     </aside>
     <section class="kb-files-main">
-      <div v-if="isMobileViewport" class="kb-mobile-stats" aria-label="文件概览">
-        <div><i class="el-icon-document stat-blue" /><strong>{{ summaryCount }}</strong><span>{{ total != null ? '筛选文件总数' : '本页文档' }}</span></div>
-        <div><i class="el-icon-folder-opened stat-teal" /><strong>{{ rootFoldersLoaded ? rootFolders.length : '—' }}{{ moreRootFolders ? '+' : '' }}</strong><span>根目录分类</span></div>
-        <div><i class="el-icon-circle-check stat-purple" /><strong>{{ loaded && !error ? files.filter(f => f.status === 'done').length : '—' }}</strong><span>本页已完成</span></div>
-        <div><i class="el-icon-time stat-orange" /><strong>{{ loaded && !error ? activeIds.length : '—' }}</strong><span>本页处理中</span></div>
-      </div>
       <div class="kb-card">
         <div v-if="isMobileViewport" class="kb-section-heading"><h2>{{ folderId ? '分类文档' : '文档动态' }}</h2><button @click="mobileShowAll = !mobileShowAll">{{ mobileShowAll ? '收起列表' : '查看全部' }}<i class="el-icon-arrow-right" /></button></div>
         <div class="kb-toolbar">
@@ -70,19 +64,6 @@
           />
         </KbStateBlock>
       </div>
-      <template v-if="isMobileViewport">
-        <router-link class="kb-graph-card" :to="{ path: '/graph', query: { shell: $route.query.shell } }">
-          <div><h2>知识图谱</h2><p>探索知识之间的关联，发现更多价值</p><span>进入图谱 <i class="el-icon-right" /></span></div>
-          <div class="kb-graph-art" aria-hidden="true"><i class="el-icon-document" /><b>产品</b><b>流程</b><b>制度</b><b>组织</b><b>项目</b></div>
-        </router-link>
-        <section class="kb-categories">
-          <div class="kb-section-heading"><h2>知识分类</h2><button @click="openFolders">查看全部<i class="el-icon-arrow-right" /></button></div>
-          <div v-if="rootFolders.length" class="kb-category-grid">
-            <button v-for="(folder, i) in rootFolders.slice(0, 5)" :key="folder.id" @click="selectRootFolder(folder.id)"><i :class="['el-icon-folder-opened', 'category-' + i]" /><span>{{ folder.name }}</span><small>查看文档</small></button>
-          </div>
-          <p v-else class="kb-category-empty">{{ rootFoldersLoaded ? '在文件夹面板中创建你的第一个分类' : '打开文件夹面板查看分类或重试' }}</p>
-        </section>
-      </template>
     </section>
     <KbPermissionDialog :visible.sync="aclVisible" :target="aclTarget" />
     <KbBatchDrawer
@@ -122,11 +103,10 @@ export default {
       folderId: '', folderPath: [], files: [], total: null, limit: DEFAULT_LIMIT, q: '', status: '',
       cursor: createCursorState(), loading: false, loaded: false, error: null, showUpload: false,
       aclVisible: false, aclTarget: null, statuses: FILE_STATUS, reqSeq: 0, localActiveBatches: [],
-      foldersOpen: false, rootFolders: [], rootFoldersLoaded: false, moreRootFolders: false, mobileShowAll: false
+      foldersOpen: false, mobileShowAll: false
     }
   },
   computed: {
-    summaryCount() { return !this.loaded || this.error ? '—' : this.total != null ? this.total.toLocaleString() : this.files.length },
     activeIds() { return this.files.filter(f => ACTIVE_STATUSES.includes(f.status)).map(f => f.id) },
     hasActive() { return this.activeIds.length > 0 },
     // 批次视图放在路由 query 里（batches=1、batch=<id>），刷新后从后端重新读取，不依赖内存
@@ -148,7 +128,6 @@ export default {
     clearTimeout(this.timer)
   },
   methods: {
-    onRootFolders({ items, hasMore }) { this.rootFolders = items; this.moreRootFolders = hasMore; this.rootFoldersLoaded = true },
     onFolderPath(path) { this.folderPath = path; this.closeFolders() },
     closeFolders() {
       this.foldersOpen = false
@@ -169,7 +148,6 @@ export default {
       if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
     },
-    selectRootFolder(id) { this.$refs.tree.select(id); this.mobileShowAll = true },
     debouncedLoad() {
       clearTimeout(this.timer)
       this.timer = setTimeout(this.reload, 300)

@@ -3,14 +3,10 @@
     <header class="kb-header">
       <div>
         <h1 class="kb-title"><i class="el-icon-collection" aria-hidden="true" />{{ isMobileViewport ? '知识库' : '文件知识库' }}</h1>
-        <p class="kb-subtitle">{{ isMobileViewport ? '沉淀企业知识，让经验创造更大价值' : '上传文件，自动解析与结构化入库，支持检索与 MCP 调用' }}</p>
-      </div>
-      <div v-if="isMobileViewport" class="kb-hero-actions">
-        <AccessNotificationTrigger collapsed />
-        <router-link to="/profile" aria-label="个人主页"><i class="el-icon-user-solid" /></router-link>
+        <p v-if="!isMobileViewport" class="kb-subtitle">上传文件，自动解析与结构化入库，支持检索与 MCP 调用</p>
       </div>
       <div v-if="isMobileViewport" class="kb-hero-art" aria-hidden="true"><span /><span /><span><i /><i /><i /></span></div>
-      <div class="kb-header-status">
+      <div v-if="!isMobileViewport" class="kb-header-status">
         <span class="kb-dot" :class="healthClass" />{{ healthText }}
       </div>
     </header>
@@ -23,12 +19,6 @@
       :visible="failuresOpen" :items="failedJobs" :total="failedTotal"
       @close="failuresOpen = false" @changed="onFailuresChanged" @open-file="openFailedFile"
     />
-    <form v-if="isMobileViewport" class="kb-hero-search" role="search" @submit.prevent="searchKnowledge">
-      <i class="el-icon-search" aria-hidden="true" />
-      <input v-model.trim="mobileQuery" type="search" aria-label="搜索知识库" placeholder="搜索文档、知识点或关键词…" enterkeyhint="search" />
-      <button type="submit" aria-label="开始搜索"><i class="el-icon-right" /></button>
-    </form>
-    <KbServiceBanner :health="health" :error="healthError" :loading="healthLoading" @retry="loadHealth" />
     <el-tabs :value="tab" class="kb-tabs" @input="onTab">
       <el-tab-pane v-for="t in tabs" :key="t.name" :name="t.name">
         <span slot="label"><i :class="t.icon" class="kb-tab-icon" aria-hidden="true" />{{ isMobileViewport ? mobileLabels[t.name] : t.label }}</span>
@@ -52,16 +42,13 @@ import KbStructuredTab from './KbStructuredTab.vue'
 import KbSearchTab from './KbSearchTab.vue'
 import KbMcpTab from './KbMcpTab.vue'
 import mobileViewport from '@/utils/mobileViewport'
-import AccessNotificationTrigger from '@/components/AccessNotificationTrigger.vue'
 const COMPONENTS = { files: 'KbFilesTab', parse: 'KbParseDetailTab', data: 'KbStructuredTab', search: 'KbSearchTab', mcp: 'KbMcpTab' }
 export default {
   name: 'KbIndexPage',
-  components: { KbServiceBanner, KbFailedJobsDialog, KbFilesTab, KbParseDetailTab, KbStructuredTab, KbSearchTab, KbMcpTab },
   mixins: [mobileViewport],
-  components: { AccessNotificationTrigger, KbServiceBanner, KbFilesTab, KbParseDetailTab, KbStructuredTab, KbSearchTab, KbMcpTab },
+  components: { KbServiceBanner, KbFailedJobsDialog, KbFilesTab, KbParseDetailTab, KbStructuredTab, KbSearchTab, KbMcpTab },
   data() {
-    return { tabs: KB_TABS, health: null, healthError: null, healthLoading: false, failedJobs: [], failedTotal: 0, failuresOpen: false }
-    return { tabs: KB_TABS, health: null, healthError: null, healthLoading: false, mobileQuery: '', mobileLabels: { files: '全部', parse: '文档', data: '数据', search: '检索', mcp: '接入' } }
+    return { tabs: KB_TABS, health: null, healthError: null, healthLoading: false, failedJobs: [], failedTotal: 0, failuresOpen: false, mobileLabels: { files: '全部', parse: '文档', data: '数据', search: '检索', mcp: '接入' } }
   },
   computed: {
     tab() {
@@ -97,9 +84,6 @@ export default {
     }).then(() => next()).catch(() => next(false))
   },
   methods: {
-    searchKnowledge() {
-      this.navigate({ tab: 'search', query: this.mobileQuery ? { q: this.mobileQuery } : {} })
-    },
     async loadHealth() {
       this.healthLoading = true
       try {
