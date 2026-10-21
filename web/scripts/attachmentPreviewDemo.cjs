@@ -57,7 +57,22 @@ async function fixtures() {
     for (let row = 0; row < 22; row++) page.drawText('Preview content ' + (row + 1) + ': scope, delivery, quality and acceptance.', { x: 50, y: 660 - row * 23, size: 12, font })
   }
   const make = (id, fileName, buffer, extra = {}) => ({ id, fileName, buffer, byteSize: buffer.length, status: 'ready', mimeType: '', updatedAt: '2026-10-14T03:00:00Z', ...extra })
+  const csv = '编号,姓名,备注\r\n00123,张三,"包含,逗号"\r\n00007,李四,"第一行\n第二行"\r\n'
+  const wav = Buffer.alloc(44 + 16000)
+  wav.write('RIFF'); wav.writeUInt32LE(wav.length - 8, 4); wav.write('WAVEfmt ', 8)
+  wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22)
+  wav.writeUInt32LE(8000, 24); wav.writeUInt32LE(16000, 28); wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34)
+  wav.write('data', 36); wav.writeUInt32LE(16000, 40)
   return {
+    csv: make('csv', '中文数据.csv', Buffer.from('\ufeff' + csv), { mimeType: 'text/csv' }),
+    csvGbk: make('csvGbk', 'GBK数据.csv', require('iconv-lite').encode(csv, 'gb18030'), { mimeType: 'text/csv' }),
+    tsv: make('tsv', '制表符数据.tsv', Buffer.from('编号\t名称\t备注\n00123\t中文\t"含\t制表符"'), { mimeType: 'text/tab-separated-values' }),
+    xls: make('xls', '旧版表格.xls', XLSX.write(workbook, { type: 'buffer', bookType: 'xls' })),
+    xlsb: make('xlsb', '二进制表格.xlsb', XLSX.write(workbook, { type: 'buffer', bookType: 'xlsb' })),
+    ods: make('ods', '开放文档表格.ods', XLSX.write(workbook, { type: 'buffer', bookType: 'ods', compression: true })),
+    emptyCsv: make('emptyCsv', '空表格.csv', Buffer.alloc(0), { mimeType: 'text/csv' }),
+    audio: make('audio', '音频示例.wav', wav, { mimeType: 'audio/wav' }),
+    badVideo: make('badVideo', '不支持的编码.mp4', Buffer.from('not a video'), { mimeType: 'video/mp4' }),
     markdown: make('markdown', '公司模型_整理版.md', Buffer.from(markdown), { mimeType: 'text/markdown' }),
     pdf: make('pdf', '项目说明书.pdf', Buffer.from(await pdf.save()), { mimeType: 'application/pdf' }),
     word: make('word', '项目方案.docx', await zip.generateAsync({ type: 'nodebuffer' }), {mimeType:'text/markdown'}),

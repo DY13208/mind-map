@@ -65,7 +65,7 @@ export function assertImagePreviewBudget(buffer) {
   return { width, height }
 }
 
-const TEXT_EXT = /\.(txt|log|csv|js|ts|jsx|tsx|css|scss|less|py|java|go|rs|c|cpp|h|sh|sql|xml|ya?ml|vue|toml|ini|conf)$/i
+const TEXT_EXT = /\.(txt|log|js|ts|jsx|tsx|css|scss|less|py|java|go|rs|c|cpp|h|sh|sql|xml|ya?ml|vue|toml|ini|conf)$/i
 
 export function attachmentPreviewKind(fileName, mimeType = '') {
   const name = String(fileName || '').trim()
@@ -78,7 +78,9 @@ export function attachmentPreviewKind(fileName, mimeType = '') {
     if (['html', 'htm'].includes(suffix)) return 'html'
     if (['md', 'markdown'].includes(suffix)) return 'markdown'
     if (suffix === 'json') return 'json'
-    if (['docx', 'xls', 'xlsx', 'xlsm', 'ods'].includes(suffix)) return 'office'
+    if (['docx', 'csv', 'tsv', 'xls', 'xlsx', 'xlsm', 'xlsb', 'xltx', 'xltm', 'ods'].includes(suffix)) return 'office'
+    if (['mp3', 'wav', 'm4a', 'ogg', 'aac', 'flac'].includes(suffix)) return 'audio'
+    if (['mp4', 'webm', 'mov', 'm4v'].includes(suffix)) return 'video'
     if (suffix === 'pptx') return 'presentation'
     if (suffix === 'zip') return 'archive'
     if (TEXT_EXT.test(name)) return 'text'
@@ -91,7 +93,10 @@ export function attachmentPreviewKind(fileName, mimeType = '') {
   if (mime === 'text/html' || mime === 'application/xhtml+xml') return 'html'
   if (mime === 'text/markdown') return 'markdown'
   if (mime === 'application/json') return 'json'
-  if (/wordprocessingml|spreadsheetml|ms-excel|opendocument\.spreadsheet/.test(mime)) return 'office'
+  if (/^(text\/(csv|tab-separated-values)|application\/csv)$/.test(mime)) return 'office'
+  if (/^audio\//.test(mime)) return 'audio'
+  if (/^video\//.test(mime)) return 'video'
+  if (/wordprocessingml|spreadsheetml|ms-excel|opendocument\.spreadsheet|sheet\.binary/.test(mime)) return 'office'
   if (/presentationml/.test(mime)) return 'presentation'
   if (/application\/(zip|x-zip-compressed)/.test(mime)) return 'archive'
   return /^text\//.test(mime) ? 'text' : 'unsupported'
@@ -106,8 +111,8 @@ export const WORKBOOK_PREVIEW_MAX_ROWS = 500
 export const WORKBOOK_PREVIEW_MAX_COLS = 40
 export const WORKBOOK_PREVIEW_MAX_SHEETS = 10
 
-const SPREADSHEET_EXT = /\.(xls|xlsx|xlsm|ods)$/i
-const SPREADSHEET_MIME = /spreadsheetml|ms-excel|opendocument\.spreadsheet/
+const SPREADSHEET_EXT = /\.(csv|tsv|xls|xlsx|xlsm|xlsb|xltx|xltm|ods)$/i
+const SPREADSHEET_MIME = /spreadsheetml|ms-excel|opendocument\.spreadsheet|sheet\.binary|^(text\/(csv|tab-separated-values)|application\/csv)(;|$)/
 const SKIP_ZIP_ENTRY = /^(xl\/(media|drawings|charts|embeddings)\/)/i
 const SKIP_ZIP_EXT = /\.(png|jpe?g|gif|emf|wmf|tif|tiff|bmp|wdp|svg)$/i
 
@@ -145,9 +150,35 @@ export function attachmentBusyMessage(data) {
 }
 
 export function isSpreadsheetAttachment(fileName, mimeType = '') {
-  const name = String(fileName || '')
+  const name = String(fileName || '').trim()
   const mime = String(mimeType || '').toLowerCase()
+  if (/\.[a-z0-9]+$/i.test(name)) return SPREADSHEET_EXT.test(name)
   return SPREADSHEET_EXT.test(name) || SPREADSHEET_MIME.test(mime)
+}
+
+export function delimitedSpreadsheetFormat(fileName, mimeType = '') {
+  const ext = String(fileName || '').trim().match(/\.([a-z0-9]+)$/i)
+  if (ext) return /^(csv|tsv)$/i.test(ext[1]) ? ext[1].toLowerCase() : ''
+  const mime = String(mimeType || '').toLowerCase().split(';')[0].trim()
+  if (mime === 'text/tab-separated-values') return 'tsv'
+  return /^(text|application)\/csv$/.test(mime) ? 'csv' : ''
+}
+
+// Delimited text must be decoded before SheetJS parses it. Preserve identifiers
+// such as 00123 and long numbers instead of coercing them to numbers or dates.
+export function readAttachmentWorkbook(XLSX, buffer, fileName, mimeType, maxRows = 10000) {
+  const format = delimitedSpreadsheetFormat(fileName, mimeType)
+  const options = { cellStyles: false, cellHTML: false, sheetRows: maxRows + 1 }
+  if (format) {
+    const text = decodeAttachmentText(buffer)
+    if (!text.trim()) {
+      const workbook = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([]), 'Sheet1')
+      return workbook
+    }
+    return XLSX.read(text, { ...options, type: 'string', raw: true, ...(format === 'tsv' ? { FS: '\t' } : {}) })
+  }
+  return XLSX.read(buffer, { ...options, type: 'array' })
 }
 
 export function isZipBuffer(value) {

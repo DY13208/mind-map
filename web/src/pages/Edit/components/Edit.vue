@@ -17,7 +17,7 @@
       ref="mindMapContainer"
       data-testid="mindmap-canvas"
     ></div>
-    <MobileEditorControls v-if="mindMap" :mind-map="mindMap" />
+    <MobileEditorControls v-if="mindMap && !isZenMode" :mind-map="mindMap" />
     <Count :mindMap="mindMap" v-if="!isZenMode"></Count>
     <Navigator v-if="mindMap && !isZenMode && showNavigator" :mindMap="mindMap"></Navigator>
     <NavigatorToolbar :mindMap="mindMap" v-if="!isZenMode && showNavigatorToolbar"></NavigatorToolbar>

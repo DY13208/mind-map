@@ -1,7 +1,7 @@
 <template>
   <div
     class="container"
-    :class="{ isDark: isDark, activeSidebar: activeSidebar }"
+    :class="{ isDark: isDark, activeSidebar: activeSidebar, isTouchEditor: isTouchEditor && !isZenMode }"
   >
     <AccessDeniedPanel
       v-if="accessDenied"
@@ -38,9 +38,11 @@ import { mapState, mapMutations } from 'vuex'
 import { getLocalConfig, withRightDragDefault } from '@/api'
 import { returnFromEditor } from '@/utils/editorFileReturn'
 import { getReturnLabel } from '@/utils/fileNavigation'
+import editorViewport from '@/utils/editorViewport'
 
 export default {
   name: 'EditPage',
+  mixins: [editorViewport],
   components: {
     AccessDeniedPanel,
     Toolbar,
