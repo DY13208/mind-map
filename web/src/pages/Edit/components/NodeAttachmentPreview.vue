@@ -71,7 +71,8 @@ export default {
     AttachmentPdfPreview: () => import('./attachment-preview/AttachmentPdfPreview.vue').then(module => module.default || module),
     AttachmentPresentationPreview: () => import('./attachment-preview/AttachmentPresentationPreview.vue').then(module => module.default || module),
     AttachmentArchivePreview: () => import('./attachment-preview/AttachmentArchivePreview.vue').then(module => module.default || module),
-    AttachmentImagePreview: () => import('./attachment-preview/AttachmentImagePreview.vue').then(module => module.default || module)
+    AttachmentImagePreview: () => import('./attachment-preview/AttachmentImagePreview.vue').then(module => module.default || module),
+    AttachmentMediaPreview: () => import('./attachment-preview/AttachmentMediaPreview.vue').then(module => module.default || module)
   },
   data: () => ({
     visible: false, loading: false, title: '附件预览', attachmentId: '', attachment: null,
@@ -110,6 +111,7 @@ export default {
       if (this.kind === 'office') return 'AttachmentOfficePreview'
       if (this.kind === 'presentation') return 'AttachmentPresentationPreview'
       if (this.kind === 'archive') return 'AttachmentArchivePreview'
+      if (['audio', 'video'].includes(this.kind)) return 'AttachmentMediaPreview'
       if (['markdown', 'text', 'json'].includes(this.kind)) return 'AttachmentDocumentPreview'
       return null
     }

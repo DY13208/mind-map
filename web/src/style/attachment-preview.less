@@ -257,3 +257,13 @@ body.isDark {
   }
   .attachmentLoadSentinel { color: rgba(255, 255, 255, .45); }
 }
+// Native controls keep playback local to the authenticated attachment endpoint.
+.attachmentMediaPreview {
+  flex: 1; min-height: 0; min-width: 0; overflow: auto; display: flex;
+  flex-direction: column; align-items: center; justify-content: center; gap: 24px;
+  padding: 24px; box-sizing: border-box; background: #f7f9fc;
+  video { display: block; width: 100%; max-width: 1080px; max-height: 100%; background: #101828; }
+  audio { width: 100%; max-width: 560px; }
+  .attachmentAudioIcon { font-size: 64px; color: #397968; }
+}
+.attachmentEmptySheet { padding: 24px; color: #667085; }

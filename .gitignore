@@ -95,6 +95,8 @@ output/*.py
 !/web/tests/teamRoomsPaging.test.cjs
 !/web/tests/fileNavigation.test.cjs
 !/web/tests/editorFileReturn.test.cjs
+!/web/tests/delimitedAttachmentPreview.test.cjs
+!/web/tests/touchEditorControls.test.cjs
 !/web/tests/shellMode.test.cjs
 !/web/tests/productShell.fileReturn.test.cjs
 !/simple-mind-map/e2e/performance/

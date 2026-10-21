@@ -1,49 +1,48 @@
-# 附件预览设计与回归验收
+# Mobile editor and attachment preview verification
 
-状态：passed（2026-10-14）。P0 / P1 / P2 未解决问题：0。
+Date: 2026-10-21. Base: `origin/main` at `009a1535`.
 
-## 对照来源与范围
+## Findings and fixes
 
-来源为用户提供的两张附件预览设计稿：`codex-clipboard-06acad19-3058-49ab-98a6-c6357f67baa1.png`（比例、工具栏、Markdown 排版）和 `codex-clipboard-68ffcd7e-4810-40a1-88b9-51ebd7c0491c.png`（各类型预览）。检查的是项目通用附件预览组件，生产组件和真实解析器在本地测试文件服务器中运行，不是单独制作的静态页面。
+| Severity | Finding | Fix and post-fix evidence |
+| --- | --- | --- |
+| P2, resolved | Six header buttons squeezed the reference title at 393px. | Keep 44px touch targets; put Refresh in the existing file menu at widths up to 420px. `final-phone.png` shows the full `UN项目工程` title and saved state; the file-menu capture retains Refresh. Long titles still truncate with their full title available. |
+| P2, resolved | Icon-font generated content polluted bottom-button accessible names. | Give Theme, Style, Map and More explicit labels, hide their decorative icons from accessibility. Real role-based taps pass in Chromium and WebKit. |
+| P1, resolved | The first long press could claim the gesture without opening a menu because `node_active` arrives after the handler. | Seed the pressed node immediately and open the action sheet. A unit regression and native Chromium touch sequence now pass. |
+| P2, resolved | Phone-only CSS hid the reference's right tool rail and left iPad using desktop chrome. | Use one editor-specific width/coarse-pointer query, a scrollable right rail, five-item bottom dock and bottom sheets. Portrait, landscape and desktop transition checks pass. |
 
-视口：桌面 1360×900，手机 390×844。已在同一次图片检查中对照设计稿和最终浏览器截图，确认固定工具栏、弹窗比例、白色内容面板、目录、蓝色操作按钮、标题层级和独立滚动。
+## Visual comparison
 
-## 视觉与交互检查
+Source: the user-supplied `codex-clipboard-60844d16-e014-4882-a12b-18fa812a1136.png`, 941 × 1672 pixels. It contains a phone frame and OS chrome. Crop the app-owned area `(96,151)-(845,1615)` and normalize it to **393 × 768**. The implementation capture uses the same CSS viewport, screenshot scale `css`, device scale factor 1, light theme and an authenticated synthetic room. The source and implementation were inspected together in `output/playwright/reference-editor/design-comparison.png`, with focused header, rail and dock comparisons in `design-comparison-details.png`.
 
-| 检查项 | 结果与证据 |
-| --- | --- |
-| 通用外壳 | 桌面实测 1200×810，符合 92vw / 最大 1200px / 90vh；最大化实测 1360×900，恢复正确。工具栏固定 70px，正文滚动不遮挡工具栏。 |
-| Markdown | 标题、列表、表格、代码块、逐步增加的目录均正常；点击目录可定位。见 [桌面截图](docs/assets/attachment-preview/markdown-desktop.jpg)。 |
-| Word | 初始只挂载 1 批正文，35 段、1 个表格、1 张已加载图片；向下滚动追加为 2 批、65 段。调整了段落行距、间距和表格边框，保留原文档标题与内容。见 [Word 截图](docs/assets/attachment-preview/word-desktop.jpg)。 |
-| Excel | 三张工作表可切换；2501 行 × 6 列的测试表初始仅 39 个正文行 DOM，滚动到底可读取末尾数据；表头固定，支持横向滚动。见 [Excel 截图](docs/assets/attachment-preview/excel-desktop.jpg)。 |
-| PDF | 24 页测试文件初始只创建 3 页占位并渲染附近页面；定位第 7 页、前后翻页、125% 缩放、适应宽度及最大化均正常，缩放后仍定位第 7 页。见 [PDF 截图](docs/assets/attachment-preview/pdf-desktop.jpg)。 |
-| 图片 | OCR 失败图片从真实脑图附件图标打开；无目录侧栏，正常解码。64px 原图在 125% 下为 80px；适应窗口和原文件下载通过。 |
-| TXT / 代码 | 35000 行日志初始只显示首批，滚动后追加一批；块边界连续为第 373 / 374 行，无额外断行。代码使用独立深色内容区域和高亮。 |
-| 不支持 / 超限 | ZIP 显示文件信息和下载入口；100 MiB DOCX 未请求正文，显示大小限制与下载入口。 |
-| 异步 / 失败 | 慢速响应显示加载状态，关闭后服务端观察到连接关闭；403 显示“无权访问此附件”及重试入口。 |
-| 关闭 / 切换 | ESC、关闭按钮、重复打开和不同类型切换通过；单元测试覆盖元数据迟到、路由变化、快速滚动和切换工作表时旧响应丢弃。 |
-| 手机 | 弹窗 370×793，工具栏 64px；目录自动收起，最大化 390×844，恢复正确。PDF 工具栏宽度未超出 370px；表格在内容区域横向滚动。见 [手机截图](docs/assets/attachment-preview/markdown-mobile.jpg)。 |
-| 编辑器协同 | 最新前后端连接隔离 PostgreSQL，两个真实客户端打开同一测试房间，编辑提交保存并实时同步到另一客户端。未使用线上数据。 |
+The synthetic room supplies three branches and Chinese node text. User content, comments, notifications, attachments and map theme are data-dependent, so the source's exact graph and avatar are not copied into production data. Existing map typography is preserved. This change adapts editor chrome; it does not replace users' themes or map contents.
 
-修复过的验收问题：PDF 缩放后页码偏移、图片缩放相对尺寸错误、表格旧响应覆盖新视口、初始加载状态位置、Word 段落过密。已逐项复测。
+Required fidelity surfaces checked:
 
-## 工程验证
+- **Typography:** navy system-font chrome, readable bold title and green saved chip; bottom labels remain on one line. Source canvas fonts remain controlled by each map's theme.
+- **Spacing/layout:** single white header, right vertical rail, separate zoom controls and rounded bottom dock with a central green plus. All tested persistent buttons have at least 44 × 44px targets. Short landscape uses a horizontal zoom strip and a scrollable rail; iPad uses a centered dock and a 360px panel.
+- **Colors/tokens:** white surfaces, navy icons/text, muted grey labels and green add/saved states follow the reference. Dark mode inherits separate editor surface/text tokens. Existing notification indicators remain functional.
+- **Image/icon quality:** sharp existing Element UI/project vector and icon-font assets; no screenshot layers, phone frame, OS status bar or home indicator inserted into the app. The rail keeps existing product action icons and permissions.
+- **Copy/content:** Theme / Style / Add / Map / More follow the reference. Existing file operations, permissions, import/export and history remain reachable. Refresh moves into the file sheet on narrow phones to preserve touch area and title legibility.
 
-- 预览、上传队列、替换/删除并发、SOP 附件、响应大小边界、图标状态、附件 HTTP、提取存储和 COS Range 的 10 组现有测试通过。
-- 修改的 Vue / JS / Worker / 构建和演示脚本 ESLint 通过；`git diff --check` 通过。
-- Vue CLI 生产构建通过，PDF ES 模块、Worker、字体及表格 Worker 作为同源静态产物发布，按文件类型加载。
-- 未修改附件存储、上传、下载、协同协议和服务端业务接口。
+The larger rail/zoom/add targets compared with the normalized mock are intentional for touch usability. Desktop chrome remains unchanged. No open P0/P1/P2 findings remain.
 
-验收边界：预览使用本地生成的真实格式测试文件，线上 COS、企业微信会话和 OCR 服务需要部署后验收。文本采取响应流逐步解码与渲染；浏览器可能预读网络字节，本次没有新增服务端分段下载协议。超出预览预算时可下载完整原文件。复现入口和详细预算见 [附件预览说明](docs/attachment-preview-safety.md)。
+## Functional verification
 
-## 原格式与节点图片回归（2026-10-14）
+- `npm run test:attachment-preview`: existing decoding, progressive loading and PDF/PPT/image lifecycle checks, plus new CSV/TSV and real workbook-worker cases. Covers UTF-8/BOM, GB18030, UTF-16 LE/BE, quoted separators/newlines, leading zeros, long numbers, literal formulas, empty files, malformed input and row bounds. XLSX/XLS/XLSB/ODS multi-sheet values are checked.
+- `npm run test:touch-editor`: live selection/history on mount, first long press, read-only guards, panels, keyboard chrome and listener disposal.
+- `npm run test:mobile`: 14 gesture regressions and 3 insert/move/ACK persistence regressions pass.
+- Browser layout: **14 cases**, Chromium and WebKit, each at 393×852, 320×740, 820×1180, 1194×834, 1366×1024, 852×393 and desktop 1440×900. No horizontal overflow, clipped persistent controls, rail/zoom overlap or out-of-viewport panels.
+- Browser attachments: Chromium and WebKit at desktop, phone and iPad sizes. CSV/GBK CSV/TSV show real table cells and exact identifiers; XLSX/XLS/XLSB/ODS switch sheets and keep bounded DOM rows. Empty CSV, WAV metadata, unsupported video codec fallback, DOCX, PDF, PPTX, Markdown, ZIP, denied access and closing/reopening a pending preview pass. Browser runs report zero uncaught page errors.
+- Authenticated editor → API → isolated local PostgreSQL: tap to add/edit two nodes, save acknowledgements, zoom/fit, read-only controls, orientation and desktop/touch switching, permission sheet and member-list height. Chromium native touch additionally verifies pan, pinch, touch cancellation, long press, drag-to-reparent, undo and redo. Reload restores edits and hierarchy. WebKit verifies edit/save/reload and menu/viewport behavior.
+- Normal local preview: `/files` returns HTTP 200; collaboration health reports `ok: true` and a healthy PostgreSQL event bus. Production build and focused ESLint pass; existing Browserslist/deprecation/bundle-size notices remain.
 
-状态：passed。基于最新主分支 `7b9dc77d`。
+## Scope and evidence
 
-- 完整应用在隔离测试房间通过实际 UI 插入图片；单击右下角箭头打开大图，关闭后显示已保存，浏览器无错误。另在生产组件测试环境验证双击仍可打开，拖拽将 64px 图片调整为约 94.39px，且不打开预览。单元测试覆盖 50% / 100% / 200% 画布缩放、指针轻微抖动、重复 mouseup 和插件卸载。
-- DOCX / XLSX / PPTX / ZIP 故意使用错误的 `text/markdown` 元数据仍进入原格式预览；未知 BIN 不被当作 Markdown。
-- 图片、HTML、DOCX、XLSX、Markdown、TXT、PDF 逐类浏览器打开/关闭通过。HTML 新页面显示原始网页与表格；ZIP 目录初始 100 项，滚动追加到 200 项；下载为原始 ZIP。
-- PPTX 直接显示原文件的背景、标题与图片，支持 3 页翻页、页码定位、125% 缩放、最大化/还原、ESC 和原始 PPTX 下载；不再显示提取文字。390px 手机工具栏与预览宽度均为 370px，无横向控件溢出。
-- 新增关闭过程中终止幻灯片解析与销毁渲染器的回归；晚到结果不更新已关闭弹窗。所有既有附件测试、相关 lint 与生产构建通过。
+Browser emulation is not physical-device acceptance. iPhone/iPad OS keyboards, Apple Pencil and each media codec still depend on the real device/browser. Attachment content/permission tests use a local fixture HTTP server with the production preview components; they do not validate production object-storage uploads or production SSO. Spreadsheet preview retains its existing 5 MiB, 10-sheet, 10,000-row and 40-column limits and download fallback. Legacy DOC/PPT and unsupported formats retain download fallback.
 
-证据：[完整应用图片放大](docs/assets/attachment-preview/inline-image-preview.jpg)、[PPTX 原格式](docs/assets/attachment-preview/pptx-slides.jpg)、[PPTX 手机](docs/assets/attachment-preview/pptx-mobile.jpg)、[ZIP 目录](docs/assets/attachment-preview/zip-directory.jpg)。
+Raw browser artifacts are local, uncommitted test output under `output/playwright/reference-editor/`: `layout-report.json`, `preview-report.json`, `interaction-report.json`, `final-phone.png`, `final-ipad.png`, `final-dark.png`, `final-file-menu.png`, `chromium-phone-csv.png` and both visual comparison images. Temporary test accounts/rooms live in a dedicated local QA database, never in the user's working maps.
+
+Implementation checklist: responsive reference chrome, narrow-title fix, first-long-press fix, typed delimited-text preview, other spreadsheet formats, media controls/fallback, read-only/history behavior, build/lint/tests, source/render comparison — complete.
+
+final result: passed

@@ -4,6 +4,8 @@
   "private": true,
   "scripts": {
     "test:mobile": "node scripts/testTouchEvent.cjs && node scripts/testTouchInsertAck.cjs",
+    "test:attachment-preview": "node tests/nodeAttachmentPreview.test.cjs && node tests/delimitedAttachmentPreview.test.cjs && node scripts/testAttachmentViewerInteraction.cjs && node scripts/testPresentationPreview.cjs",
+    "test:touch-editor": "node tests/touchEditorControls.test.cjs",
     "serve": "vue-cli-service serve",
     "build": "vue-cli-service build && node ../copy.js",
     "lint": "vue-cli-service lint",
