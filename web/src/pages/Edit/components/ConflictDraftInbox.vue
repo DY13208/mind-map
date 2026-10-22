@@ -15,7 +15,7 @@
         <div class="itemHead">
           <div>
             <strong>{{ $t('editConflict.node') }} {{ item.uid }}</strong>
-            <span class="itemGroup">{{ item.group }}</span>
+            <span class="itemGroup">{{ item.group === 'outbox-structure' ? $t('editConflict.operationIntent') : item.group }}</span>
           </div>
           <el-button type="text" size="mini" @click="toggleItem(item)">
             {{ selectedKey === item.key ? $t('editConflict.hideLatest') : $t('editConflict.myDraft') }}
@@ -323,6 +323,7 @@ export default {
         return
       }
       this.selectedKey = item.key
+      if (item.session && item.session.kind === 'outbox-structure') return
       const cooperate = getEditCooperate(this.mindMap)
       const active =
         cooperate &&

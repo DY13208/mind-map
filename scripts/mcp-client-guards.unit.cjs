@@ -10,6 +10,7 @@ function method(start, end) {
   return source.slice(from, to).trim()
 }
 const methods = vm.runInNewContext(`({${[
+  method('  onOutboxConflict(', '\n  editSessionOperationFingerprint('),
   method('  guardWritePayload(', '\n  largeMapDelay('),
   method('  observeGuardedIntentEvent(', '\n  interceptGuardedCommand('),
   method('  applyV2PayloadDelete(', '\n  applyV2PayloadRestore('),
@@ -33,6 +34,17 @@ async function main() {
     ]),
     _preparedMoveCommand: { name: 'INSERT_BEFORE', args: [null, { getData: () => 'a' }] }
   }
+  const intents = []
+  context.httpRoomKey = 'room'
+  context.mindMap = { emit: (name, detail) => intents.push({ name, detail }) }
+  context.onOutboxConflict({ type: 'node.batch', opId: 'batch', roomKey: 'room', payload: { ops: [
+    { type: 'node.move', payload: { uid: 'n', parentUid: 'p' } },
+    { type: 'node.delete', payload: { uid: 'other' } }
+  ] } }, { code: 'PRECONDITION_REQUIRED' })
+  assert.equal(intents.length, 2)
+  assert.equal(intents[0].detail.session.draft.operation.payload.parentUid, 'p')
+  assert.equal(intents[1].detail.opId, 'batch:1')
+  assert.equal(intents[1].detail.session.kind, 'outbox-structure')
   const guarded = context.guardWritePayload('node.update', { uid: 'n', patch: { text: 'draft' }, expected: { '__fv.text': 2 } })
   assert.equal(guarded.expected['__fv.text'], 2, 'never rebase an editing baseline at submit')
   const deleted = context.guardWritePayload('node.delete', { uid: 'n', expected: { text: 'old' } })

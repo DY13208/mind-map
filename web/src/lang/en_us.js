@@ -281,6 +281,12 @@ export default {
     title: 'Note'
   },
   editConflict: {
+    unsavedTitle: 'This change was not saved',
+    operationIntent: 'Intended operation',
+    moveIntent: 'Move node',
+    deleteIntent: 'Delete node',
+    missingBaseline: 'This change was not saved: the editing baseline is missing. Keep your draft, then reopen the node and review before submitting.',
+    operationFailed: 'This move or deletion was not saved. The intended operation is retained; review the latest node before trying again.',
     title: 'Collaboration conflict',
     message: 'The server content changed. Your edit was not applied automatically.',
     myDraft: 'My unsaved content',
@@ -749,6 +755,7 @@ export default {
     chipOffline: 'Offline',
     chipSyncing: 'Syncing',
     chipFailed: 'Sync failed',
+    diagTechnical: 'Technical details',
     diagTitle: 'Sync failure details',
     diagCopy: 'Copy diagnostics',
     diagCopied: 'Copied',

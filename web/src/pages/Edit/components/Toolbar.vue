@@ -77,10 +77,13 @@
           >
             <div class="collabDiag">
               <div class="diagHead">{{ $t('cooperate.diagTitle') }}</div>
+              <p role="alert">{{ collabFailureHint }}</p>
+              <details><summary>{{ $t('cooperate.diagTechnical') }}</summary>
               <div class="diagRow" v-for="row in collabDiagRows" :key="row.key">
                 <span class="k">{{ row.key }}</span>
                 <span class="v">{{ row.value }}</span>
               </div>
+              </details>
               <el-button
                 v-if="isCollabDiagDev"
                 size="mini"
@@ -283,7 +286,7 @@
     </div>
     <el-drawer :visible.sync="mobileMenuOpen" direction="ltr" size="320px" :with-header="false" :modal="false" :lock-scroll="false" append-to-body class="touchEditorDrawer" :custom-class="isDark ? 'touchEditorActionSidebar isDark' : 'touchEditorActionSidebar'">
       <header><strong>导航</strong><button aria-label="关闭脑图操作" @click="mobileMenuOpen = false"><i class="el-icon-close" /></button></header>
-      <div v-if="displayedSaveChip === 'failed'" class="collabDiag" role="alert"><p v-for="row in collabDiagRows" :key="row.key">{{ row.key }}：{{ row.value }}</p></div>
+      <div v-if="displayedSaveChip === 'failed'" class="collabDiag" role="alert"><p>{{ collabFailureHint }}</p><details><summary>{{ $t('cooperate.diagTechnical') }}</summary><p v-for="row in collabDiagRows" :key="row.key">{{ row.key }}：{{ row.value }}</p></details></div>
       <div class="mobileActionGrid">
         <button v-for="item in fileToolbarActions" :key="item.key" :disabled="item.disabled" @click="mobileMenuOpen = false; onFileMenuSelect(item.key)"><i aria-hidden="true" :class="item.icon" />{{ item.label }}</button>
         <button v-if="isPhoneReader" type="button" @click="toggleTouchMapTree"><i aria-hidden="true" class="el-icon-folder-opened" />脑图目录</button>
@@ -1131,13 +1134,22 @@ export default {
           : null
       return fromWin || this.collabDiagnostic || {}
     },
+    collabFailureHint() {
+      const d = this.collabDiag || {}
+      const code = (d.currentError && d.currentError.code) || d.errorCode || (d.lastError && d.lastError.code)
+      return this.$t(code === 'PRECONDITION_REQUIRED' ? 'editConflict.missingBaseline'
+        : code === 'REPLACE_CONFLICT' ? 'editConflict.message' : 'editConflict.saveFailed')
+    },
     collabDiagRows() {
       const d = this.collabDiag || {}
       const err = d.lastError || {}
       return [
+        ['clientBuild', process.env.VUE_APP_BUILD_COMMIT || 'unknown'],
+        ['clientBuildTime', process.env.VUE_APP_BUILD_TIME || 'unknown'],
         ['errorCode', d.errorCode || err.code || ''],
         ['errorMessage', d.errorMessage || err.message || this.collabError || ''],
         ['stage', d.stage || err.stage || ''],
+        ...['operationType', 'nodeUid', 'modifiedFields', 'expectedPresent', 'operationIndex'].map(key => [key, err.details && err.details[key]]),
         ['roomKey', d.roomKey || ''],
         ['userId', d.userId || ''],
         ['clientId', d.clientId || ''],

@@ -193,6 +193,16 @@ async function main() {
   assert.strictEqual(recovered.stale, false)
   assert.strictEqual(commits, 0, 'Outbox conflict recovery is view-only and must never auto-submit')
 
+  const structural = { id: 'outbox-structure:op', uid: 'move-node', roomKey: 'room/1',
+    kind: 'outbox-structure', fields: ['operation'], state: 'conflict', draftRevision: 1,
+    draft: { operation: { type: 'node.move', payload: { uid: 'move-node', parentUid: 'target' } } } }
+  const kept = await edit.persistOutboxConflictDraft({ route: { query: { room: 'room/1' } },
+    payload: { session: structural, roomKey: 'room/1', error: { code: 'PRECONDITION_REQUIRED' } } })
+  assert.strictEqual(kept.record.reason, 'operation_failed')
+  assert.strictEqual(kept.record.session.draft.operation.payload.parentUid, 'target')
+  const reloaded = await store.listConflictDrafts('user A', 'room/1')
+  assert(reloaded.some(row => row.sessionId === structural.id), 'structural intent survives a storage reload')
+  assert.strictEqual(commits, 0, 'structural intent recovery must never submit')
   console.log('PASS: scoped keys, principal/room isolation, ordered writes, clear-vs-late-write protection, and view-only legacy outbox recovery.')
 }
 

@@ -708,6 +708,26 @@ class Cooperate {
   }
 
   onOutboxConflict(op, error) {
+    if (op && op.type === 'node.batch') {
+      return (op.payload && op.payload.ops || []).map((child, index) =>
+        this.onOutboxConflict({ ...op, ...child, opId: `${op.opId}:${index}` }, error)
+      )
+    }
+    if (op && ['node.move', 'node.reorder', 'node.delete'].includes(op.type)) {
+      const payload = op.payload || {}
+      if (!payload.uid) return null
+      const roomKey = String(op.roomKey || this.httpRoomKey || '')
+      const id = `outbox-structure:${roomKey}:${op.opId}`
+      const session = { id, uid: String(payload.uid), roomKey, kind: 'outbox-structure',
+        fields: ['operation'], draft: { operation: { type: op.type, payload } },
+        draftRevision: 1, state: 'conflict', outboxOpId: op.opId,
+        conflict: { error }, startedAt: Date.now(), updatedAt: Date.now() }
+      this.mindMap.emit('edit_session_outbox_conflict', {
+        id, opId: op.opId, roomKey, uid: session.uid, session, error,
+        patch: session.draft, expected: payload.expected || {}
+      })
+      return session
+    }
     const payload = (op && (op.payload || (op.event && op.event.payload))) || {}
     const uid = String(payload.uid || '')
     if (!uid) return null

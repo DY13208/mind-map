@@ -1,3 +1,4 @@
+const { assertOperationPreconditions } = require('../nodeWritePreflight')
 const { createOutbox } = require('./outbox')
 const performanceObserver = require('./performanceObserver')
 const {
@@ -69,6 +70,7 @@ function sessionClientId() {
 
 const STAGES = {
   CLIENT_INIT: 'client_init',
+  CLIENT_PREFLIGHT: 'client_preflight',
   OUTBOX_PUT: 'outbox_put',
   SOCKET_CONNECT: 'socket_connect',
   SOCKET_JOIN: 'socket_join',
@@ -2103,7 +2105,15 @@ function createCollaborationAdapter(options = {}) {
       return { deferred: true }
     }
     state.stage = STAGES.ACK_WAIT
-    const result = await emitAck('op', op)
+    // Keep the durable original payload, but do not send an unguarded write.
+    // Reuse terminal rejection handling so drafts and structural intent survive.
+    let result
+    try { assertOperationPreconditions(op) }
+    catch (error) {
+      result = { ok: false, code: error.code, error: error.message,
+        statusCode: error.statusCode, details: { ...error.details, clientPreflight: true } }
+    }
+    if (!result) result = await emitAck('op', op)
     if (!scopeIsCurrent(scope)) return { deferred: true }
     if (result && (result.code === 'TIMEOUT' || result.code === 'ACK_TIMEOUT')) {
       endSending()
@@ -2201,7 +2211,8 @@ function createCollaborationAdapter(options = {}) {
           ? STAGES.SERVER_ACL
           : isPgCommitCode(err.code, err.message)
             ? STAGES.PG_COMMIT
-            : STAGES.SERVER_APPLY
+            : err.details && err.details.clientPreflight
+              ? STAGES.CLIENT_PREFLIGHT : STAGES.SERVER_APPLY
       if (err.code === 'SOP_CONFIRM_REQUIRED') {
         state.requiresConfirmation = {
           opId: op.opId,
@@ -2218,6 +2229,10 @@ function createCollaborationAdapter(options = {}) {
         stage,
         opId: op.opId,
         details: {
+          operationType: op.type,
+          nodeUid: op.payload && op.payload.uid,
+          modifiedFields: Object.keys(op.payload && (op.payload.patch || op.payload.data) || {}),
+          expectedPresent: !!(op.payload && (op.payload.expected || op.payload.expectedValue)),
           statusCode: err.statusCode,
           originalBaseRevision: originalBase,
           sendBaseRevision: sendBase,

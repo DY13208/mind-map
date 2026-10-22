@@ -259,6 +259,12 @@ export default {
     title: 'Ghi chú'
   },
   editConflict: {
+    unsavedTitle: 'Thay đổi chưa được lưu',
+    operationIntent: 'Thao tác dự định',
+    moveIntent: 'Di chuyển nút',
+    deleteIntent: 'Xóa nút',
+    missingBaseline: 'Thay đổi chưa được lưu: thiếu dữ liệu đối chiếu. Giữ bản nháp, mở lại nút và kiểm tra trước khi gửi.',
+    operationFailed: 'Di chuyển hoặc xóa chưa được lưu. Thao tác đã được giữ lại; kiểm tra nút mới nhất trước khi thử lại.',
     title: 'Xung đột cộng tác',
     message: 'Nội dung trên máy chủ đã thay đổi. Bản sửa của bạn chưa được tự động áp dụng.',
     myDraft: 'Nội dung chưa lưu của tôi',
@@ -723,6 +729,7 @@ export default {
     chipOffline: 'Ngoại tuyến',
     chipSyncing: 'Đang đồng bộ',
     chipFailed: 'Đồng bộ thất bại',
+    diagTechnical: 'Chi tiết kỹ thuật',
     diagTitle: 'Chi tiết lỗi đồng bộ',
     diagCopy: 'Sao chép chẩn đoán',
     diagCopied: 'Đã sao chép',

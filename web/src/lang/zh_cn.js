@@ -275,6 +275,12 @@ export default {
     title: '备注'
   },
   editConflict: {
+    unsavedTitle: '本次修改未保存',
+    operationIntent: '操作意图',
+    moveIntent: '移动节点',
+    deleteIntent: '删除节点',
+    missingBaseline: '本次修改未保存：缺少编辑基线。请先保留草稿，再重新打开节点并核对后提交。',
+    operationFailed: '本次移动或删除未保存，操作意图已保留，请查看最新节点后重新操作。',
     title: '协同修改冲突',
     message: '服务器内容已变化，本次修改没有自动覆盖。',
     myDraft: '我的未保存内容',
@@ -725,6 +731,7 @@ export default {
     chipOffline: '离线编辑',
     chipSyncing: '正在同步',
     chipFailed: '同步失败',
+    diagTechnical: '技术详情',
     diagTitle: '同步失败详情',
     diagCopy: '复制诊断信息',
     diagCopied: '已复制',

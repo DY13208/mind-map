@@ -276,6 +276,12 @@ export default {
     title: '備註'
   },
   editConflict: {
+    unsavedTitle: '本次修改未儲存',
+    operationIntent: '操作意圖',
+    moveIntent: '移動節點',
+    deleteIntent: '刪除節點',
+    missingBaseline: '本次修改未儲存：缺少編輯基線。請先保留草稿，再重新開啟節點並核對後提交。',
+    operationFailed: '本次移動或刪除未儲存，操作意圖已保留，請查看最新節點後重新操作。',
     title: '協同修改衝突',
     message: '伺服器內容已變更，本次修改沒有自動覆蓋。',
     myDraft: '我的未儲存內容',
@@ -725,6 +731,7 @@ export default {
     chipOffline: '離線編輯',
     chipSyncing: '正在同步',
     chipFailed: '同步失敗',
+    diagTechnical: '技術詳情',
     diagTitle: '同步失敗詳情',
     diagCopy: '複製診斷資訊',
     diagCopied: '已複製',

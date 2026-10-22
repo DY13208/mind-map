@@ -1,6 +1,6 @@
 <template>
   <section class="conflictDraftPanel" role="alert">
-    <strong>{{ $t('editConflict.title') }}</strong>
+    <strong>{{ $t('editConflict.unsavedTitle') }}</strong>
     <p>{{ messageText }}</p>
 
     <div class="draftSection">
@@ -79,6 +79,9 @@ export default {
       return this.formatValues(this.draftValues, this.fields, this.draft)
     },
     messageText() {
+      const error = this.draft && this.draft.conflict && this.draft.conflict.error
+      if (error && error.code === 'PRECONDITION_REQUIRED') return this.$t('editConflict.missingBaseline')
+      if (this.reason === 'operation_failed') return this.$t('editConflict.operationFailed')
       return this.reason === 'save_failed'
         ? this.$t('editConflict.saveFailed')
         : this.$t('editConflict.message')
@@ -87,6 +90,14 @@ export default {
   methods: {
     formatValues(values, fields, source) {
       if (!values || !fields || !fields.length) return ''
+      if (fields.includes('operation')) {
+        const operation = values.operation
+        if (!operation) return values.text == null ? '' : String(values.text)
+        const payload = operation.payload || {}
+        const label = this.$t(operation.type === 'node.delete' ? 'editConflict.deleteIntent' : 'editConflict.moveIntent')
+        const target = payload.parentUid || payload.parent_uid || payload.parent
+        return `${label}: ${payload.uid || ''}${target ? ` → ${target}` : ''}`
+      }
       const richText = isConflictRichText(values, source)
       return fields
         .map(field => {

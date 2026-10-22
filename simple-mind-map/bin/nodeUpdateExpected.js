@@ -1,6 +1,7 @@
 const { commandError } = require('./conflictErrors')
 const { stripSearchHtml } = require('./roomNodes')
 const { fieldGroupOf } = require('./fieldMerge')
+const { preflightNodeWritePreconditions } = require('./nodeWritePreflight')
 
 const PRECONDITION_REQUIRED = 'PRECONDITION_REQUIRED'
 const PRECONDITION_INVALID = 'PRECONDITION_INVALID'
@@ -132,52 +133,6 @@ function assertMoveTargetMode(expected, payload) {
     preconditionError('expected.anchor_side 只能是 before 或 after', PRECONDITION_INVALID, 400)
   }
   return { hasAnchor, targetEmpty }
-}
-
-function preflightNodeWritePreconditions({ type, payload = {}, uid, allowNewUid = false } = {}) {
-  const normalizedType = String(type || '')
-  const expected = expectedFor(payload)
-  const groups = protectedGroupsForPatch(patchFor(payload))
-  const moving = ['node.move', 'node.reorder'].includes(normalizedType) ||
-    (normalizedType === 'node.update' && (
-      payload.parentUid !== undefined || payload.parent_uid !== undefined ||
-      payload.parent !== undefined || payload.index !== undefined ||
-      payload.position !== undefined || payload.order !== undefined
-    ))
-  const deleting = normalizedType === 'node.delete'
-  if (!groups.length && !moving && !deleting) return
-  if (allowNewUid) {
-    if (moving && expected) {
-      assertExpectedLocationTuple(expected, MOVE_EXPECTED_KEYS[0], '目标父节点')
-      assertMoveTargetMode(expected, payload)
-    } else if (moving && payload.index !== undefined) {
-      preconditionError('指定 index 的移动必须提供 expected 锚点与 anchor_side，或 expected.target_empty=true', PRECONDITION_REQUIRED, 428)
-    }
-    return
-  }
-  if (!expected) {
-    preconditionError('受保护的节点写入缺少 expected 校验信息', PRECONDITION_REQUIRED, 428)
-  }
-  assertExpectedUid(expected, uid || payload.uid)
-  groups.forEach(group => assertExpectedVersion(expected, group))
-  if (moving) {
-    for (const key of ['parent_uid', 'position']) {
-      if (!Object.prototype.hasOwnProperty.call(expected, key)) {
-        preconditionError(`移动操作必须提供 expected.${key}`, PRECONDITION_REQUIRED, 428)
-      }
-    }
-    if (expected.parent_uid != null && typeof expected.parent_uid !== 'string') {
-      preconditionError('expected.parent_uid 必须是 UID 字符串或 null', PRECONDITION_INVALID, 400)
-    }
-    if (typeof expected.position !== 'string') {
-      preconditionError('expected.position 必须是字符串', PRECONDITION_INVALID, 400)
-    }
-    assertExpectedLocationTuple(expected, MOVE_EXPECTED_KEYS[0], '目标父节点')
-    assertMoveTargetMode(expected, payload)
-  }
-  if (deleting && (!Object.prototype.hasOwnProperty.call(expected, 'subtree_token') || !String(expected.subtree_token || '').trim())) {
-    preconditionError('删除操作必须提供 expected.subtree_token', PRECONDITION_REQUIRED, 428)
-  }
 }
 
 function normalizeNullableUid(value) {

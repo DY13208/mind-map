@@ -206,6 +206,13 @@ export async function persistEditSessionEventDraft({
 
 export async function persistOutboxConflictDraft({ mindMap, route, payload }) {
   const event = payload || {}
+  if (event.session && event.session.kind === 'outbox-structure') {
+    return persistConflictDraft({
+      principal: currentEditPrincipal(), room: event.roomKey || roomFromLocation(route),
+      session: event.session, latestSnapshot: event.latestSnapshot || null,
+      error: conflictErrorDetails(event.error || {}), reason: 'operation_failed'
+    })
+  }
   const uid = String(event.uid || (event.session && event.session.uid) || '')
   const opId = String(event.opId || event.id || '')
   const sourcePatch = event.patch || event.data || {}
