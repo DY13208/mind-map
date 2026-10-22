@@ -1,5 +1,5 @@
 <template>
-  <nav id="product-navigation" class="productNavigation" aria-label="产品导航">
+  <nav :id="navigationId" class="productNavigation" aria-label="产品导航">
     <p class="navLabel">文件</p>
     <router-link
       v-for="item in fileNav"
@@ -54,6 +54,7 @@ import { withShell } from '@/utils/shellMode'
 export default {
   name: 'ProductNavigation',
   props: {
+    navigationId: { type: String, default: 'product-navigation' },
     fileNav: { type: Array, default: () => [] },
     kbEnabled: { type: Boolean, default: true }
   },

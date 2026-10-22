@@ -9,7 +9,8 @@
       'productShell--teams': $route.path === '/spaces',
       'productShell--team-detail': $route.path.startsWith('/spaces/'),
       'productShell--dark': isDarkTheme,
-      'productShell--knowledge': isKnowledgeRoute
+      'productShell--knowledge': isKnowledgeRoute,
+      'productShell--tablet': isTabletNavigation
     }"
   >
     <button
@@ -31,11 +32,11 @@
           v-else
           class="collapsedLogoTrigger"
           type="button"
-          aria-label="打开侧边栏"
-          aria-expanded="false"
-          aria-controls="product-navigation"
+          :aria-label="isTabletNavigation ? '全部功能与设置' : '打开侧边栏'"
+          :aria-expanded="String(isTabletNavigation && navigationOpen)"
+          :aria-controls="isTabletNavigation ? 'drawer-product-navigation' : 'product-navigation'"
           data-testid="sidebar-toggle"
-          @click="setSidebarCollapsed(false)"
+          @click="openSidebar"
         >
           <img class="collapsedLogoMark wcpdLogoImage" :src="brandLogo" alt="" aria-hidden="true" />
           <svg
@@ -183,7 +184,7 @@
       <router-view />
     </main>
     <el-drawer
-      v-if="shellMode === 'focus' || isMobileViewport"
+      v-if="navigationDrawerEnabled"
       :visible.sync="navigationOpen"
       size="288px"
       direction="ltr"
@@ -191,7 +192,7 @@
       :wrapper-closable="true"
       :close-on-press-escape="true"
       :append-to-body="false"
-      custom-class="productNavigationDrawer"
+      :custom-class="isTouchNavigation ? 'productNavigationDrawer touchNavigationDrawer' : 'productNavigationDrawer'"
       @opened="focusNavigationStart"
       @closed="restoreNavigationFocus"
     >
@@ -203,7 +204,7 @@
         tabindex="-1"
       >
         <div class="navigationDrawerHeader">
-          <strong>导航</strong>
+          <div class="navigationDrawerBrand"><img class="wcpdLogoImage" :src="brandLogo" alt="" /><div><strong>WCPD</strong><span>全部功能与设置</span></div></div>
           <button
             type="button"
             class="shellModeButton"
@@ -214,10 +215,20 @@
           </button>
         </div>
         <ProductNavigation
+          navigation-id="drawer-product-navigation"
           :file-nav="fileNav"
           :kb-enabled="kbEnabled"
           @navigate="closeNavigation"
         />
+        <div v-if="profile" class="navigationDrawerFooter">
+          <div @click.capture="closeNavigation"><AccessNotificationTrigger :key="'drawer-' + profile.id" /></div>
+          <div class="navigationDrawerAccount">
+            <button type="button" class="navigationDrawerProfile" aria-label="打开个人主页" @click="openProfile(); closeNavigation()">
+              <UserAvatar :person="profile" size="small" fallback="依" /><span><strong>{{ profile.name }}</strong><small>{{ profile.id }}</small></span>
+            </button>
+            <button type="button" class="shellModeButton" aria-label="退出登录" :disabled="loggingOut" @click="closeNavigation(); signOut()"><i class="el-icon-switch-button" aria-hidden="true" /></button>
+          </div>
+        </div>
       </div>
     </el-drawer>
   </div>
@@ -230,10 +241,11 @@ import { logoutAndRedirect } from '@/utils/auth'
 import UserAvatar from '@/components/UserAvatar.vue'
 import AccessNotificationTrigger from '@/components/AccessNotificationTrigger.vue'
 import { shellTheme, applyShellThemeToRoot } from '@/utils/shellTheme'
-import { resolveShellMode } from '@/utils/shellMode'
+import { resolveShellMode, withShell } from '@/utils/shellMode'
 import ProductNavigation from './ProductNavigation.vue'
 const SIDEBAR_PREFERENCE_KEY = 'product-shell-sidebar-collapsed'
-const isSmallScreen = () => window.matchMedia('(max-width: 760px)').matches
+const TABLET_NAVIGATION_QUERY = '(min-width: 768px) and (max-width: 1366px) and (any-pointer: coarse)'
+const isSmallScreen = () => window.matchMedia('(max-width: 760px), (max-width: 1023px) and (any-pointer: coarse)').matches
 const readSidebarPreference = () => {
   try {
     const value = localStorage.getItem(SIDEBAR_PREFERENCE_KEY)
@@ -251,6 +263,7 @@ export default {
     return {
       brandLogo: process.env.BASE_URL + 'wcpd-logo.png',
       sidebarCollapsed: preference === null ? isSmallScreen() : preference,
+      isTabletNavigation: window.matchMedia(TABLET_NAVIGATION_QUERY).matches,
       hasSidebarPreference: preference !== null,
       profile: null,
       navigationOpen: false,
@@ -267,6 +280,8 @@ export default {
     }
   },
   computed: {
+    isTouchNavigation() { return this.isMobileViewport || this.isTabletNavigation },
+    navigationDrawerEnabled() { return this.shellMode === 'focus' || this.isTouchNavigation },
     isKnowledgeRoute() { return this.$route.name === 'FileKb' },
     shellMode() {
       return resolveShellMode(this.$route)
@@ -287,14 +302,18 @@ export default {
     document.body.classList.remove('isDark')
     applyShellThemeToRoot(true)
     window.addEventListener('resize', this.updateAutoSidebar)
+    this._tabletNavigationQuery = window.matchMedia(TABLET_NAVIGATION_QUERY)
+    this._tabletNavigationQuery.addListener(this.updateTabletNavigation)
   },
   beforeDestroy() {
     this.$bus.$off('mobile-create-state', this.updateMobileCreateState)
     applyShellThemeToRoot(false)
     window.removeEventListener('resize', this.updateAutoSidebar)
     document.removeEventListener('keydown', this.onNavigationKeydown)
+    if (this._tabletNavigationQuery) this._tabletNavigationQuery.removeListener(this.updateTabletNavigation)
   },
   watch: {
+    navigationDrawerEnabled(enabled) { if (!enabled) this.closeNavigation() },
     navigationOpen(open) {
       if (open) document.addEventListener('keydown', this.onNavigationKeydown)
       else document.removeEventListener('keydown', this.onNavigationKeydown)
@@ -307,6 +326,11 @@ export default {
     }
   },
   methods: {
+    updateTabletNavigation() { this.isTabletNavigation = this._tabletNavigationQuery.matches },
+    openSidebar(event) {
+      if (this.isTabletNavigation) this.openNavigation(event)
+      else this.setSidebarCollapsed(false)
+    },
     updateMobileCreateState(open) { this.mobileCreateOpen = open },
     async mobileCreate() {
       if (!['/files', '/my-maps'].some(path => this.$route.path === path || this.$route.path.startsWith(path + '/folder/'))) {
@@ -318,7 +342,7 @@ export default {
       if (!this.hasSidebarPreference) this.sidebarCollapsed = isSmallScreen()
     },
     openProfile() {
-      if (this.$route.path !== '/profile') this.$router.push('/profile')
+      if (this.$route.path !== '/profile') this.$router.push(withShell('/profile', this.$route))
     },
     switchShellMode(mode) {
       if (mode === this.shellMode) return
@@ -348,7 +372,10 @@ export default {
     restoreNavigationFocus() {
       this.$nextTick(() => {
         const trigger = this.$refs.navigationTrigger || this.navigationTrigger
-        if (trigger && typeof trigger.focus === 'function') trigger.focus()
+        const active = document.activeElement
+        const drawer = this.$el.querySelector('.productNavigationDrawer')
+        if (active && active !== document.body && active !== trigger && !(drawer && drawer.contains(active))) return
+        if (trigger && trigger.isConnected && typeof trigger.focus === 'function') trigger.focus({ preventScroll: true })
       })
     },
     onNavigationKeydown(event) {
@@ -1041,7 +1068,8 @@ export default {
     box-sizing: border-box;
   }
   .navigationDrawerHeader {
-    min-height: 40px;
+    flex-shrink: 0;
+    min-height: 56px;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -1049,6 +1077,28 @@ export default {
     margin-bottom: 12px;
     border-bottom: 1px solid var(--ui-border);
     strong { font-size: 15px; }
+  }
+  .navigationDrawerBrand {
+    display: flex; align-items: center; gap: 10px; min-width: 0;
+    img { width: 32px; height: 32px; }
+    div { display: flex; flex-direction: column; gap: 3px; }
+    strong { font-size: 16px; }
+    span { font-size: 11px; color: var(--ui-text-muted); }
+  }
+  .navigationDrawerFooter {
+    flex-shrink: 0; margin-top: 12px; padding-top: 4px; border-top: 1px solid var(--ui-border);
+    .notificationButton { color: var(--ui-text-secondary); font-size: 14px; }
+    .notificationButton:hover, .notificationButton:focus-visible { background: var(--ui-surface-muted); color: var(--ui-primary); }
+  }
+  .navigationDrawerAccount { display: flex; align-items: center; gap: 4px; padding-top: 8px; border-top: 1px solid var(--ui-border); }
+  .navigationDrawerProfile {
+    display: flex; align-items: center; flex: 1; min-width: 0; gap: 10px; border: 0; border-radius: 8px;
+    padding: 8px; background: transparent; color: inherit; text-align: left; cursor: pointer;
+    > span { display: flex; flex-direction: column; min-width: 0; gap: 4px; }
+    strong, small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    strong { font-size: 13px; } small { font-size: 11px; color: var(--ui-text-muted); }
+    &:hover { background: var(--ui-hover-overlay); }
+    &:focus-visible { outline: 2px solid var(--ui-focus); outline-offset: -2px; }
   }
   .productNavigation {
     min-height: 0;
@@ -1094,6 +1144,22 @@ export default {
     }
     i { font-size: 17px; }
   }
+}
+.productShell--tablet {
+  .sidebarToggle, .collapsedLogoTrigger, .shellModeButton, .accountLogout { min-width: 44px; min-height: 44px; }
+  .productSidebar a, .productSidebar .sidebarModeSwitch button, .productSidebar .notificationButton { min-height: 44px; }
+  &.productShell--collapsed .productSidebar { --rail-item: 44px; }
+  .collapsedLogoTrigger .collapsedLogoMark { opacity: 0; }
+  .collapsedLogoTrigger .collapsedLogoOpenIcon { opacity: 1; }
+  .collapsedLogoTrigger .collapsedLogoTip { display: none; }
+  .productSidebar { padding-top: max(16px, env(safe-area-inset-top)); padding-bottom: max(16px, env(safe-area-inset-bottom)); }
+}
+.touchNavigationDrawer {
+  height: var(--mm-viewport-height, 100vh) !important;
+  top: var(--mm-viewport-top, 0px) !important;
+  .navigationDrawerContent { padding-top: max(12px, env(safe-area-inset-top)); padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+  .productNavigation a, .shellModeButton, .notificationButton, .navigationDrawerProfile { min-height: 44px; }
+  .shellModeButton { min-width: 44px; }
 }
 @media (max-width: 760px) {
   .productShell .productMain {
