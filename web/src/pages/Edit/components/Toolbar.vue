@@ -1,13 +1,13 @@
 <template>
   <div class="toolbarContainer" :class="{ isDark: isDark }">
     <header v-if="isTouchEditor" class="touchEditorHeader" aria-label="脑图工具栏">
-      <button type="button" aria-label="脑图目录" :aria-expanded="String(mapTreeShow)" @click="toggleTouchMapTree"><i class="el-icon-folder" aria-hidden="true"></i></button>
-      <button v-if="$route.query.room" type="button" data-testid="back-to-my-maps" :aria-label="fileListReturnLabel" :disabled="returningToList" @click="onFileToolbarAction('maps')"><i class="el-icon-arrow-left"></i></button>
+      <button v-if="$route.query.room" type="button" class="touchHeaderBack" data-testid="back-to-my-maps" :aria-label="fileListReturnLabel" :disabled="returningToList" @click="onFileToolbarAction('maps')"><i class="el-icon-arrow-left" aria-hidden="true"></i></button>
       <div class="touchFileIdentity">
         <strong :title="fileTitle">{{ fileTitle }}</strong>
         <button v-if="displayedSaveChip === 'failed'" type="button" class="saveChip failed" data-testid="collab-sync-failed" @click="openMobileFileMenu">{{ collabSaveLabel }}</button>
         <span v-else class="saveChip" :class="[displayedSaveChip, { cooperating: collabLive }]" data-testid="collab-status" :title="collabError || collabSaveLabel" role="status">{{ collabSaveLabel }}</span>
       </div>
+      <button type="button" class="touchFileSwitch" aria-label="切换文件" title="切换文件" :aria-expanded="String(mapTreeShow)" @click="toggleTouchMapTree"><i class="el-icon-folder-opened" aria-hidden="true"></i></button>
     </header>
     <nav v-if="isTouchEditor" class="touchEditorLeftRail" aria-label="脑图操作" data-testid="touch-editor-left-rail">
       <button type="button" aria-label="搜索" title="搜索" @click="showTouchSearch"><i class="iconfont iconsousuo" aria-hidden="true"></i></button>
@@ -282,7 +282,7 @@
       </div>
     </div>
     <el-drawer :visible.sync="mobileMenuOpen" direction="ltr" size="320px" :with-header="false" :modal="false" :lock-scroll="false" append-to-body class="touchEditorDrawer" :custom-class="isDark ? 'touchEditorActionSidebar isDark' : 'touchEditorActionSidebar'">
-      <header><strong>脑图操作</strong><button aria-label="关闭脑图操作" @click="mobileMenuOpen = false"><i class="el-icon-close" /></button></header>
+      <header><strong>导航</strong><button aria-label="关闭脑图操作" @click="mobileMenuOpen = false"><i class="el-icon-close" /></button></header>
       <div v-if="displayedSaveChip === 'failed'" class="collabDiag" role="alert"><p v-for="row in collabDiagRows" :key="row.key">{{ row.key }}：{{ row.value }}</p></div>
       <div class="mobileActionGrid">
         <button v-for="item in fileToolbarActions" :key="item.key" :disabled="item.disabled" @click="mobileMenuOpen = false; onFileMenuSelect(item.key)"><i aria-hidden="true" :class="item.icon" />{{ item.label }}</button>

@@ -19,7 +19,7 @@ export default {
   watch: { open(value) { this.$emit('toggle', value) } },
   computed: {
     items() { return [
-      { key: 'file', label: '文件', icon: 'el-icon-folder-opened' },
+      { key: 'file', label: '导航', icon: 'el-icon-folder-opened' },
       { key: 'node', label: '节点', icon: 'el-icon-s-grid' },
       { key: 'canvas', label: '画布', icon: 'el-icon-full-screen' },
       { key: 'appearance', label: '外观', icon: 'el-icon-brush' },

@@ -9,15 +9,15 @@
   &.isDark { --touch-surface: #262a2e; --touch-ink: #edf2f7; --touch-muted: #b5bec9; --touch-border: #3b4149; }
   .toolbarContainer {
     position: fixed !important; inset: var(--mm-viewport-top) 0 auto !important;
-    height: auto !important; padding: 0 !important; z-index: 31; background: transparent !important;
+    height: auto !important; padding: 0 !important; z-index: 31; background: transparent !important; pointer-events: none;
   }
   .touchEditorHeader {
-    display: flex; align-items: center; box-sizing: border-box;
-    height: calc(56px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) max(8px, env(safe-area-inset-right)) 0 max(4px, env(safe-area-inset-left));
-    background: var(--touch-surface); color: var(--touch-ink); border-radius: 0 0 18px 18px;
-    > button { flex: 0 0 auto; }
-    button:not(.saveChip) { width: 44px; min-width: 44px; height: 48px; border: 0; padding: 0; display: inline-grid; place-items: center; background: transparent; color: inherit; font-size: 21px; &:disabled { opacity: .4; } }
-    .touchFileIdentity { min-width: 0; flex: 1; display: flex; align-items: center; gap: 7px; }
+    display: inline-flex; align-items: center; gap: 6px; box-sizing: border-box; max-width: 100%;
+    height: calc(60px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) max(8px, env(safe-area-inset-right)) 0 max(8px, env(safe-area-inset-left));
+    background: transparent; color: var(--touch-ink);
+    > button { flex: 0 0 auto; pointer-events: auto; }
+    button:not(.saveChip) { width: 44px; min-width: 44px; height: 44px; border: 1px solid var(--touch-border); border-radius: 50%; padding: 0; display: inline-grid; place-items: center; background: var(--touch-surface); color: inherit; font-size: 20px; box-shadow: 0 3px 12px #17261f08; &:disabled { opacity: .4; } }
+    .touchFileIdentity { box-sizing: border-box; min-width: 0; flex: 0 1 auto; display: flex; align-items: center; gap: 7px; height: 44px; padding: 0 12px; border: 1px solid var(--touch-border); border-radius: 24px; background: var(--touch-surface); box-shadow: 0 3px 12px #17261f08; pointer-events: auto; }
     strong { min-width: 0; max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 15px; font-weight: 700; }
     .saveChip { flex-shrink: 0; display: inline-flex; align-items: center; gap: 4px; margin: 0; border: 0; border-radius: 20px; padding: 4px 7px; font-size: 10px; line-height: 16px; white-space: nowrap; background: #e7f6ed; color: #159749; }
     .saveChip.saved::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
@@ -25,8 +25,8 @@
     .saveChip.pending, .saveChip.saving { background: #fff7e7; color: #9b6c16; }
   }
   .editContainer .mindMapContainer {
-    left: 0 !important; top: calc(56px + env(safe-area-inset-top)) !important; width: 100% !important;
-    height: calc(100% - 56px - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
+    left: 0 !important; top: 0 !important; width: 100% !important;
+    height: calc(100% - env(safe-area-inset-bottom)) !important;
     border-radius: 0 !important; touch-action: none;
   }
   .countContainer, .navigatorToolbarDock, .navigatorToolbarContainer { display: none !important; }
@@ -34,7 +34,7 @@
     position: fixed; left: max(8px, env(safe-area-inset-left)); top: calc(var(--mm-viewport-top) + var(--mm-viewport-height) / 2);
     transform: translateY(-50%); display: flex; flex-direction: column;
     max-height: calc(var(--mm-viewport-height) - 140px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); overflow-y: auto; overscroll-behavior: contain;
-    padding: 4px 0; border-radius: 18px; background: var(--touch-surface); color: var(--touch-ink); box-shadow: 0 5px 24px #17261f0a;
+    padding: 4px 0; border-radius: 18px; background: var(--touch-surface); color: var(--touch-ink); box-shadow: 0 5px 24px #17261f0a; pointer-events: auto;
     button { flex-shrink: 0; display: grid; place-items: center; width: 44px; min-height: 44px; border: 0; padding: 0; background: transparent; color: inherit; font-size: 21px; &:disabled { opacity: .4; } }
     .iconfont { font-size: 21px; }
   }
@@ -115,11 +115,9 @@
 }
 @media (prefers-reduced-motion: reduce) { .container.isTouchEditor .sidebarContainer, .container.isTouchEditor .searchContainer { transition: none; } }
 
-// Phone reading mode keeps a single persistent action entry. iPad keeps its rails.
+// Phone reading mode groups editor actions; file navigation remains by the title.
 .container.isPhoneReader {
   .touchEditorLeftRail, .sidebarTriggerRoot.touchEditorRail { display: none !important; }
-  .touchEditorHeader > button { display: none !important; }
-  .touchEditorHeader { padding-left: max(16px, env(safe-area-inset-left)); }
   .searchContainer { left: 8px; max-width: calc(100vw - 16px); transform: translateX(calc(-100% - 24px)); &.show { transform: none; } }
   .contextmenuContainer .item, .contextmenuContainer .submenu .item { min-height: 44px; height: auto; }
   .contextmenuContainer .desc { display: none; }
