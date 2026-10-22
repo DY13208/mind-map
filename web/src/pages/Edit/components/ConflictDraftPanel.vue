@@ -10,7 +10,7 @@
           {{ copied ? $t('editConflict.copied') : $t('editConflict.copyDraft') }}
         </el-button>
       </div>
-      <pre>{{ formatValues(draftValues, fields) || '（空）' }}</pre>
+      <pre>{{ formatValues(draftValues, fields, draft) || '（空）' }}</pre>
     </div>
 
     <div class="draftActions">
@@ -21,7 +21,7 @@
     </div>
     <div v-if="showingLatest" class="draftSection latestSection">
       <span class="draftSectionTitle">{{ $t('editConflict.latest') }}</span>
-      <pre>{{ formatValues(latestValues, fields) || $t('editConflict.latestUnavailable') }}</pre>
+      <pre>{{ formatValues(latestValues, fields, latest) || $t('editConflict.latestUnavailable') }}</pre>
     </div>
     <p v-if="storageError" class="storageError">{{ $t('editConflict.storageFailed') }}</p>
     <p v-else-if="persisted" class="savedHint">{{ $t('editConflict.savedLocally') }}</p>
@@ -29,6 +29,11 @@
 </template>
 
 <script>
+import {
+  formatConflictText,
+  isConflictRichText
+} from '@/utils/conflictDraftDisplay'
+
 function dataOf(snapshot) {
   if (!snapshot || typeof snapshot !== 'object') return {}
   return snapshot.data && typeof snapshot.data === 'object'
@@ -71,7 +76,7 @@ export default {
       return dataOf(this.latest)
     },
     copyText() {
-      return this.formatValues(this.draftValues, this.fields)
+      return this.formatValues(this.draftValues, this.fields, this.draft)
     },
     messageText() {
       return this.reason === 'save_failed'
@@ -80,13 +85,17 @@ export default {
     }
   },
   methods: {
-    formatValues(values, fields) {
+    formatValues(values, fields, source) {
       if (!values || !fields || !fields.length) return ''
+      const richText = isConflictRichText(values, source)
       return fields
         .map(field => {
           const labels = { hyperlink: 'nodeHyperlink.link', hyperlinkTitle: 'nodeHyperlink.name' }
           const label = labels[field] ? this.$t(labels[field]) : ''
-          return `${label ? label + ':\n' : ''}${valueText(values[field])}`
+          const value = field === 'text'
+            ? formatConflictText(values[field], richText)
+            : values[field]
+          return `${label ? label + ':\n' : ''}${valueText(value)}`
         })
         .join('\n\n')
     },

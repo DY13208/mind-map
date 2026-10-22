@@ -31,6 +31,15 @@
         </div>
       </template>
     </div>
+    <div v-else-if="kind === 'text'" class="kb-preview-text">
+      <div v-if="textLoading" v-loading="true" class="kb-preview-loading" />
+      <div v-else-if="textError" class="kb-preview-hint" role="alert">
+        {{ textError }} <el-button size="mini" @click="loadMarkdown">重试</el-button>
+        <a :href="rawUrl" target="_blank" rel="noopener">下载原文件</a>
+      </div>
+      <div v-else-if="plainText === ''" class="kb-preview-hint">文件内容为空</div>
+      <pre v-else class="kb-text-content" tabindex="0" aria-label="TXT 原文预览">{{ plainText }}</pre>
+    </div>
     <div v-else-if="kind === 'markdown'" class="kb-preview-markdown">
       <div v-if="textLoading" v-loading="true" class="kb-preview-loading" />
       <div v-else-if="textError" class="kb-preview-hint" role="alert">
@@ -59,13 +68,14 @@
 </template>
 <script>
 import { markdownDocument } from '../utils/markdown'
+import { decodeAttachmentText } from '@/utils/nodeAttachmentPreview'
 import kbApi from '../services/kbApi'
 import { fileKind, blockLocation, locationLabel } from '../utils/format'
 export default {
   name: 'KbSourcePreview',
   props: { file: { type: Object, default: null }, block: { type: Object, default: null }, maxRows: { type: Number, default: 500 } },
   data() {
-    return { markdown: null, textMode: 'preview', textLoading: false, textError: '', textRequest: 0, imgError: false, workbook: null, sheetName: '', sheetLoading: false, sheetError: '', truncated: false }
+    return { markdown: null, plainText: '', textMode: 'preview', textLoading: false, textError: '', textRequest: 0, imgError: false, workbook: null, sheetName: '', sheetLoading: false, sheetError: '', truncated: false }
   },
   computed: {
     sourceLines() { return this.markdown ? this.markdown.text.split('\n') : [] },
@@ -106,10 +116,11 @@ export default {
     reset() {
       this.textRequest++
       this.markdown = null
+      this.plainText = ''
       this.textError = ''
       this.textLoading = false
       this.$emit('markdown-source', null)
-      if (this.file && this.kind === 'markdown') this.loadMarkdown()
+      if (this.file && ['markdown', 'text'].includes(this.kind)) this.loadMarkdown()
       this.imgError = false
       this.workbook = null
       this.sheetError = ''
@@ -117,16 +128,21 @@ export default {
     },
     async loadMarkdown() {
       const request = ++this.textRequest
+      const isPlainText = this.kind === 'text'
       this.textLoading = true
       this.textError = ''
       try {
         const buf = await kbApi.getRaw(this.file.id)
         if (request !== this.textRequest) return
-        this.markdown = markdownDocument(new TextDecoder('utf-8').decode(buf))
-        this.$emit('markdown-source', this.markdown)
-        this.$nextTick(this.scrollToMarkdown)
+        if (isPlainText) {
+          this.plainText = decodeAttachmentText(buf)
+        } else {
+          this.markdown = markdownDocument(new TextDecoder('utf-8').decode(buf))
+          this.$emit('markdown-source', this.markdown)
+          this.$nextTick(this.scrollToMarkdown)
+        }
       } catch (e) {
-        if (request === this.textRequest) this.textError = 'Markdown 原文加载失败，请重试或下载原文件'
+        if (request === this.textRequest) this.textError = `${isPlainText ? 'TXT' : 'Markdown'} 原文加载失败，请重试或下载原文件`
       } finally {
         if (request === this.textRequest) this.textLoading = false
       }
@@ -190,6 +206,8 @@ export default {
   a { color: var(--ui-primary); }
 }
 .kb-preview-loading { min-height: 200px; }
+.kb-preview-text { display: flex; flex-direction: column; min-height: 0; }
+.kb-text-content { margin: 0; padding: 16px; max-height: 640px; min-height: 340px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; box-sizing: border-box; font: 14px/1.8 ui-monospace, monospace; color: var(--ui-text); background: var(--ui-surface); tab-size: 4; }
 .kb-preview-image {
   flex: 1;
   overflow: auto;

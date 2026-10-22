@@ -1,0 +1,68 @@
+// Scoped to the three file creation dialogs; other prompts keep their own UI.
+.wcpdCreateDialog.el-message-box,
+.homeImportDialog .wcpdImportDialog.el-dialog {
+  box-sizing: border-box; width: 420px; max-width: calc(100vw - 32px);
+  border: 1px solid var(--ui-border, #e7ece9); border-radius: 22px;
+  background: var(--ui-surface, #fff); color: var(--ui-text, #17261f);
+  box-shadow: 0 16px 56px rgba(17, 39, 28, .16); overflow: hidden;
+  .el-input__inner {
+    height: 48px; padding: 0 14px; border-radius: 12px;
+    background: var(--ui-surface-muted, #f1f5f3); border: 1px solid var(--ui-border, #e7ece9);
+    color: var(--ui-text, #17261f); font-size: 14px;
+    &::placeholder { color: var(--ui-text-secondary, #66756e); }
+    &:focus { border-color: var(--ui-primary, #087854); box-shadow: 0 0 0 3px var(--ui-primary-soft, #e8f4ef); }
+  }
+  .el-button {
+    min-height: 44px; padding: 11px 20px; border-radius: 12px; font-size: 14px; font-weight: 500;
+    background: var(--ui-surface, #fff); border-color: var(--ui-border, #e7ece9); color: var(--ui-text, #17261f);
+    &:focus-visible { outline: 2px solid var(--ui-primary, #087854); outline-offset: 3px; }
+  }
+  .el-button--primary { background: var(--ui-primary, #087854); border-color: var(--ui-primary, #087854); color: #fff; &:hover { background: var(--ui-primary-hover, #066646); } }
+  .el-button.is-disabled { opacity: .5; }
+  .el-message-box__headerbtn, .el-dialog__headerbtn {
+    top: 18px; right: 16px; display: grid; place-items: center; width: 36px; height: 36px;
+    border-radius: 50%; background: var(--ui-surface-muted, #f1f5f3);
+    .el-message-box__close, .el-dialog__close { color: var(--ui-text-secondary, #66756e); font-size: 17px; }
+  }
+}
+.wcpdCreateDialog.el-message-box {
+  padding-bottom: 0; text-align: left; vertical-align: middle;
+  .el-message-box__header { padding: 26px 26px 0; }
+  .el-message-box__title {
+    display: flex; flex-direction: column; align-items: flex-start; gap: 16px;
+    padding-right: 30px; color: inherit; font-size: 21px; font-weight: 600;
+    &::before {
+      display: grid; place-items: center; width: 44px; height: 44px; border-radius: 14px;
+      background: var(--ui-primary-soft, #e8f4ef); color: var(--ui-primary, #087854);
+      font-family: element-icons; font-size: 24px; font-weight: 400;
+    }
+  }
+  .el-message-box__content { padding: 12px 26px 18px; color: var(--ui-text-secondary, #66756e); }
+  .el-message-box__message p { font-size: 13px; line-height: 22px; }
+  .el-message-box__input { padding-top: 16px; }
+  .el-message-box__errormsg { padding-top: 6px; font-size: 12px; }
+  .el-message-box__btns { display: flex; gap: 10px; padding: 0 26px 26px; .el-button { flex: 1; margin: 0; } }
+}
+.wcpdCreateDialog--room .el-message-box__title::before { content: '\e782'; }
+.wcpdCreateDialog--folder .el-message-box__title::before { content: '\e783'; }
+.homeImportDialog.el-dialog__wrapper {
+  display: flex; align-items: center; justify-content: center;
+  .wcpdImportDialog.el-dialog {
+    width: 460px !important; max-height: calc(100dvh - 40px); margin: 20px auto !important; overflow-y: auto;
+    .el-dialog__header { padding: 24px 24px 0; }
+    .el-dialog__body { padding: 18px 24px; color: inherit; }
+    .el-dialog__footer { padding: 0 24px 24px; > span { display: flex; gap: 10px; .el-button { flex: 1; margin: 0; } } }
+    .creationDialogHeading { display: flex; align-items: center; gap: 12px; padding-right: 32px; strong { font-size: 20px; font-weight: 600; } p { margin: 6px 0 0; color: var(--ui-text-secondary, #66756e); font-size: 12px; line-height: 18px; } }
+    .creationDialogIcon { display: grid; place-items: center; flex: 0 0 44px; height: 44px; border-radius: 14px; background: var(--ui-primary-soft, #e8f4ef); color: var(--ui-primary, #087854); font-size: 25px; }
+    .intro { color: var(--ui-text-secondary, #66756e); font-size: 12px; line-height: 24px; code { background: var(--ui-surface-muted, #f1f5f3); color: inherit; } }
+    .el-upload { display: block; }
+    .el-upload-dragger { height: auto; min-height: 166px; padding: 24px 12px; border: 1px dashed var(--ui-border-strong, #cbd8d2); border-radius: 16px; background: var(--ui-surface-muted, #f1f5f3); &:hover { border-color: var(--ui-primary, #087854); } }
+    .creationUploadIcon { margin: 0 0 12px; font-size: 32px; color: var(--ui-primary, #087854); }
+    .el-upload__text { display: flex; flex-direction: column; gap: 8px; color: var(--ui-text, #17261f); strong { font-size: 14px; font-weight: 500; } > span { color: var(--ui-text-secondary, #66756e); font-size: 12px; } em { color: var(--ui-primary, #087854); } }
+    .sheetHead, .progress p { color: var(--ui-text-secondary, #66756e); }
+  }
+}
+@media (max-width: 767px) {
+  .wcpdCreateDialog.el-message-box { width: 360px; }
+  .homeImportDialog .wcpdImportDialog.el-dialog { max-height: calc(100dvh - 32px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
+}

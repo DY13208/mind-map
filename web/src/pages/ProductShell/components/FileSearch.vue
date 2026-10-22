@@ -1,7 +1,13 @@
 <template>
-  <div class="fileSearch" :class="{ expanded: expanded || !!value }">
+  <div
+    class="fileSearch"
+    :class="{
+      alwaysExpanded,
+      expanded: alwaysExpanded || expanded || !!value
+    }"
+  >
     <button
-      v-if="!expanded && !value"
+      v-if="!alwaysExpanded && !expanded && !value"
       type="button"
       class="searchTrigger"
       title="搜索"
@@ -17,8 +23,9 @@
       :value="value"
       clearable
       prefix-icon="el-icon-search"
-      placeholder="搜索脑图、所有者或文件夹"
+      :placeholder="placeholder"
       @input="$emit('input', $event)"
+      @focus="$emit('focus')"
       @blur="onBlur"
       @clear="onClear"
     />
@@ -27,7 +34,11 @@
 <script>
 export default {
   name: 'FileSearch',
-  props: { value: { type: String, default: '' } },
+  props: {
+    value: { type: String, default: '' },
+    alwaysExpanded: { type: Boolean, default: false },
+    placeholder: { type: String, default: '搜索脑图、所有者或文件夹' }
+  },
   data() {
     return { expanded: false }
   },
@@ -39,12 +50,16 @@ export default {
         if (input && input.focus) input.focus()
       })
     },
+    blur() {
+      const input = this.$refs.input
+      if (input && input.blur) input.blur()
+    },
     onBlur() {
-      if (!this.value) this.expanded = false
+      if (!this.alwaysExpanded && !this.value) this.expanded = false
     },
     onClear() {
       this.$emit('input', '')
-      this.expanded = false
+      if (!this.alwaysExpanded) this.expanded = false
     }
   }
 }
@@ -59,6 +74,13 @@ export default {
     flex: 1 1 200px;
     min-width: 160px;
     max-width: 360px;
+  }
+
+  &.alwaysExpanded {
+    flex: 1 1 auto;
+    width: 100%;
+    min-width: 0;
+    max-width: none;
   }
 }
 

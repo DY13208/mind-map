@@ -25,7 +25,7 @@
           class="productLogo"
           @click="$router.push('/files')"
         >
-          <span>W</span><strong>WCPD</strong>
+          <img class="wcpdLogoImage" :src="brandLogo" alt="WCPD" /><strong>WCPD</strong>
         </div>
         <button
           v-else
@@ -37,7 +37,7 @@
           data-testid="sidebar-toggle"
           @click="setSidebarCollapsed(false)"
         >
-          <span class="collapsedLogoMark" aria-hidden="true">C</span>
+          <img class="collapsedLogoMark wcpdLogoImage" :src="brandLogo" alt="" aria-hidden="true" />
           <svg
             class="collapsedLogoOpenIcon"
             viewBox="0 0 24 24"
@@ -135,12 +135,13 @@
     </aside>
     <header v-if="shellMode !== 'embed'" class="mobileShellHeader">
       <template v-if="$route.path === '/spaces'">
-        <button class="mobileTeamBrand" aria-label="打开全部功能" @click="openNavigation"><span class="mobileBrandMark">C</span></button>
-        <h1 class="mobilePageTitle">团队空间</h1>
+        <button class="mobileBrandButton mobileTeamBrand" aria-label="打开全部功能" @click="openNavigation"><img class="mobileBrandMark wcpdLogoImage" :src="brandLogo" alt="" /><strong>WCPD</strong></button>
+        <div class="mobileHeaderSpacer" />
         <button aria-label="搜索团队" @click="$bus.$emit('mobile-search-teams')"><i class="el-icon-search" /></button>
+        <button aria-label="全部功能与设置" @click="openNavigation"><i class="el-icon-menu" /></button>
       </template>
       <template v-else>
-      <button aria-label="打开全部功能" @click="openNavigation"><span class="mobileBrandMark">W</span><strong>WCPD</strong></button>
+      <button class="mobileBrandButton" aria-label="打开全部功能" @click="openNavigation"><img class="mobileBrandMark wcpdLogoImage" :src="brandLogo" alt="" /><strong>WCPD</strong></button>
       <button v-if="$route.path.startsWith('/spaces/')" class="detailLauncher" aria-label="全部功能与设置" @click="openNavigation"><i class="el-icon-menu" /></button>
       <template v-else-if="!$route.path.startsWith('/spaces/')">
       <button aria-label="全部功能与设置" @click="openNavigation"><i class="el-icon-menu" /></button>
@@ -148,10 +149,11 @@
       </template>
     </header>
     <nav v-if="shellMode !== 'embed'" class="mobileBottomNav" aria-label="主导航">
-      <router-link to="/files"><i class="el-icon-house" /><span>脑图</span></router-link>
-      <router-link to="/spaces"><i class="el-icon-office-building" /><span>团队</span></router-link>
-      <AccessNotificationTrigger v-if="profile" :key="'mobile-' + profile.id" label="消息" icon="el-icon-chat-dot-round" />
-      <router-link to="/profile"><i class="el-icon-user" /><span>我的</span></router-link>
+      <router-link to="/files" aria-label="脑图" title="脑图"><i class="el-icon-house" aria-hidden="true" /></router-link>
+      <router-link to="/spaces" aria-label="团队" title="团队"><i class="el-icon-office-building" aria-hidden="true" /></router-link>
+      <button type="button" class="mobilePrimary" :class="{ 'mobilePrimary--open': mobileCreateOpen }" aria-label="新建" title="新建" aria-haspopup="menu" aria-controls="mobile-create-menu" :aria-expanded="mobileCreateOpen ? 'true' : 'false'" @click="mobileCreate"><i class="el-icon-plus" aria-hidden="true" /></button>
+      <AccessNotificationTrigger v-if="profile" :key="'mobile-' + profile.id" :collapsed="true" label="消息" icon="el-icon-chat-dot-round" />
+      <router-link to="/profile" aria-label="我的" title="我的"><i class="el-icon-user" aria-hidden="true" /></router-link>
     </nav>
     <main class="productMain">
       <div v-if="shellMode === 'focus'" class="shellModeToolbar" role="group" aria-label="页面导航模式">
@@ -247,10 +249,12 @@ export default {
   data() {
     const preference = readSidebarPreference()
     return {
+      brandLogo: process.env.BASE_URL + 'wcpd-logo.png',
       sidebarCollapsed: preference === null ? isSmallScreen() : preference,
       hasSidebarPreference: preference !== null,
       profile: null,
       navigationOpen: false,
+      mobileCreateOpen: false,
       navigationTrigger: null,
       fileNav: [
         { path: '/files/recent', label: '最近', icon: 'el-icon-time' },
@@ -285,6 +289,7 @@ export default {
     window.addEventListener('resize', this.updateAutoSidebar)
   },
   beforeDestroy() {
+    this.$bus.$off('mobile-create-state', this.updateMobileCreateState)
     applyShellThemeToRoot(false)
     window.removeEventListener('resize', this.updateAutoSidebar)
     document.removeEventListener('keydown', this.onNavigationKeydown)
@@ -302,6 +307,13 @@ export default {
     }
   },
   methods: {
+    updateMobileCreateState(open) { this.mobileCreateOpen = open },
+    async mobileCreate() {
+      if (!['/files', '/my-maps'].some(path => this.$route.path === path || this.$route.path.startsWith(path + '/folder/'))) {
+        return this.$router.push({ path: '/files', query: { mobileCreate: '1' } })
+      }
+      this.$nextTick(() => this.$bus.$emit('mobile-create-file'))
+    },
     updateAutoSidebar() {
       if (!this.hasSidebarPreference) this.sidebarCollapsed = isSmallScreen()
     },
@@ -395,6 +407,7 @@ export default {
     }
   },
   async created() {
+    this.$bus.$on('mobile-create-state', this.updateMobileCreateState)
     try {
       this.profile = await productService.getProfile()
     } catch (error) {
@@ -405,6 +418,11 @@ export default {
 </script>
 
 <style lang="less">
+.productShell img.wcpdLogoImage {
+  display: block; object-fit: contain; flex-shrink: 0;
+  background: transparent; border-radius: 0; box-shadow: none;
+}
+.productShell .productLogo .wcpdLogoImage { width: 36px; height: 36px; }
 .mobileShellHeader, .mobileBottomNav { display: none; }
 // Keep shell overrides after component styles, including asynchronously loaded chunks.
 @media (max-width: 767px) {
@@ -670,7 +688,7 @@ export default {
       display: grid;
       place-items: center;
       color: var(--ui-on-primary);
-      background: var(--ui-primary);
+      background: transparent;
       font-size: 18px;
       flex-shrink: 0;
     }
@@ -1149,6 +1167,18 @@ export default {
 </style>
 <style lang="less">
 @media (max-width: 767px) {
+  .productShell .mobileShellHeader {
+    left: 0; right: 0; transform: none; width: 100%; max-width: none; box-sizing: border-box;
+    height: calc(56px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 16px 0;
+    font-family: Arial, 'Microsoft YaHei', sans-serif;
+    .mobileBrandButton { gap: 10px; min-width: 44px; margin: 0; padding: 0; }
+    .mobileBrandButton .mobileBrandMark { width: 36px; height: 36px; flex: 0 0 36px; border-radius: 10px; font: 400 25px/1 Arial, sans-serif; background: #087854; box-shadow: none; }
+    .mobileBrandButton strong { font: 700 17px/1 Arial, sans-serif; letter-spacing: normal; }
+  }
+}
+</style>
+<style lang="less">
+@media (max-width: 767px) {
   .productShell--team-detail {
     --ui-bg: #f6f9f7; --ui-primary: #08785d; --ui-text: #182d29; --ui-text-secondary: #7c8e88;
     font-family: -apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;
@@ -1171,7 +1201,9 @@ export default {
     .productMain { max-width: 640px !important; margin-inline: auto !important; padding-top: calc(104px + env(safe-area-inset-top)); padding-bottom: calc(114px + env(safe-area-inset-bottom)); min-height: 100dvh; box-sizing: border-box; background: radial-gradient(ellipse 64% 230px at 100% -62px,rgba(212,239,224,.58),transparent 76%),#f6f9f7; box-shadow: 0 0 50px rgba(20,52,39,.10); }
     .spacesPage { padding: 0 24px 0 !important; }
     .mobileShellHeader { left: 50%; right: auto; transform: translateX(-50%); width: 100%; max-width: 640px; box-sizing: border-box; height: calc(104px + env(safe-area-inset-top)); padding-inline: 24px; background: #f6f9f7; gap: 8px; }
-    .mobileShellHeader .mobileTeamBrand { min-width: 52px; margin-right: 7px; }
+    .mobileShellHeader .mobileTeamBrand { min-width: 52px; margin-right: 7px; gap: 11px; }
+    .mobileHeaderSpacer { flex: 1; }
+    .mobileShellHeader .mobileTeamBrand strong { font-size: 20px; }
     .mobileBrandMark { width: 52px; height: 52px; border-radius: 16px; font-family: Georgia,serif; font-size: 35px; font-weight: 600; background: linear-gradient(145deg,#0a886a,#05694f); box-shadow: 0 6px 14px rgba(4,115,83,.15); }
     .mobilePageTitle { font-size: 27px; font-weight: 750; letter-spacing: -.6px; white-space: nowrap; }
     .mobileShellHeader .userAvatar { width: 45px !important; height: 45px !important; font-size: 19px !important; background: linear-gradient(135deg,#159c77,#087255); }
@@ -1192,18 +1224,55 @@ export default {
 @media (max-width: 355px) { .productShell--teams .mobilePageTitle { font-size: 20px; } }
 </style>
 <style lang="less">
-// Navigation geometry stays identical across routes; only selection colors change.
+// Floating navigation uses the existing shell tokens in both themes.
 @media (max-width: 767px) {
+  .productShell { --mobile-nav-height: 104px; }
+  .productShell .productMain { padding-bottom: calc(104px + env(safe-area-inset-bottom)); }
+  .productShell--embed .productMain { padding-bottom: 0; }
   .productShell .mobileBottomNav {
-    left: 50%; right: auto; transform: translateX(-50%); width: 100%; max-width: 640px;
-    min-height: 85px; padding: 11px 16px calc(12px + env(safe-area-inset-bottom));
-    border: 1px solid #e7eee9; border-bottom: 0; border-radius: 20px 20px 0 0;
-    background: rgba(255,255,255,.96); backdrop-filter: blur(16px); box-shadow: 0 -7px 25px rgba(42,74,56,.052);
-    > a, .notificationButton { min-height: 62px; font-size: 12px; gap: 4px; color: #7b8c81; }
-    i, .notificationButton i { display: grid; place-items: center; width: 65px; height: 38px; font-size: 27px; box-sizing: border-box; padding: 0; margin: 0; border-radius: 12px; }
-    .router-link-active { color: #087659; font-weight: 700; }
-    .router-link-active i { padding: 0; margin: 0; background: #e5f4ec; border-radius: 12px; }
+    left: 50%; right: auto; bottom: calc(24px + env(safe-area-inset-bottom)); transform: translateX(-50%);
+    display: flex; justify-content: center; gap: 16px; width: max-content; max-width: calc(100% - 32px);
+    min-height: 62px; padding: 8px; border: 1px solid var(--ui-border); border-radius: 999px;
+    background: var(--ui-surface); backdrop-filter: none; box-shadow: 0 6px 24px rgba(0,0,0,.12);
+    > a, > button, .notificationButton {
+      display: flex; align-items: center; justify-content: center; flex: 0 0 44px;
+      width: 44px; height: 44px; min-height: 44px; min-width: 44px; padding: 0 !important;
+      border: 0; border-radius: 50%; background: transparent; color: var(--ui-text-secondary);
+      cursor: pointer; transition: background-color .18s ease-out, color .18s ease-out;
+      &:hover { background: var(--ui-surface-muted); color: var(--ui-text); }
+      &:focus-visible { outline: 2px solid var(--ui-focus); outline-offset: 3px; }
+    }
+    i, .notificationButton i { display: block; width: auto; height: auto; font-size: 22px; padding: 0; margin: 0; background: transparent; }
+    .router-link-active { color: var(--ui-primary); background: var(--ui-primary-soft); }
+    .router-link-active i { padding: 0; margin: 0; background: transparent; }
+    > .mobilePrimary { background: var(--ui-primary); color: #fff; &:hover { background: var(--ui-primary-hover, #066646); color: #fff; } }
+    > .mobilePrimary i { transition: transform .22s ease-out; }
+    > .mobilePrimary--open i { transform: rotate(45deg); }
+    .notificationBadge { position: relative; flex: 0 0 44px; width: 44px; margin: 0; }
+    .notificationBadge > .el-badge__content.is-fixed {
+      top: 3px; right: 3px; transform: translate(25%, -15%);
+      min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box;
+      border: 1px solid var(--ui-surface); font-size: 10px; line-height: 14px;
+    }
   }
 }
-@media (max-width: 470px) { .productShell .mobileBottomNav { padding-inline: 7px; } }
+@media (max-width: 359px) { .productShell .mobileBottomNav { gap: 10px; } }
+@media (prefers-reduced-motion: reduce) {
+  .productShell .mobileBottomNav {
+    > a, > button, .notificationButton, > .mobilePrimary i { transition: none; }
+  }
+}
+</style>
+<style lang="less">
+@media (max-width: 767px) {
+  .productShell--teams {
+    .productMain { padding-top: calc(56px + env(safe-area-inset-top)); }
+    .mobileShellHeader { height: calc(56px + env(safe-area-inset-top)); padding-inline: 16px; gap: 4px; }
+    .mobileShellHeader .mobileTeamBrand { margin-right: 0; min-width: 44px; gap: 10px; }
+    .mobileShellHeader .mobileTeamBrand strong { font-size: 17px; }
+    .mobileBrandMark { width: 36px; height: 36px; border-radius: 10px; font: 400 25px sans-serif; background: #087854; box-shadow: none; }
+    .mobileShellHeader > button:last-child { margin-left: 0; }
+    .mobileShellHeader i { font-size: 23px; }
+  }
+}
 </style>

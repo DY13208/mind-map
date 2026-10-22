@@ -17,6 +17,7 @@ const files = [
   'simple-mind-map/test/collabHttpHistoryRefresh.test.js', 'simple-mind-map/test/historyGeneratedIds.test.js',
   'simple-mind-map/test/mcpHistory.test.js', 'simple-mind-map/test/historyVersionTime.test.js',
   'web/scripts/testConflictDraftStore.cjs', 'web/scripts/testCollabConflictEditors.cjs',
+  'web/scripts/testConflictDraftPanel.cjs',
   'web/scripts/testConflictDraftInboxEvents.cjs', 'web/scripts/testNodeHyperlink.cjs'
 ]
 const report = { startedAt: new Date().toISOString(), checks: [] }

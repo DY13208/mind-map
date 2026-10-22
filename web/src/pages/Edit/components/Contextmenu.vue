@@ -52,8 +52,12 @@
       </div>
       <div class="item" data-testid="copy-node-for-ai" @click="copyNodeForAi">
         <MenuIcon name="clipboard" />
-        <span class="name">复制给 AI（SOP）</span>
+        <span class="name">复制给AI</span>
         <span class="desc">Ctrl + Alt + A</span>
+      </div>
+      <div class="item" data-testid="distill-node-skill" @click="distillNodeSkill">
+        <MenuIcon name="clipboard" />
+        <span class="name">蒸馏skill</span>
       </div>
       <div class="splitLine"></div>
       <div
@@ -668,7 +672,7 @@ export default {
       else if (name === 'flowExpand') this.$bus.$emit('node_flow_expand', list[0])
     },
 
-    async copyNodeForAi() {
+    getNodeAiReference() {
       const node = this.node
       const uid = this.nodeUid(node)
       const room = roomFromLocation(this.$route)
@@ -684,12 +688,29 @@ export default {
         if (text) path.unshift(text)
         current = current.parent
       }
-      this.hide()
       if (!room || !uid) {
         this.$message.warning('请先打开已保存的脑图')
-        return
+        return ''
       }
-      const text = `执行这个SOP：${path.join(' / ')}（room_key=${room}，node_uid=${uid}）`
+      return `${path.join(' / ')}（room_key=${room}，node_uid=${uid}）`
+    },
+
+    async copyNodeForAi() {
+      const reference = this.getNodeAiReference()
+      this.hide()
+      if (!reference) return
+      await this.copyAiInstruction(`执行这个SOP：${reference}`, 'SOP 指令已复制，可粘贴给 AI 使用')
+    },
+
+    async distillNodeSkill() {
+      const reference = this.getNodeAiReference()
+      this.hide()
+      if (!reference) return
+      const text = `/skill-to-mindmap-sop 利用这个skill\n识别${reference}所有D节点，智能查找对应的D节点适配的skill 或者对话 任务 记忆等，补充对应D需要的信息，整理放在对应D的子节点下。`
+      await this.copyAiInstruction(text, '蒸馏skill 指令已复制，可粘贴给 AI 使用')
+    },
+
+    async copyAiInstruction(text, successMessage) {
       try {
         try {
           if (!navigator.clipboard || !navigator.clipboard.writeText) throw new Error('clipboard unavailable')
@@ -707,7 +728,7 @@ export default {
             document.body.removeChild(input)
           }
         }
-        this.$message.success('SOP 指令已复制，可粘贴给 AI 使用')
+        this.$message.success(successMessage)
       } catch (err) {
         this.$message.error('复制失败，请重试')
       }

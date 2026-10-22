@@ -17,7 +17,9 @@ const BUILD = path.resolve(process.env.MCP_GUARDS_BUILD_DIR || path.join(ROOT, '
 const id = randomUUID().replace(/-/g, '').slice(0, 12)
 const database = 'mcp_guards_test_' + id
 const roomKey = 'mcp-guards-' + id
-const OUT = path.join(ROOT, 'output/mcp-write-guards', id)
+const OUT = process.env.MCP_GUARDS_OUTPUT_DIR
+  ? path.resolve(process.env.MCP_GUARDS_OUTPUT_DIR, id)
+  : path.join(ROOT, 'output/mcp-write-guards', id)
 const pg = { host: '127.0.0.1', port: 25492, database: 'mcp_incremental_test', user: 'mcp_test', password: 'mcp-incremental-test-db-password' }
 const report = { id, database, roomKey, startedAt: new Date().toISOString(), checks: [], scope: '3 real browsers, owned 10000-node room, native MCP and product backend; test-only identity endpoint; loopback traffic only' }
 const children = []
@@ -181,6 +183,7 @@ async function main() {
   const concurrentAddOnly = process.argv.includes('--concurrent-add-only')
   const compatMode = process.argv.includes('--compat-mode')
   const traceQuietCheck = process.argv.includes('--trace-quiet-check')
+  const draftDisplayCheck = process.argv.includes('--draft-display-check')
   report.writeMode = compatMode ? 'compatibility (Direct and event bridge disabled)' : 'Direct + event bridge'
   const expectConcurrentAddSuccess = process.argv.includes('--expect-concurrent-add-success')
   if (concurrentAddOnly) report.scope = 'Focused concurrent child-add repro: owned 10000-node PostgreSQL room + three native browsers; no full acceptance suite'
@@ -286,7 +289,7 @@ async function main() {
   await check('10000-node initial database' + (apiOnly ? ' (API only)' : ' and three native browsers'), async () => ({ nodes: (await pool.query('select count(*)::int as n from room_nodes where room_key=$1 and deleted_at is null', [roomKey])).rows[0].n, clients: clients.length }))
   if (concurrentAddOnly) {
     await require('./mcp-guards-concurrent-add.cjs')({ clients, call, batch, query, serverChildren, state, converge, roomKey, check, OUT,
-      expectSuccess: expectConcurrentAddSuccess, compatMode })
+      expectSuccess: expectConcurrentAddSuccess, compatMode, draftDisplayCheck })
     if (traceQuietCheck) {
       await check('日志默认关闭：真实协同事件不输出追踪、不生成快照或缓存', async () => {
         const rows = await Promise.all(clients.map(async client => ({ actor: client.actor,

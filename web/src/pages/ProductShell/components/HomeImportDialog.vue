@@ -1,6 +1,7 @@
 <template>
   <el-dialog
     class="homeImportDialog"
+    custom-class="wcpdImportDialog"
     title="导入脑图"
     :visible.sync="visibleProxy"
     width="480px"
@@ -8,6 +9,10 @@
     :close-on-press-escape="!importing"
     @closed="reset"
   >
+    <div slot="title" class="creationDialogHeading">
+      <span class="creationDialogIcon"><i class="el-icon-upload2" aria-hidden="true" /></span>
+      <div><strong>导入脑图</strong><p>把已有内容带进工作空间</p></div>
+    </div>
     <div class="intro">
       支持 <code>.smm</code> / <code>.json</code> / <code>.xmind</code> /
       <code>.md</code>。多画布 XMind 可批量导入到新建文件夹。
@@ -28,8 +33,8 @@
       :on-remove="onRemove"
       :on-exceed="onExceed"
     >
-      <i class="el-icon-upload" />
-      <div class="el-upload__text">将文件拖到此处，或<em>点击选择</em></div>
+      <i class="el-icon-upload2 creationUploadIcon" aria-hidden="true" />
+      <div class="el-upload__text"><strong>选择要导入的文件</strong><span>拖放到这里，或<em>点击选择</em></span></div>
     </el-upload>
 
     <div v-if="sheets.length" class="sheetBlock">
@@ -102,7 +107,7 @@
     <span slot="footer">
       <el-button :disabled="importing" @click="visibleProxy = false">取消</el-button>
       <el-button type="primary" :loading="importing" :disabled="!canSubmit" @click="submit">
-        {{ mode === 'folder' ? '批量导入' : '导入' }}
+        {{ mode === 'folder' ? '批量导入' : '开始导入' }}
       </el-button>
     </span>
   </el-dialog>
