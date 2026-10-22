@@ -241,6 +241,58 @@ async function main() {
   listeners.personal_expand_change()
   assert.strictEqual(component.personalExpandState.branch, true, 'async batch event updates personal preferences')
 
+  // 局部层级以右击节点为起点，保留其他分支，并沿用个人展开状态保存。
+  f = fixture()
+  const unrelated = { data: { uid: 'other', expand: true }, children: [] }
+  f.renderer.renderTree.children.push(unrelated)
+  const hydrationTargets = []
+  f.renderer.hydrateThen = (root, target, options, after) => {
+    hydrationTargets.push([root, target])
+    f.finish = after
+  }
+  level.call(f.renderer, 1, 'branch')
+  assert.strictEqual(hydrationTargets[0][0], f.branch, 'only hydrate the selected subtree')
+  assert.strictEqual(hydrationTargets[0][1], 1)
+  f.finish()
+  assert.strictEqual(f.branch.data.expand, true, 'first level reveals direct children')
+  assert.strictEqual(f.deep.data.expand, false, 'deeper branches stay collapsed')
+  assert.strictEqual(unrelated.data.expand, true, 'other branches keep their state')
+  assert.strictEqual(f.summary.expand, true)
+  level.call(f.renderer, 2, 'branch')
+  f.finish()
+  assert.strictEqual(f.deep.data.expand, true, 'second level reveals grandchildren')
+  level.call(f.renderer, 1, 'summary')
+  f.finish()
+  assert.strictEqual(f.summary.expand, true, 'summary nodes support local levels')
+  assert.strictEqual(f.summaryChild.data.expand, false)
+  const callsBeforeMissing = hydrationTargets.length
+  level.call(f.renderer, 1, 'missing')
+  assert.strictEqual(hydrationTargets.length, callsBeforeMissing, 'deleted target cannot expand the whole map')
+
+  level.call(f.renderer, 2, 'branch')
+  const staleLocal = f.finish
+  level.call(f.renderer, 1, 'branch')
+  f.finish(); staleLocal()
+  assert.strictEqual(f.deep.data.expand, false, 'latest local selection wins')
+  level.call(f.renderer, 2, 'branch')
+  const cancelledLocal = f.finish
+  collapse.call(f.renderer, false)
+  cancelledLocal()
+  assert.strictEqual(f.branch.data.expand, false, 'collapse cancels pending local expansion')
+
+  level.call(f.renderer, 1, 'branch')
+  const replacedChild = { data: { uid: 'new-child', expand: true }, children: [{ data: { uid: 'new-leaf' }, children: [] }] }
+  const replacedBranch = { data: { uid: 'branch', expand: false }, children: [replacedChild] }
+  f.renderer.renderTree = { data: { uid: 'root', expand: true }, children: [replacedBranch, unrelated] }
+  f.finish()
+  assert.strictEqual(replacedBranch.data.expand, true, 'resolve current subtree after hydration replaces the tree')
+  assert.strictEqual(replacedChild.data.expand, false)
+  assert.strictEqual(f.branch.data.expand, false, 'detached tree stays untouched')
+  level.call(f.renderer, 2, 'branch')
+  f.renderer.renderTree.children = [unrelated]
+  f.finish()
+  assert.strictEqual(unrelated.data.expand, true, 'deleted target cannot change other branches')
+
   // 收起后再展开只露出下一级，子节点不恢复收起前的展开状态。
   const setExpand = method('setNodeExpand', 'collapseChildrenOf')
   const collapseChildren = method('collapseChildrenOf', 'nodeHasChildren')
