@@ -25,7 +25,7 @@
       />
     </label>
     <div class="folderCardMedia">
-      <div class="folderCardArtField" :style="mobileArtStyle">
+      <div class="folderCardArtField">
         <div class="gf-stage" :style="stageStyle">
           <div class="gf-tilt">
             <div class="gf-shadow" aria-hidden="true" />
@@ -148,7 +148,6 @@ import InlineTitle from './InlineTitle.vue'
 import mobileViewport from '@/utils/mobileViewport'
 import glassCard, { STAGE_W as W, STAGE_H as H, reducedMotion } from './glassCard'
 import { artForKey, hashString, paintArt, rng } from './glassFolderArt'
-import { fitFolderStageToWidth } from './mobileFolderLayout'
 
 const FRONT_H = H - 74
 const ART_PAD = 24
@@ -201,38 +200,11 @@ export default {
     frontClip() {
       return `path('${FRONT_PATH}')`
     },
-    mobileCardLayout() {
-      return fitFolderStageToWidth(this.width)
-    },
-    mobileArtLayout() {
-      return fitFolderStageToWidth(this.width + 2)
-    },
     cardStyle() {
-      return {
-        height:
-          (this.isMobileViewport
-            ? this.mobileCardLayout.height
-            : this.rootHeight) + 'px'
-      }
-    },
-    mobileArtStyle() {
-      if (!this.isMobileViewport) return {}
-      return {
-        width: `${this.mobileArtLayout.width.toFixed(2)}px`,
-        height: `${this.mobileArtLayout.height.toFixed(2)}px`
-      }
+      return { height: this.rootHeight + 'px' }
     },
     stageStyle() {
-      if (!this.isMobileViewport) {
-        return glassCard.computed.stageStyle.call(this)
-      }
-      return {
-        zoom: 1,
-        width: `${W}px`,
-        height: `${H}px`,
-        transform: `scale(${this.mobileArtLayout.scale.toFixed(6)})`,
-        transformOrigin: '0 0'
-      }
+      return glassCard.computed.stageStyle.call(this)
     },
     artW() {
       return W + ART_PAD
