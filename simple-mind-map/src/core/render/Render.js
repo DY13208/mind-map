@@ -2811,16 +2811,17 @@ class Render {
     return (Array.isArray(list) ? list : [list]).filter(Boolean)
   }
 
-  applyExpandFlagsToLevel(level) {
+  applyExpandFlagsToLevel(level, root = this.renderTree) {
     walk(
-      this.renderTree,
+      root,
       null,
       (node, parent, isRoot, layerIndex) => {
         const expand = layerIndex < level
+        const data = this.getExpandTreeData(node)
         if (expand) {
-          node.data.expand = true
+          data.expand = true
         } else if (!isRoot && this.nodeHasChildren(node)) {
-          node.data.expand = false
+          data.expand = false
         }
       },
       null,
@@ -3084,15 +3085,21 @@ class Render {
   }
 
   //  展开到指定层级
-  expandToLevel(level) {
+  expandToLevel(level, uid = '') {
     if (!this.renderTree) return
+    // 带 UID 时，以该节点为第 0 层，只改变它的下级分支。
+    const start = this.findExpandStartNode(uid)
+    if (!start) return
     const target = Number(level) || 0
     const token = (this._expandOperationId || 0) + 1
     this._expandOperationId = token
     this._expandAllToken = 0
-    this.hydrateThen(this.renderTree, target, { maxFetches: 40, concurrency: 2 }, () => {
+    this.hydrateThen(start, target, { maxFetches: 40, concurrency: 2 }, () => {
       if (this._expandOperationId !== token) return
-      this.applyExpandFlagsToLevel(target)
+      // 懒加载期间协同刷新可能替换整棵树，按 UID 重新解析目标。
+      const current = this.findExpandStartNode(uid)
+      if (!current) return
+      this.applyExpandFlagsToLevel(target, current)
       this.mindMap.emit('personal_expand_change')
       this.mindMap.render()
     })

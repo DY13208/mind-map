@@ -15,6 +15,17 @@
     >
     <template v-if="type === 'node' && !editable">
       <div class="item" @click="exec('EXPAND_ALL')"><MenuIcon name="expand" /><span class="name">{{ $t('contextmenu.expandNodeChild') }}</span></div>
+      <div
+        class="item"
+        data-testid="expand-node-to-level"
+        @mouseenter="openSubmenu('expand', $event)"
+        v-on:click="openSubmenu('expand', $event)"
+        @mouseleave="scheduleSubmenuClose"
+      >
+        <MenuIcon name="expand" />
+        <span class="name">{{ $t('contextmenu.expandTo') }}</span>
+        <MenuIcon name="chevron" />
+      </div>
       <div class="item" @click="exec('UNEXPAND_ALL')"><MenuIcon name="collapse" /><span class="name">{{ $t('contextmenu.unExpandNodeChild') }}</span></div>
       <div class="item" @click="copyNodeForAi"><MenuIcon name="clipboard" /><span class="name">复制给 AI（SOP）</span></div>
     </template>
@@ -43,6 +54,17 @@
         <MenuIcon name="expand" />
         <span class="name">{{ $t('contextmenu.expandNodeChild') }}</span>
         <span class="desc">Ctrl + Alt + E</span>
+      </div>
+      <div
+        class="item"
+        data-testid="expand-node-to-level"
+        @mouseenter="openSubmenu('expand', $event)"
+        v-on:click="openSubmenu('expand', $event)"
+        @mouseleave="scheduleSubmenuClose"
+      >
+        <MenuIcon name="expand" />
+        <span class="name">{{ $t('contextmenu.expandTo') }}</span>
+        <MenuIcon name="chevron" />
       </div>
       <div class="splitLine"></div>
       <div class="item" data-testid="share-node" @click="shareNode">
@@ -1258,6 +1280,9 @@ export default {
         }
         case 'EXPAND_ALL':
           this.runCommand(key, this.node ? this.node.uid : '')
+          break
+        case 'UNEXPAND_TO_LEVEL':
+          this.runCommand(key, ...args, this.type === 'node' && this.node ? this.node.uid : '')
           break
         default:
           this.runCommand(key, ...args)
