@@ -50,7 +50,7 @@ async function test() {
   const kindContext = { IMAGE_EXT: /\.(png|jpe?g|webp|gif)$/i, HTML_EXT: /\.html?$/i, TEXT_EXT: /\.(txt|js)$/i }
   vm.runInNewContext(fn, kindContext)
   for (const [name, expected] of [['deck.pptx', 'presentation'], ['deck.ppt', 'unsupported'], ['archive.zip', 'archive'], ['file.md', 'markdown'], ['file.pdf', 'pdf'], ['file.docx', 'office'], ['file.xlsx', 'office'], ['file.png', 'image'], ['file.txt', 'text']]) assert.equal(kindContext.attachmentPreviewKind(name, ''), expected)
-  assert(read('src/pages/Edit/components/NodeAttachmentPreview.vue').includes("if (this.kind === 'presentation') return 'AttachmentPresentationPreview'"))
+  assert(read('src/pages/Edit/components/NodeAttachmentPreview.vue').includes("kind === 'presentation' ? 'AttachmentPresentationPreview'"))
   console.log('PASS: binary PPTX routing/rendering, navigation, zoom preserves page, close cleanup, size budget, per-format routing and unsupported legacy files.')
 }
 test().catch(error => { console.error(error); process.exitCode = 1 })

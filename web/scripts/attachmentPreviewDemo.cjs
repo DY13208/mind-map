@@ -90,6 +90,8 @@ async function fixtures() {
   }
 }
 async function main() {
+  const esmSplitting = process.env.PREVIEW_DEMO_ESM === '1'
+  const demoOutputDir = path.join(root, 'web/.tmp/attachment-preview-demo')
   const files = await fixtures()
   const meta = Object.fromEntries(Object.entries(files).map(([key, file]) => {
     const item = { ...file }
@@ -105,7 +107,8 @@ async function main() {
       "window.previewHost=new Vue({render:h=>h(Preview)}).$mount('#preview');window.map=new MindMap({el:document.querySelector('#map'),data:{data:{uid:'root',text:'附件预览 · 本地验证'},children:[{data:{uid:'inline-image',text:'插入图片',image:" + JSON.stringify('data:image/png;base64,' + fs.readFileSync(path.join(root,'web/src/assets/img/logo2.png')).toString('base64')) + ",imageSize:{width:64,height:64,custom:true}},children:[]},...Object.values(files).map(file=>({data:{uid:file.id,text:file.fileName,attachmentId:file.id,attachmentName:file.fileName,attachmentMimeType:file.mimeType,attachmentStatus:file.status,attachmentError:file.errorMessage||''},children:[]}))]}});new Vue({render:h=>h(ImgPreview,{props:{mindMap:map}})}).$mount(document.body.appendChild(document.createElement('div')));map.on('node_attachmentClick',node=>bus.$emit('node_attachmentClick',node));" +
       "Object.values(files).forEach(file=>{const button=document.createElement('button');button.textContent=file.fileName;button.onclick=()=>bus.$emit('node_attachmentClick',{getData:()=>({attachmentId:file.id,attachmentName:file.fileName,attachmentMimeType:file.mimeType,attachmentStatus:file.status})});document.querySelector('#fixtures').appendChild(button)});setTimeout(()=>map.view.fit(),100);"
     },
-    bundle: true, write: false, outdir: 'demo', platform: 'browser',
+    bundle: true, write: false, outdir: esmSplitting ? demoOutputDir : 'demo', platform: 'browser',
+    ...(esmSplitting ? { format: 'esm', splitting: true, entryNames: 'demo', chunkNames: 'chunks/[name]-[hash]' } : {}),
     define: { 'process.env.NODE_ENV': '"test"' },
     alias: { 'simple-mind-map': path.join(root, 'simple-mind-map'), '@': path.join(root, 'web/src'), 'docx-preview': path.join(root, 'web/node_modules/docx-preview/dist/docx-preview.js') },
     nodePaths: [path.join(root, 'web/node_modules')], loader: { '.ttf': 'dataurl', '.woff': 'dataurl', '.woff2': 'dataurl' },
@@ -121,12 +124,22 @@ async function main() {
   })
   await context.rebuild()
   await context.watch()
+  const outputByRelativePath = () => new Map(compiled.outputFiles.map(file => [
+    path.relative(demoOutputDir, file.path).split(path.sep).join('/'), file
+  ]))
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://localhost')
-    if (url.pathname === '/demo.js' || url.pathname === '/demo.css') {
-      const suffix = url.pathname.endsWith('.css') ? '.css' : '.js'
-      res.setHeader('Content-Type', suffix === '.css' ? 'text/css' : 'application/javascript')
-      res.end(compiled.outputFiles.find(file => file.path.endsWith(suffix)).contents); return
+    const demoAssetPath = url.pathname === '/demo.js' || url.pathname === '/demo.css'
+      ? url.pathname.slice(1)
+      : (esmSplitting && url.pathname.startsWith('/chunks/') ? url.pathname.slice(1) : null)
+    if (demoAssetPath) {
+      const asset = esmSplitting
+        ? outputByRelativePath().get(demoAssetPath)
+        : compiled.outputFiles.find(file => file.path.endsWith(demoAssetPath.endsWith('.css') ? '.css' : '.js'))
+      if (!asset) { res.writeHead(404); res.end('Preview demo asset not found'); return }
+      res.setHeader('Content-Type', demoAssetPath.endsWith('.css') ? 'text/css' : 'application/javascript')
+      res.setHeader('Cache-Control', 'no-store')
+      res.end(asset.contents); return
     }
     if (url.pathname.startsWith('/attachment-preview/')) {
       const relative = url.pathname.slice('/attachment-preview/'.length)
@@ -163,7 +176,8 @@ async function main() {
       send(); return
     }
     res.setHeader('Content-Type', 'text/html; charset=utf-8')
-    res.end('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>通用附件预览 · 本地验证</title><link rel="stylesheet" href="/demo.css"><style>body{margin:0;font-family:system-ui;background:#f5f7fb}#fixtures{display:flex;gap:8px;flex-wrap:wrap;padding:16px}#fixtures button{padding:8px 12px;border:1px solid #dce4ef;background:white;border-radius:6px;color:#344155;cursor:pointer}#map{height:82vh;width:100vw}</style><nav id="fixtures" aria-label="测试附件"></nav><div id="map"></div><div id="preview"></div><script src="/demo.js"></script>')
+    const scriptType = esmSplitting ? ' type="module"' : ''
+    res.end('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>通用附件预览 · 本地验证</title><link rel="stylesheet" href="/demo.css"><style>body{margin:0;font-family:system-ui;background:#f5f7fb}#fixtures{display:flex;gap:8px;flex-wrap:wrap;padding:16px}#fixtures button{padding:8px 12px;border:1px solid #dce4ef;background:white;border-radius:6px;color:#344155;cursor:pointer}#map{height:82vh;width:100vw}</style><nav id="fixtures" aria-label="测试附件"></nav><div id="map"></div><div id="preview"></div><script' + scriptType + ' src="/demo.js"></script>')
   })
   await new Promise(resolve => server.listen(Number(process.env.PREVIEW_PORT || 4321), '127.0.0.1', resolve))
   console.log('Attachment preview demo: http://127.0.0.1:' + server.address().port)

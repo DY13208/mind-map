@@ -2,7 +2,7 @@
   <div class="nodeAttachmentPreviewRoot">
   <el-dialog :visible.sync="visible" :title="title" width="92vw" top="5vh" append-to-body
     :custom-class="isMaximized ? 'attachmentViewer is-maximized' : 'attachmentViewer'"
-    :show-close="false" :close-on-click-modal="true" :close-on-press-escape="true" @close="onClosed">
+    :show-close="false" :close-on-click-modal="true" :close-on-press-escape="true" @closed="onClosed">
     <header slot="title" class="attachmentViewerHeader">
       <div class="attachmentFileIcon"><span class="attachmentFileIconSvg" aria-hidden="true" v-html="fileIconSvg"></span></div>
       <div class="attachmentFileInfo">
@@ -63,20 +63,23 @@ import { getAttachmentFileIconSvg } from 'simple-mind-map/src/svg/attachmentFile
 import { isAttachmentErrorActive, attachmentErrorText, canPreviewOriginalAttachment } from 'simple-mind-map/src/utils/attachmentIconState'
 import '@/style/attachment-preview.less'
 
+const PREVIEW_MODULE_LOADERS = {
+  AttachmentDocumentPreview: () => import('./attachment-preview/AttachmentDocumentPreview.vue').then(module => module.default || module),
+  AttachmentOfficePreview: () => import('./attachment-preview/AttachmentOfficePreview.vue').then(module => module.default || module),
+  AttachmentPdfPreview: () => import('./attachment-preview/AttachmentPdfPreview.vue').then(module => module.default || module),
+  AttachmentPresentationPreview: () => import('./attachment-preview/AttachmentPresentationPreview.vue').then(module => module.default || module),
+  AttachmentArchivePreview: () => import('./attachment-preview/AttachmentArchivePreview.vue').then(module => module.default || module),
+  AttachmentImagePreview: () => import('./attachment-preview/AttachmentImagePreview.vue').then(module => module.default || module),
+  AttachmentMediaPreview: () => import('./attachment-preview/AttachmentMediaPreview.vue').then(module => module.default || module)
+}
+const PREVIEW_MODULE_LOAD_TIMEOUT_MS = 20000
+
 export default {
   name: 'NodeAttachmentPreview',
-  components: {
-    AttachmentDocumentPreview: () => import('./attachment-preview/AttachmentDocumentPreview.vue').then(module => module.default || module),
-    AttachmentOfficePreview: () => import('./attachment-preview/AttachmentOfficePreview.vue').then(module => module.default || module),
-    AttachmentPdfPreview: () => import('./attachment-preview/AttachmentPdfPreview.vue').then(module => module.default || module),
-    AttachmentPresentationPreview: () => import('./attachment-preview/AttachmentPresentationPreview.vue').then(module => module.default || module),
-    AttachmentArchivePreview: () => import('./attachment-preview/AttachmentArchivePreview.vue').then(module => module.default || module),
-    AttachmentImagePreview: () => import('./attachment-preview/AttachmentImagePreview.vue').then(module => module.default || module),
-    AttachmentMediaPreview: () => import('./attachment-preview/AttachmentMediaPreview.vue').then(module => module.default || module)
-  },
   data: () => ({
     visible: false, loading: false, title: '附件预览', attachmentId: '', attachment: null,
-    kind: 'unsupported', source: null, externalUrl: '', error: '', requestId: 0,
+    kind: 'unsupported', source: null, previewComponent: null, previewLoadAttempt: 0, previewLoadFailed: false,
+    externalUrl: '', error: '', requestId: 0,
     isMaximized: false, selectedData: null,
     errorDialog: { visible: false, node: null, data: null, editable: false }
   }),
@@ -105,16 +108,6 @@ export default {
       const data = this.errorDialog.data || {}
       return getAttachmentFileIconSvg(data.attachmentName, data.attachmentMimeType, { label: true })
     },
-    previewComponent() {
-      if (this.kind === 'image') return 'AttachmentImagePreview'
-      if (this.kind === 'pdf') return 'AttachmentPdfPreview'
-      if (this.kind === 'office') return 'AttachmentOfficePreview'
-      if (this.kind === 'presentation') return 'AttachmentPresentationPreview'
-      if (this.kind === 'archive') return 'AttachmentArchivePreview'
-      if (['audio', 'video'].includes(this.kind)) return 'AttachmentMediaPreview'
-      if (['markdown', 'text', 'json'].includes(this.kind)) return 'AttachmentDocumentPreview'
-      return null
-    }
   },
   watch: {
     $route(to, from) {
@@ -195,12 +188,58 @@ export default {
     },
     resetPreview() {
       this.requestId++
+      this.previewLoadAttempt++
+      this.previewComponent = null
+      this.previewLoadFailed = false
       this.source = null
       this.loading = false
       this.error = ''
       this.attachment = null
       this.attachmentId = ''
       this.externalUrl = ''
+    },
+    async loadPreviewComponent(kind = this.kind, requestId = this.requestId) {
+      const loaders = this._previewModuleLoaders || PREVIEW_MODULE_LOADERS
+      const componentName = kind === 'image' ? 'AttachmentImagePreview'
+        : kind === 'pdf' ? 'AttachmentPdfPreview'
+        : kind === 'office' ? 'AttachmentOfficePreview'
+        : kind === 'presentation' ? 'AttachmentPresentationPreview'
+        : kind === 'archive' ? 'AttachmentArchivePreview'
+        : ['audio', 'video'].includes(kind) ? 'AttachmentMediaPreview'
+        : ['markdown', 'text', 'json'].includes(kind) ? 'AttachmentDocumentPreview'
+        : ''
+      const loader = componentName && loaders[componentName]
+      this.previewComponent = null
+      this.previewLoadFailed = false
+      this.error = ''
+      if (!loader) return
+
+      const attempt = ++this.previewLoadAttempt
+      let timeoutId
+      this.loading = true
+      try {
+        const timeout = new Promise((resolve, reject) => {
+          timeoutId = setTimeout(() => reject(Object.assign(new Error('预览组件加载超时'), { code: 'PREVIEW_MODULE_TIMEOUT' })), this._previewModuleLoadTimeoutMs || PREVIEW_MODULE_LOAD_TIMEOUT_MS)
+        })
+        const loaded = await Promise.race([loader(), timeout])
+        if (requestId !== this.requestId || attempt !== this.previewLoadAttempt || !this.visible) return
+        const component = loaded && loaded.default || loaded
+        const options = typeof component === 'function' ? component.options : component
+        const hasRender = options && typeof options.render === 'function'
+        const hasTemplate = options && typeof options.template === 'string' && options.template.trim().length > 0
+        if (!options || typeof options !== 'object' || (!hasRender && !hasTemplate)) throw new Error('预览组件不可用')
+        this.previewComponent = component
+      } catch (error) {
+        if (requestId === this.requestId && attempt === this.previewLoadAttempt && this.visible) {
+          this.previewLoadFailed = true
+          this.error = error && error.code === 'PREVIEW_MODULE_TIMEOUT'
+            ? '预览组件加载超时，请重试；如果持续失败，请刷新页面后重新打开附件'
+            : '预览组件加载失败，请重试；如果持续失败，请刷新页面后重新打开附件'
+        }
+      } finally {
+        clearTimeout(timeoutId)
+        if (requestId === this.requestId && attempt === this.previewLoadAttempt) this.loading = false
+      }
     },
     async openStoredAttachment(data) {
       this.resetPreview()
@@ -228,12 +267,14 @@ export default {
           return
         }
         this.source = Object.freeze({ ...attachment, roomKey, url: nodeAttachmentContentUrl(roomKey, attachment.id) })
+        await this.loadPreviewComponent(this.kind, token)
       } catch (error) {
         if (token === this.requestId) this.error = error.message || '附件加载失败'
       } finally { if (token === this.requestId) this.loading = false }
     },
     openExternalAttachment(data) {
       this.resetPreview()
+      this.selectedData = { ...data }
       this.externalUrl = String(data.attachmentUrl || '')
       let fallbackName = '附件预览'
       try { fallbackName = decodeURIComponent(new URL(this.externalUrl, window.location.href).pathname.split('/').pop()) || fallbackName } catch (error) { /* Keep the original link available. */ }
@@ -242,8 +283,14 @@ export default {
       this.kind = ['office', 'pdf', 'presentation'].includes(kind) ? kind : 'external'
       if (this.kind !== 'external') this.source = Object.freeze({ fileName: this.title, mimeType: data.attachmentMimeType || '', url: this.externalUrl, external: true, byteSize: Number(data.attachmentSize || data.byteSize) || 0 })
       this.visible = true
+      if (this.source) this.loadPreviewComponent(this.kind, this.requestId)
     },
-    retry() { if (this.selectedData) this.openStoredAttachment(this.selectedData) },
+    retry() {
+      if (this.previewLoadFailed && this.source) return this.loadPreviewComponent(this.kind, this.requestId)
+      if (!this.selectedData) return
+      if (this.selectedData.attachmentId) return this.openStoredAttachment(this.selectedData)
+      if (this.selectedData.attachmentUrl) return this.openExternalAttachment(this.selectedData)
+    },
     toggleMaximize() { this.isMaximized = !this.isMaximized },
     download() {
       if (this.externalUrl) { this.openExternal(); return }
@@ -259,7 +306,7 @@ export default {
       link.remove()
     },
     openExternal() { this.openUrlInNewPage(this.externalUrl) },
-    onClosed() { this.resetPreview() }
+    onClosed() { if (!this.visible) this.resetPreview() }
   }
 }
 </script>
