@@ -13,7 +13,7 @@
     </div>
     <div v-if="loading" class="attachmentViewerState" role="status"><i class="el-icon-loading"></i><strong>正在加载 PDF…</strong></div>
     <div v-else-if="error" class="attachmentViewerState" role="alert">
-      <i class="el-icon-warning-outline"></i><strong>{{ error }}</strong><el-button size="small" @click="$emit('download')">下载原文件</el-button>
+      <i class="el-icon-warning-outline"></i><strong>{{ error }}</strong><el-button size="small" @click="$emit('download')">{{ source.external ? '外部打开' : '下载原文件' }}</el-button>
     </div>
     <div v-else class="attachmentPagedBody">
       <AttachmentThumbnailRail v-if="pageCount" :count="pageCount" :active="currentPage" :render-thumbnail="renderThumbnail" @select="goToPage" />
@@ -30,6 +30,7 @@
 <script>
 import { loadPdfPreviewRuntime, previewAssetUrl } from '@/utils/attachmentPreviewRuntime'
 import { nodeAttachmentContentUrl } from '@/utils/nodeAttachmentApi'
+import { fetchPreviewAttachmentContent } from '@/utils/attachmentPreviewSource'
 import { PDF_PREVIEW_MAX_BYTES } from '@/utils/nodeAttachmentPreview'
 import AttachmentThumbnailRail from './AttachmentThumbnailRail.vue'
 export default {
@@ -50,6 +51,7 @@ export default {
     if (this._resize) this._resize.disconnect()
     for (const task of this._jobs.values()) task.cancel()
     if (this._task) this._task.destroy()
+    if (this._controller) this._controller.abort()
     this._doc = null
   },
   methods: {
@@ -58,8 +60,14 @@ export default {
         if (this.source.byteSize > PDF_PREVIEW_MAX_BYTES) throw new Error('PDF 较大，请下载原文件查看')
         const pdf = await loadPdfPreviewRuntime()
         if (this._disposed) return
+        let original = null
+        if (this.source.external) {
+          this._controller = new AbortController()
+          original = await fetchPreviewAttachmentContent(this.source, { signal: this._controller.signal, maxBytes: PDF_PREVIEW_MAX_BYTES })
+          if (this._disposed) return
+        }
         this._task = pdf.getDocument({
-          url: nodeAttachmentContentUrl(this.source.roomKey, this.source.id, { maxBytes: PDF_PREVIEW_MAX_BYTES }), withCredentials: true,
+          ...(original ? { data: new Uint8Array(original.buffer) } : { url: nodeAttachmentContentUrl(this.source.roomKey, this.source.id, { maxBytes: PDF_PREVIEW_MAX_BYTES }), withCredentials: true }),
           cMapUrl: previewAssetUrl('pdf/cmaps/'), cMapPacked: true,
           standardFontDataUrl: previewAssetUrl('pdf/standard_fonts/'),
           wasmUrl: previewAssetUrl('pdf/wasm/'), isEvalSupported: false,

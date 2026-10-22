@@ -11,7 +11,7 @@
       <button type="button" aria-label="放大幻灯片" :disabled="busy || zoom >= 200" @click="setZoom(zoom + 25)"><i class="el-icon-zoom-in"></i></button>
       <button type="button" :disabled="busy" @click="setZoom(100)">适应窗口</button>
     </div>
-    <div v-if="error" class="attachmentViewerState" role="alert"><i class="el-icon-warning-outline"></i><strong>{{ error }}</strong><el-button size="small" @click="$emit('download')">下载原文件</el-button></div>
+    <div v-if="error" class="attachmentViewerState" role="alert"><i class="el-icon-warning-outline"></i><strong>{{ error }}</strong><el-button size="small" @click="$emit('download')">{{ source.external ? '外部打开' : '下载原文件' }}</el-button></div>
     <div v-show="!error" class="attachmentPagedBody">
       <AttachmentThumbnailRail v-if="count" :count="count" :active="page" :render-thumbnail="renderThumbnail" @select="goToPage" />
       <div ref="viewport" class="attachmentPresentationViewport" aria-label="幻灯片预览" tabindex="0"><div ref="slides"></div></div>
@@ -22,7 +22,7 @@
 </template>
 <script>
 import JSZip from 'jszip'
-import { fetchNodeAttachmentContent } from '@/utils/nodeAttachmentApi'
+import { fetchPreviewAttachmentContent } from '@/utils/attachmentPreviewSource'
 import { OFFICE_PREVIEW_MAX_BYTES, assertOfficeZipBudget } from '@/utils/nodeAttachmentPreview'
 import { loadPresentationPreviewRuntime } from '@/utils/attachmentPreviewRuntime'
 export default {
@@ -36,7 +36,7 @@ export default {
       this._controller = new AbortController()
       try {
         if (this.source.byteSize > OFFICE_PREVIEW_MAX_BYTES) throw new Error('演示文稿较大，请下载原文件查看')
-        const content = await fetchNodeAttachmentContent(this.source.roomKey, this.source.id, { signal: this._controller.signal, maxBytes: OFFICE_PREVIEW_MAX_BYTES })
+        const content = await fetchPreviewAttachmentContent(this.source, { signal: this._controller.signal, maxBytes: OFFICE_PREVIEW_MAX_BYTES })
         if (this._disposed) return
         const zip = await JSZip.loadAsync(content.buffer)
         assertOfficeZipBudget(zip)

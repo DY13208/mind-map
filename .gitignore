@@ -96,6 +96,7 @@ output/*.py
 !/web/tests/fileNavigation.test.cjs
 !/web/tests/editorFileReturn.test.cjs
 !/web/tests/delimitedAttachmentPreview.test.cjs
+!/web/tests/attachmentPreviewSource.test.cjs
 !/web/tests/touchEditorControls.test.cjs
 !/web/tests/shellMode.test.cjs
 !/web/tests/productShell.fileReturn.test.cjs

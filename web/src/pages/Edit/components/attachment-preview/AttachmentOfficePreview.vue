@@ -1,7 +1,7 @@
 <template>
   <section class="attachmentOfficeLayout" :class="{ 'is-spreadsheet': spreadsheet }">
     <div v-if="loading" class="attachmentViewerState" role="status"><i class="el-icon-loading"></i><strong>正在解析文档…</strong></div>
-    <div v-else-if="error" class="attachmentViewerState" role="alert"><i class="el-icon-warning-outline"></i><strong>{{ error }}</strong><el-button size="small" @click="$emit('download')">下载原文件</el-button></div>
+    <div v-else-if="error" class="attachmentViewerState" role="alert"><i class="el-icon-warning-outline"></i><strong>{{ error }}</strong><el-button size="small" @click="$emit('download')">{{ source.external ? '外部打开' : '下载原文件' }}</el-button></div>
     <template v-else-if="spreadsheet">
       <nav class="attachmentSheetTabs" aria-label="工作表">
         <button v-for="sheet in sheets" :key="sheet.name" type="button" :class="{ active: sheet.name === activeSheet }" :aria-current="sheet.name === activeSheet ? 'page' : null" @click="selectSheet(sheet.name)">{{ sheet.name }}</button>
@@ -34,7 +34,7 @@
   </section>
 </template>
 <script>
-import { fetchNodeAttachmentContent } from '@/utils/nodeAttachmentApi'
+import { fetchPreviewAttachmentContent } from '@/utils/attachmentPreviewSource'
 import { isSpreadsheetAttachment, OFFICE_PREVIEW_MAX_BYTES, assertOfficeZipBudget } from '@/utils/nodeAttachmentPreview'
 import { previewAssetUrl } from '@/utils/attachmentPreviewRuntime'
 const abortError = () => new DOMException('cancelled', 'AbortError')
@@ -86,7 +86,7 @@ export default {
       try {
         if (this.source.byteSize > OFFICE_PREVIEW_MAX_BYTES) throw new Error('文档较大，已停止自动解析，请下载后查看')
         if (/\.doc$/i.test(this.source.fileName)) throw new Error('此 Word 格式暂不支持在线排版，请下载后打开')
-        const content = await fetchNodeAttachmentContent(this.source.roomKey, this.source.id, { signal: this._controller.signal, maxBytes: OFFICE_PREVIEW_MAX_BYTES })
+        const content = await fetchPreviewAttachmentContent(this.source, { signal: this._controller.signal, maxBytes: OFFICE_PREVIEW_MAX_BYTES })
         if (this._disposed) return
         if (this.spreadsheet) {
           this._worker = new Worker(previewAssetUrl('workbook.worker.js'))

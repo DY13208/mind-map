@@ -15,7 +15,7 @@ class Viewer {
 }
 new Function('require','module','exports',code)(name => {
   if(name === 'jszip') return { loadAsync: async () => ({ files: { 'ppt/slides/slide1.xml': {} } }) }
-  if(name.endsWith('/nodeAttachmentApi')) return { fetchNodeAttachmentContent: async () => ({ buffer: new ArrayBuffer(8) }) }
+  if(name.endsWith('/attachmentPreviewSource')) return { fetchPreviewAttachmentContent: async () => ({ buffer: new ArrayBuffer(8) }) }
   if(name.endsWith('/nodeAttachmentPreview')) return { OFFICE_PREVIEW_MAX_BYTES: 5242880, assertOfficeZipBudget() {} }
   return { loadPresentationPreviewRuntime: async () => ({ PptxViewer: Viewer }) }
 },ref,ref.exports)

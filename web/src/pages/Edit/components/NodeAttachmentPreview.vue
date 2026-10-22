@@ -234,14 +234,19 @@ export default {
     },
     openExternalAttachment(data) {
       this.resetPreview()
-      this.title = data.attachmentName || '附件预览'
-      this.kind = 'external'
       this.externalUrl = String(data.attachmentUrl || '')
+      let fallbackName = '附件预览'
+      try { fallbackName = decodeURIComponent(new URL(this.externalUrl, window.location.href).pathname.split('/').pop()) || fallbackName } catch (error) { /* Keep the original link available. */ }
+      this.title = data.attachmentName || fallbackName
+      const kind = attachmentPreviewKind(this.title, data.attachmentMimeType)
+      this.kind = ['office', 'pdf', 'presentation'].includes(kind) ? kind : 'external'
+      if (this.kind !== 'external') this.source = Object.freeze({ fileName: this.title, mimeType: data.attachmentMimeType || '', url: this.externalUrl, external: true, byteSize: Number(data.attachmentSize || data.byteSize) || 0 })
       this.visible = true
     },
     retry() { if (this.selectedData) this.openStoredAttachment(this.selectedData) },
     toggleMaximize() { this.isMaximized = !this.isMaximized },
     download() {
+      if (this.externalUrl) { this.openExternal(); return }
       const room = (this.source && this.source.roomKey) || roomFromLocation(this.$route)
       if (!room || !this.attachmentId) return
       const link = document.createElement('a')

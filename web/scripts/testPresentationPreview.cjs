@@ -23,7 +23,7 @@ const ctx = {
   JSZip: { loadAsync: async () => ({ files: { 'ppt/slides/slide1.xml': {} } }) },
   OFFICE_PREVIEW_MAX_BYTES: 5 * 1024 * 1024,
   assertOfficeZipBudget() {},
-  fetchNodeAttachmentContent: async (room, id, options) => { calls.push(['fetch', room, id, options]); return { buffer: binary } },
+  fetchPreviewAttachmentContent: async (source, options) => { calls.push(['fetch', source, options]); return { buffer: binary } },
   loadPresentationPreviewRuntime: async () => ({ PptxViewer: Viewer, RECOMMENDED_ZIP_LIMITS: {} })
 }
 vm.runInNewContext(parsed.script.content.replace(/^import .*$/gm, '').replace('export default', 'component ='), ctx)
