@@ -39,12 +39,17 @@ async function test() {
   const routing = { URL, window: scope.window, attachmentPreviewKind }
   vm.runInNewContext('methods = ({' + method + '})', routing)
   for (const [file, kind] of [['编号.csv', 'office'], ['报告.pptx', 'presentation'], ['报告.pdf', 'pdf']]) {
-    const viewer = { resetPreview() { this.source = null } }
+    const viewer = {
+      requestId: 0,
+      resetPreview() { this.source = null },
+      loadPreviewComponent(componentKind, requestId) { this.loadedPreview = { componentKind, requestId } }
+    }
     routing.methods.openExternalAttachment.call(viewer, { attachmentUrl: 'https://files.example.test/' + encodeURIComponent(file), attachmentMimeType: 'text/markdown' })
     assert.equal(viewer.kind, kind)
     assert.equal(viewer.title, file)
     assert.equal(viewer.source.external, true)
     assert.equal(viewer.visible, true)
+    assert.deepEqual(viewer.loadedPreview, { componentKind: kind, requestId: 0 })
   }
   console.log('PASS external CSV/PPTX/PDF routing, URL names, bounded reads, HTTP/CORS failures, cancellation and stored API preservation')
 }

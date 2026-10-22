@@ -26,7 +26,7 @@ import { fetchPreviewAttachmentContent } from '@/utils/attachmentPreviewSource'
 import { OFFICE_PREVIEW_MAX_BYTES, assertOfficeZipBudget } from '@/utils/nodeAttachmentPreview'
 import { loadPresentationPreviewRuntime } from '@/utils/attachmentPreviewRuntime'
 export default {
-  components: { AttachmentThumbnailRail: () => import('./AttachmentThumbnailRail.vue') },
+  components: { AttachmentThumbnailRail: () => import('./AttachmentThumbnailRail.vue').then(module => module.default || module) },
   props: { source: { type: Object, required: true } },
   data: () => ({ busy: true, error: '', partial: false, page: 1, pageInput: 1, count: 0, zoom: 100 }),
   mounted() { this.load() },
