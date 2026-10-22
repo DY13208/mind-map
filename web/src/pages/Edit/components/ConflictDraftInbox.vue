@@ -1,24 +1,25 @@
 <template>
   <div v-if="room && drafts.length" class="conflictDraftInbox">
-    <el-button type="warning" round size="small" @click="openInbox">
+    <el-button class="draftInboxTrigger" round size="small" @click="openInbox">
       <i class="el-icon-warning-outline"></i>
       {{ $t('editConflict.inbox') }} · {{ drafts.length }}
     </el-button>
     <el-dialog
       :visible.sync="visible"
       :title="$t('editConflict.inboxTitle')"
-      width="560px"
+      width="600px"
+      custom-class="conflictDraftDialog"
       append-to-body
     >
       <p v-if="!drafts.length">{{ $t('editConflict.empty') }}</p>
       <div v-for="item in drafts" :key="item.key" class="conflictDraftItem">
         <div class="itemHead">
-          <div>
-            <strong>{{ $t('editConflict.node') }} {{ item.uid }}</strong>
-            <span class="itemGroup">{{ item.group === 'outbox-structure' ? $t('editConflict.operationIntent') : item.group }}</span>
+          <div class="itemIdentity">
+            <strong :title="item.uid">{{ $t('editConflict.node') }} {{ item.uid }}</strong>
+            <span class="itemGroup">{{ draftGroupLabel(item.group) }}</span>
           </div>
-          <el-button type="text" size="mini" @click="toggleItem(item)">
-            {{ selectedKey === item.key ? $t('editConflict.hideLatest') : $t('editConflict.myDraft') }}
+          <el-button class="draftItemToggle" type="text" size="mini" :aria-label="$t('editConflict.myDraft')" :aria-expanded="String(selectedKey === item.key)" @click="toggleItem(item)">
+            <i :class="selectedKey === item.key ? 'el-icon-arrow-up' : 'el-icon-arrow-down'" aria-hidden="true"></i>
           </el-button>
         </div>
         <ConflictDraftPanel
@@ -105,6 +106,10 @@ export default {
     this.unbindMindMapEvents(this.mindMap)
   },
   methods: {
+    draftGroupLabel(group) {
+      const labels = { text: 'style.text', note: 'nodeNote.title', hyperlink: 'nodeHyperlink.title', 'outbox-structure': 'editConflict.operationIntent' }
+      return this.$t(labels[group] || 'editConflict.myDraft')
+    },
     bindMindMapEvents(mindMap) {
       if (mindMap && typeof mindMap.on === 'function') {
         mindMap.on('edit_session_outbox_conflict', this.onOutboxConflict)
@@ -388,7 +393,11 @@ export default {
 
 .conflictDraftItem {
   padding: 8px 0 12px;
-  border-bottom: 1px solid #ebeef5;
+  border-bottom: 1px solid #e2e9e4;
+  &:last-child { border-bottom: 0; }
+  .itemIdentity { min-width: 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .itemIdentity strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 320px; font-size: 13px; font-weight: 500; }
+  .itemHead > .el-button { flex-shrink: 0; }
 }
 
 .itemHead {
@@ -399,10 +408,51 @@ export default {
 }
 
 .itemGroup {
-  margin-left: 8px;
-  color: #909399;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: #eef3f0;
+  color: #5c6e64;
   font-size: 12px;
 }
 
-.discardButton { color: #c45656; }
+.draftItemToggle { width: 32px; height: 32px; border-radius: 6px; }
+.discardButton { color: #b8433a; }
+.draftInboxTrigger { color: #72501d; border-color: #ddcaa6; background: #fff; box-shadow: 0 3px 12px rgba(23, 38, 31, .08); }
+</style>
+
+<style lang="less">
+.conflictDraftDialog {
+  max-width: calc(100vw - 32px);
+  border-radius: 12px;
+  overflow: hidden;
+  background: #fff;
+  box-shadow: 0 20px 60px rgba(23, 38, 31, .16);
+  .el-dialog__header { padding: 22px 24px 18px; border-bottom: 1px solid #e2e9e4; }
+  .el-dialog__title { font-size: 16px; font-weight: 600; color: #25362e; }
+  .el-dialog__headerbtn { top: 23px; right: 24px; }
+  .el-dialog__body { padding: 12px 24px 24px; max-height: 65vh; overflow-y: auto; color: #25362e; }
+  .el-button--text { color: #087854; }
+  .el-button:focus-visible { outline: 2px solid #087854; outline-offset: 3px; }
+  .discardButton { color: #b8433a; }
+}
+body.isDark .conflictDraftInbox .draftInboxTrigger { background: #25332c; border-color: #655432; color: #dfb66b; }
+body.isDark .conflictDraftDialog {
+  background: #25332c;
+  .el-dialog__header { border-color: #3e5046; }
+  .el-dialog__title, .el-dialog__body { color: #e2ebe5; }
+  .conflictDraftItem { border-color: #3e5046; }
+  .itemGroup { background: #34453b; color: #acbdb2; }
+  .el-button--text { color: #7dcdab; }
+  .discardButton { color: #ed9e96; }
+}
+@media (max-width: 600px) {
+  .conflictDraftInbox { right: 16px; bottom: max(16px, env(safe-area-inset-bottom)); }
+  .conflictDraftDialog {
+    margin-top: 8vh !important;
+    .el-dialog__header { padding: 18px 16px 14px; }
+    .el-dialog__headerbtn { top: 19px; right: 16px; }
+    .el-dialog__body { padding: 8px 16px 20px; max-height: 72vh; }
+    .itemIdentity strong { max-width: 170px; }
+  }
+}
 </style>

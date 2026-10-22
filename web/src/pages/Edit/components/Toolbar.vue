@@ -76,12 +76,14 @@
             popper-class="collabDiagPopper"
           >
             <div class="collabDiag">
-              <div class="diagHead">{{ $t('cooperate.diagTitle') }}</div>
-              <p role="alert">{{ collabFailureHint }}</p>
+              <div class="diagHead"><i class="el-icon-warning-outline" aria-hidden="true"></i><span>{{ $t('cooperate.diagTitle') }}</span></div>
+              <p class="diagExplanation" role="alert">{{ collabFailureHint }}</p>
               <details><summary>{{ $t('cooperate.diagTechnical') }}</summary>
+              <div class="diagRows">
               <div class="diagRow" v-for="row in collabDiagRows" :key="row.key">
                 <span class="k">{{ row.key }}</span>
                 <span class="v">{{ row.value }}</span>
+              </div>
               </div>
               </details>
               <el-button
@@ -6550,34 +6552,39 @@ export default {
 }
 
 .collabDiagPopper {
-  .collabDiag {
-    font-size: 12px;
-    color: #1f2937;
-  }
-  .diagHead {
-    font-size: 13px;
-    font-weight: 600;
-    margin-bottom: 8px;
-  }
-  .diagRow {
-    display: flex;
-    gap: 8px;
-    padding: 2px 0;
-    line-height: 1.45;
-    word-break: break-all;
-  }
-  .k {
-    flex: 0 0 140px;
-    color: #64748b;
-    font-family: Consolas, 'SF Mono', monospace;
-  }
-  .v {
-    flex: 1;
-    font-family: Consolas, 'SF Mono', monospace;
-  }
-  .diagCopy {
-    margin-top: 10px;
-  }
+  max-width: calc(100vw - 32px);
+  box-sizing: border-box;
+  padding: 20px;
+  border: 1px solid #dce5df;
+  border-radius: 10px;
+  box-shadow: 0 12px 36px rgba(23, 38, 31, .12);
+  .collabDiag { font-size: 13px; color: #25362e; }
+  .diagHead { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; margin-bottom: 10px; }
+  .diagHead > i { color: #a66b16; font-size: 18px; }
+  .diagExplanation { margin: 0 0 16px; color: #5c6e64; line-height: 1.7; }
+  details { border-top: 1px solid #e2e9e4; padding-top: 12px; }
+  summary { cursor: pointer; color: #5c6e64; font-size: 12px; line-height: 24px; }
+  summary:focus-visible { outline: 2px solid #087854; outline-offset: 3px; border-radius: 3px; }
+  .diagRows { max-height: 260px; overflow-y: auto; margin-top: 10px; border-radius: 6px; background: #f5f7f6; padding: 6px 10px; }
+  .diagRow { display: flex; gap: 12px; padding: 7px 0; line-height: 1.5; border-bottom: 1px solid #e2e9e4; overflow-wrap: anywhere; }
+  .diagRow:last-child { border-bottom: 0; }
+  .k { flex: 0 0 124px; color: #5c6e64; font-size: 12px; font-family: Consolas, 'SF Mono', monospace; }
+  .v { flex: 1; min-width: 0; font-size: 12px; font-family: Consolas, 'SF Mono', monospace; }
+  .diagCopy { margin-top: 14px; border-color: #dce5df; background: #fff; color: #087854; border-radius: 6px; }
+}
+body.isDark .collabDiagPopper {
+  background: #25332c; border-color: #3e5046;
+  .collabDiag { color: #e2ebe5; }
+  &[x-placement^="bottom"] .popper__arrow { border-bottom-color: #3e5046; &::after { border-bottom-color: #25332c; } }
+  &[x-placement^="top"] .popper__arrow { border-top-color: #3e5046; &::after { border-top-color: #25332c; } }
+  .diagExplanation, summary, .k { color: #acbdb2; }
+  .diagHead > i { color: #dfb66b; }
+  details, .diagRow { border-color: #3e5046; }
+  .diagRows { background: #202c25; }
+  .diagCopy { background: #25332c; border-color: #3e5046; color: #7dcdab; }
+}
+@media (max-width: 600px) {
+  .collabDiagPopper { padding: 16px; .k { flex-basis: 108px; } }
 }
 
 .workbuddyJobDialog {
@@ -7446,7 +7453,7 @@ body.isDark .collabDiagPopper .collabDiag {
 }
 
 body.isDark .collabDiagPopper .k {
-  color: rgba(255, 255, 255, 0.5);
+  color: #acbdb2;
 }
 
 body.isDark .el-select-dropdown {
