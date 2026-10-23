@@ -14,6 +14,10 @@ const MAX_EXTRACT_CHARS = Math.max(
   Number(process.env.NODE_KNOWLEDGE_MAX_EXTRACT_CHARS || 20000)
 )
 const MAX_FILENAME = 180
+const {
+  normalizeAttachmentFileName,
+  sanitizeAttachmentFileName
+} = require('../../src/utils/attachmentFileName')
 // Attachment text is handed to MCP clients in slices so a single response
 // cannot blow past their output budget.
 const DEFAULT_TEXT_SLICE_CHARS = 4000
@@ -145,10 +149,7 @@ function kindOf(fileName, mimeType) {
 }
 
 function safeFileName(name) {
-  return String(name || 'file')
-    .replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_')
-    .trim()
-    .slice(0, MAX_FILENAME) || 'file'
+  return normalizeAttachmentFileName(name || 'file', MAX_FILENAME)
 }
 
 // The upload MIME is client supplied and must not control how stored bytes are
@@ -164,7 +165,9 @@ function encodeContentDispositionFileName(fileName) {
 }
 
 function attachmentResponseHeaders(fileName) {
-  const safeName = safeFileName(fileName || 'attachment')
+  // Stored DTO names are already logical names. Do not decode percent escapes
+  // again while building a Content-Disposition header.
+  const safeName = sanitizeAttachmentFileName(fileName || 'attachment', MAX_FILENAME)
   const mimeType = trustedMimeType(safeName)
   const isHtml = mimeType === 'text/html'
   const inline =

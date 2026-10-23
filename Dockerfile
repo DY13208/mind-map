@@ -19,6 +19,7 @@ RUN cd simple-mind-map && npm ci --omit=dev --omit=optional
 FROM deps AS build
 COPY web ./web
 COPY simple-mind-map ./simple-mind-map
+COPY services/file-kb/src/shared/excelForm.js ./services/file-kb/src/shared/excelForm.js
 RUN rm -rf /src/web/node_modules/simple-mind-map \
   && cp -R /src/simple-mind-map /src/web/node_modules/simple-mind-map \
   && rm -rf /src/web/node_modules/simple-mind-map/node_modules

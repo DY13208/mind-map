@@ -8,6 +8,7 @@ const {
   EXTRACT_CONCURRENCY,
   DEFAULT_TEXT_SLICE_CHARS,
   MAX_TEXT_SLICE_CHARS,
+  MAX_FILENAME,
   DEFAULT_LIST_LIMIT,
   MAX_LIST_LIMIT,
   isAllowedFile,
@@ -15,6 +16,7 @@ const {
   safeFileName,
   kindOf
 } = require('./limits')
+const { detectLegacyAttachmentFileName } = require('../../src/utils/attachmentFileName')
 const pLimit = require('p-limit')
 const { extractBuffer } = require('./extract')
 const { fetchSafeUrl } = require('./ssrf')
@@ -139,6 +141,52 @@ async function getByHash(db, roomKey, contentHash) {
     [roomKey, contentHash]
   )
   return rowToDto(res.rows[0])
+}
+
+async function repairDedupedFileName(db, roomKey, existing, originalFileName, normalizedFileName) {
+  if (!existing || !existing.id) return existing
+  const legacy = detectLegacyAttachmentFileName(
+    existing.fileName,
+    originalFileName,
+    MAX_FILENAME
+  )
+  if (!legacy || legacy.candidate !== normalizedFileName) return existing
+
+  const updated = await db.query(
+    `update node_attachments
+     set file_name = $3, updated_at = now()
+     where room_key = $1 and id = $2 and file_name = $4
+     returning *`,
+    [roomKey, existing.id, normalizedFileName, existing.fileName]
+  )
+  if (updated.rows[0]) {
+    const repaired = await getById(db, roomKey, existing.id)
+    if (!repaired) {
+      const err = new Error('附件记录在修复文件名时已被移除，请重新上传')
+      err.statusCode = 404
+      err.code = 'ATTACHMENT_NOT_FOUND'
+      throw err
+    }
+    console.info('[nodeKnowledge] repaired deduped attachment filename', {
+      roomKey,
+      attachmentId: repaired.id,
+      reason: legacy.reason,
+      from: existing.fileName,
+      to: normalizedFileName
+    })
+    return repaired
+  }
+
+  // Another upload may have repaired this row first. Re-read after a lost
+  // compare-and-set and never overwrite a concurrently selected normal name.
+  const latest = await getById(db, roomKey, existing.id)
+  if (!latest) {
+    const err = new Error('附件记录在修复文件名时已被移除，请重新上传')
+    err.statusCode = 404
+    err.code = 'ATTACHMENT_NOT_FOUND'
+    throw err
+  }
+  return latest
 }
 
 async function listByIds(db, roomKey, ids) {
@@ -463,7 +511,8 @@ async function createFromBuffer(db, options = {}) {
   if (byteSize > MAX_BYTES) {
     throw binary.fileTooLargeError(MAX_BYTES)
   }
-  const fileName = safeFileName(options.fileName || 'file')
+  const originalFileName = String(options.fileName || 'file')
+  const fileName = safeFileName(originalFileName)
   const mimeType = normalizeMime(options.mimeType, fileName)
   if (!isAllowedFile(fileName, mimeType)) {
     const err = new Error(`不支持的文件类型：${fileName}`)
@@ -475,8 +524,15 @@ async function createFromBuffer(db, options = {}) {
   const contentHash = hasBuffer
     ? hashBuffer(options.buffer)
     : await hashFile(filePath)
-  const existing = await getByHash(db, roomKey, contentHash)
+  let existing = await getByHash(db, roomKey, contentHash)
   if (existing) {
+    existing = await repairDedupedFileName(
+      db,
+      roomKey,
+      existing,
+      originalFileName,
+      fileName
+    )
     if (options.cleanupFile) await binary.unlinkQuiet(filePath)
     if (options.forceExtract && existing.status === 'failed') {
       const buffer = await loadBuffer(options)
@@ -520,7 +576,16 @@ async function createFromBuffer(db, options = {}) {
     if (String(err && err.code) === '23505') {
       if (options.cleanupFile) await binary.unlinkQuiet(filePath)
       const raced = await getByHash(db, roomKey, contentHash)
-      if (raced) return { ...raced, deduped: true }
+      if (raced) {
+        const repaired = await repairDedupedFileName(
+          db,
+          roomKey,
+          raced,
+          originalFileName,
+          fileName
+        )
+        return { ...repaired, deduped: true }
+      }
     }
     throw err
   }

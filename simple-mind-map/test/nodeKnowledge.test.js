@@ -4,16 +4,33 @@ const limits = require('../bin/nodeKnowledge/limits')
 const ssrf = require('../bin/nodeKnowledge/ssrf')
 const extract = require('../bin/nodeKnowledge/extract')
 const store = require('../bin/nodeKnowledge/store')
+const attachmentFileName = require('../src/utils/attachmentFileName')
 
 function createMemoryDb() {
   const rows = new Map()
+  let hashMisses = 0
+  let uniqueInsertFailures = 0
+  let nextFileNameUpdateBehavior = ''
+  function removeRow(row) {
+    rows.delete(row.id)
+    rows.delete(`hash:${row.room_key}:${row.content_hash}`)
+  }
   return {
+    forceNextHashMiss() { hashMisses += 1 },
+    failNextInsertAsUniqueConflict() { uniqueInsertFailures += 1 },
+    setNextFileNameUpdateBehavior(behavior) { nextFileNameUpdateBehavior = behavior },
     async query(sql, params = []) {
       const text = String(sql).replace(/\s+/g, ' ').trim().toLowerCase()
       if (text.startsWith('create') || text.startsWith('alter')) {
         return { rows: [] }
       }
       if (text.includes('insert into node_attachments')) {
+        if (uniqueInsertFailures > 0) {
+          uniqueInsertFailures -= 1
+          const error = new Error('simulated unique conflict')
+          error.code = '23505'
+          throw error
+        }
         const row = {
           id: params[0],
           room_key: params[1],
@@ -43,6 +60,32 @@ function createMemoryDb() {
         rows.delete(`hash:${row.room_key}:${row.content_hash}`)
         return { rows: [row] }
       }
+      if (text.startsWith('update node_attachments set file_name = $3')) {
+        const row = rows.get(params[1])
+        if (!row || row.room_key !== params[0] || row.file_name !== params[3]) {
+          return { rows: [] }
+        }
+        const behavior = nextFileNameUpdateBehavior
+        nextFileNameUpdateBehavior = ''
+        if (behavior === 'error') throw new Error('simulated filename update error')
+        if (behavior === 'lose-race') {
+          row.file_name = 'concurrent-winner.html'
+          row.updated_at = new Date()
+          return { rows: [] }
+        }
+        if (behavior === 'deleted') {
+          removeRow(row)
+          return { rows: [] }
+        }
+        if (behavior === 'deleted-after-update') {
+          row.file_name = params[2]
+          removeRow(row)
+          return { rows: [row] }
+        }
+        row.file_name = params[2]
+        row.updated_at = new Date()
+        return { rows: [row] }
+      }
       if (text.includes('update node_attachments set')) {
         const row = rows.get(params[0])
         if (!row) return { rows: [] }
@@ -54,6 +97,10 @@ function createMemoryDb() {
         return { rows: [row] }
       }
       if (text.includes('where room_key = $1 and content_hash = $2')) {
+        if (hashMisses > 0) {
+          hashMisses -= 1
+          return { rows: [] }
+        }
         const row = rows.get(`hash:${params[0]}:${params[1]}`)
         return { rows: row ? [row] : [] }
       }
@@ -74,6 +121,68 @@ function createMemoryDb() {
 }
 
 async function main() {
+  const encodedLongName = '%E5%AE%B6%E6%9C%89%E8%89%AF%E7%89%A9-%E8%89%AF%E7%AD%96AI%E7%94%B5%E5%95%86%E5%B7%A5%E4%BD%9C%E6%B5%81%E6%96%B9%E6%A1%88-%E5%90%AB%E5%AE%A2%E6%88%B7%E7%97%9B%E7%82%B9%E5%AE%8C%E6%95%B4%E7%89%88.html'
+  const decodedLongName = '家有良物-良策AI电商工作流方案-含客户痛点完整版.html'
+  assert.equal(encodedLongName.length, 198)
+  assert.equal(attachmentFileName.normalizeAttachmentFileName(encodedLongName), decodedLongName)
+  const sanitizedEncodedName = attachmentFileName.sanitizeAttachmentFileName(encodedLongName)
+  assert.ok(sanitizedEncodedName.length <= 180)
+  assert.ok(sanitizedEncodedName.endsWith('.html'))
+  assert.match(sanitizedEncodedName, /%/)
+  assert.equal(attachmentFileName.normalizeAttachmentFileName('预算100%.html'), '预算100%.html')
+  assert.equal(attachmentFileName.normalizeAttachmentFileName('report%20name.pdf'), 'report%20name.pdf')
+  assert.equal(attachmentFileName.normalizeAttachmentFileName('中文%20.html'), '中文%20.html')
+  assert.equal(attachmentFileName.normalizeAttachmentFileName('%E5%AD%97%GG.html'), '%E5%AD%97%GG.html')
+  assert.deepEqual(
+    attachmentFileName.detectLegacyAttachmentFileName('%E5%AD%97.html', '字.html'),
+    { reason: 'encoded', candidate: '字.html' }
+  )
+  assert.deepEqual(
+    attachmentFileName.detectLegacyAttachmentFileName('%e5%ad%97.html', '字.html'),
+    { reason: 'encoded', candidate: '字.html' }
+  )
+  const completeEncodedLongName = encodeURIComponent(decodedLongName)
+  assert.equal(completeEncodedLongName.length, 198)
+  assert.deepEqual(
+    attachmentFileName.detectLegacyAttachmentFileName(completeEncodedLongName, decodedLongName),
+    { reason: 'encoded', candidate: decodedLongName }
+  )
+  // The old stored value could be the entire 198-character percent-encoded
+  // form even though the re-upload supplies the original 30-character name.
+  const thirtyCharacterOriginal = decodedLongName
+  const completeEncodedThirtyCharacterName = encodeURIComponent(thirtyCharacterOriginal)
+  assert.equal(thirtyCharacterOriginal.length, 30)
+  assert.equal(completeEncodedThirtyCharacterName.length, 198)
+  assert.deepEqual(
+    attachmentFileName.detectLegacyAttachmentFileName(
+      completeEncodedThirtyCharacterName,
+      thirtyCharacterOriginal
+    ),
+    { reason: 'encoded', candidate: thirtyCharacterOriginal }
+  )
+  assert.equal(
+    attachmentFileName.detectLegacyAttachmentFileName('a%2520b.txt', 'a%20b.txt'),
+    null
+  )
+  const mixedEncodingName = '%25E5%25AE%25B6%E5%AD%97.html'
+  const onceDecodedMixedName = attachmentFileName.normalizeAttachmentFileName(mixedEncodingName)
+  assert.equal(onceDecodedMixedName, '%E5%AE%B6字.html')
+  assert.equal(attachmentFileName.sanitizeAttachmentFileName(onceDecodedMixedName), onceDecodedMixedName)
+  assert.notEqual(attachmentFileName.normalizeAttachmentFileName(onceDecodedMixedName), onceDecodedMixedName)
+  const mixedNameDisposition = limits.attachmentResponseHeaders(onceDecodedMixedName)['Content-Disposition']
+  assert.equal(
+    decodeURIComponent(mixedNameDisposition.split("filename*=UTF-8''")[1]),
+    onceDecodedMixedName
+  )
+  assert.equal(limits.attachmentResponseHeaders(decodedLongName)['Content-Type'], 'text/html; charset=utf-8')
+
+  const longEmojiName = `${'文'.repeat(177)}😀.html`
+  const normalizedLongEmojiName = attachmentFileName.normalizeAttachmentFileName(longEmojiName)
+  assert.ok(normalizedLongEmojiName.length <= 180)
+  assert.ok(normalizedLongEmojiName.endsWith('.html'))
+  assert.equal(/[\uD800-\uDBFF]$/.test(normalizedLongEmojiName), false)
+  assert.doesNotThrow(() => limits.attachmentResponseHeaders('isolated-\ud800.html'))
+
   assert.equal(limits.isAllowedFile('a.txt', 'text/plain'), true)
   assert.equal(limits.isAllowedFile('a.pdf', 'application/pdf'), true)
   assert.equal(limits.isAllowedFile('a.docx', ''), true)
@@ -189,6 +298,168 @@ async function main() {
   })
   assert.equal(second.id, first.id)
   assert.equal(second.deduped, true)
+  assert.equal(second.fileName, 'a.txt')
+
+  // Simulate a legacy DB row that stored the first 180 characters of the
+  // percent-encoded name. Re-uploading its original name repairs only the
+  // shared display name and retains its ID/content/extraction state.
+  const repairDb = createMemoryDb()
+  await store.initSchema(repairDb)
+  const repairBuffer = Buffer.from('same content for legacy filename repair', 'utf8')
+  const initiallySaved = await store.createFromBuffer(repairDb, {
+    roomKey: 'room-repair', buffer: repairBuffer,
+    fileName: encodedLongName, mimeType: 'text/html', createdBy: 'tester'
+  })
+  const oldTruncatedName = encodedLongName.slice(0, 180)
+  await repairDb.query(
+    'update node_attachments set file_name = $3, updated_at = now() where room_key = $1 and id = $2 and file_name = $4 returning *',
+    ['room-repair', initiallySaved.id, oldTruncatedName, decodedLongName]
+  )
+  const repaired = await store.createFromBuffer(repairDb, {
+    roomKey: 'room-repair', buffer: repairBuffer,
+    fileName: encodedLongName, mimeType: 'text/html', createdBy: 'tester'
+  })
+  assert.equal(repaired.id, initiallySaved.id)
+  assert.equal(repaired.deduped, true)
+  assert.equal(repaired.fileName, decodedLongName)
+  assert.equal(repaired.contentHash, initiallySaved.contentHash)
+  assert.equal(repaired.extractedText, initiallySaved.extractedText)
+
+  // Repair the complete encoded form as well as historical truncated forms.
+  // This specifically covers a value longer than MAX_FILENAME in the DB.
+  const completeEncodedDb = createMemoryDb()
+  await store.initSchema(completeEncodedDb)
+  const completeEncodedBuffer = Buffer.from('complete encoded legacy filename')
+  const completeEncodedSaved = await store.createFromBuffer(completeEncodedDb, {
+    roomKey: 'room-complete-encoded',
+    buffer: completeEncodedBuffer,
+    fileName: thirtyCharacterOriginal,
+    mimeType: 'text/html',
+    createdBy: 'tester'
+  })
+  await completeEncodedDb.query(
+    'update node_attachments set file_name = $3, updated_at = now() where room_key = $1 and id = $2 and file_name = $4 returning *',
+    [
+      'room-complete-encoded',
+      completeEncodedSaved.id,
+      completeEncodedThirtyCharacterName,
+      thirtyCharacterOriginal
+    ]
+  )
+  const repairedCompleteEncoded = await store.createFromBuffer(completeEncodedDb, {
+    roomKey: 'room-complete-encoded',
+    buffer: completeEncodedBuffer,
+    fileName: thirtyCharacterOriginal,
+    mimeType: 'text/html',
+    createdBy: 'tester'
+  })
+  assert.equal(repairedCompleteEncoded.id, completeEncodedSaved.id)
+  assert.equal(repairedCompleteEncoded.fileName, thirtyCharacterOriginal)
+  assert.equal(repairedCompleteEncoded.contentHash, completeEncodedSaved.contentHash)
+
+  async function createCorruptLongNameRecord(dbForRepair, roomKey) {
+    await store.initSchema(dbForRepair)
+    const buffer = Buffer.from(`repair-cas-${roomKey}`)
+    const saved = await store.createFromBuffer(dbForRepair, {
+      roomKey,
+      buffer,
+      fileName: encodedLongName,
+      mimeType: 'text/html',
+      createdBy: 'tester'
+    })
+    const oldName = encodedLongName.slice(0, 180)
+    await dbForRepair.query(
+      'update node_attachments set file_name = $3, updated_at = now() where room_key = $1 and id = $2 and file_name = $4 returning *',
+      [roomKey, saved.id, oldName, decodedLongName]
+    )
+    return { saved, buffer, oldName }
+  }
+
+  // A lost CAS re-reads and returns the concurrently chosen current name.
+  const lostRaceDb = createMemoryDb()
+  const lostRaceRecord = await createCorruptLongNameRecord(lostRaceDb, 'room-lost-race')
+  lostRaceDb.setNextFileNameUpdateBehavior('lose-race')
+  const lostRaceResult = await store.createFromBuffer(lostRaceDb, {
+    roomKey: 'room-lost-race',
+    buffer: lostRaceRecord.buffer,
+    fileName: encodedLongName,
+    mimeType: 'text/html'
+  })
+  assert.equal(lostRaceResult.id, lostRaceRecord.saved.id)
+  assert.equal(lostRaceResult.fileName, 'concurrent-winner.html')
+  assert.equal((await store.getById(lostRaceDb, 'room-lost-race', lostRaceResult.id)).fileName, 'concurrent-winner.html')
+
+  // If the row disappears during the conditional update, do not return a stale
+  // DTO that points at a missing attachment.
+  const deletedDuringRepairDb = createMemoryDb()
+  const deletedDuringRepair = await createCorruptLongNameRecord(deletedDuringRepairDb, 'room-deleted-during-repair')
+  deletedDuringRepairDb.setNextFileNameUpdateBehavior('deleted')
+  await assert.rejects(
+    () => store.createFromBuffer(deletedDuringRepairDb, {
+      roomKey: 'room-deleted-during-repair',
+      buffer: deletedDuringRepair.buffer,
+      fileName: encodedLongName,
+      mimeType: 'text/html'
+    }),
+    err => err && err.statusCode === 404 && err.code === 'ATTACHMENT_NOT_FOUND'
+  )
+
+  // Even a successful UPDATE result must be read back; the row may have been
+  // removed between the write and that read.
+  const deletedAfterUpdateDb = createMemoryDb()
+  const deletedAfterUpdate = await createCorruptLongNameRecord(deletedAfterUpdateDb, 'room-deleted-after-update')
+  deletedAfterUpdateDb.setNextFileNameUpdateBehavior('deleted-after-update')
+  await assert.rejects(
+    () => store.createFromBuffer(deletedAfterUpdateDb, {
+      roomKey: 'room-deleted-after-update',
+      buffer: deletedAfterUpdate.buffer,
+      fileName: encodedLongName,
+      mimeType: 'text/html'
+    }),
+    err => err && err.statusCode === 404 && err.code === 'ATTACHMENT_NOT_FOUND'
+  )
+
+  // A database error during the CAS propagates and leaves the old row intact.
+  const failedUpdateDb = createMemoryDb()
+  const failedUpdate = await createCorruptLongNameRecord(failedUpdateDb, 'room-failed-update')
+  failedUpdateDb.setNextFileNameUpdateBehavior('error')
+  await assert.rejects(
+    () => store.createFromBuffer(failedUpdateDb, {
+      roomKey: 'room-failed-update',
+      buffer: failedUpdate.buffer,
+      fileName: encodedLongName,
+      mimeType: 'text/html'
+    }),
+    /simulated filename update error/
+  )
+  assert.equal(
+    (await store.getById(failedUpdateDb, 'room-failed-update', failedUpdate.saved.id)).fileName,
+    failedUpdate.oldName
+  )
+
+  // Exercise the INSERT unique-conflict branch: the first hash lookup misses,
+  // another writer wins, and the fallback lookup repairs its legacy name.
+  const uniqueRaceDb = createMemoryDb()
+  const uniqueRace = await createCorruptLongNameRecord(uniqueRaceDb, 'room-unique-race')
+  uniqueRaceDb.forceNextHashMiss()
+  uniqueRaceDb.failNextInsertAsUniqueConflict()
+  const uniqueRaceResult = await store.createFromBuffer(uniqueRaceDb, {
+    roomKey: 'room-unique-race',
+    buffer: uniqueRace.buffer,
+    fileName: encodedLongName,
+    mimeType: 'text/html'
+  })
+  assert.equal(uniqueRaceResult.id, uniqueRace.saved.id)
+  assert.equal(uniqueRaceResult.deduped, true)
+  assert.equal(uniqueRaceResult.fileName, decodedLongName)
+
+  // Normal shared names are stable even when identical bytes arrive under a
+  // different name; only a provable legacy encoding/truncation is repairable.
+  const ordinaryDedup = await store.createFromBuffer(repairDb, {
+    roomKey: 'room-repair', buffer: repairBuffer,
+    fileName: 'renamed.html', mimeType: 'text/html', createdBy: 'tester'
+  })
+  assert.equal(ordinaryDedup.fileName, decodedLongName)
 
   const removed = await store.removeById(db, 'room-demo', first.id, {
     nodeUid: 'node-1'
@@ -273,6 +544,32 @@ async function main() {
   assert.equal(streamed.deduped, false)
   assert.equal(streamed.fileName, 'stream.txt')
   assert.match(streamed.extractedText, /streamed attachment/)
+
+  const entryName = '家有良物-良策AI电商工作流方案-含客户痛点完整版.html'
+  const encodedEntryName = encodeURIComponent(entryName)
+  const htmlPayload = Buffer.from('<html><body>encoded filename entry regression</body></html>')
+  const binaryEntry = Readable.from([htmlPayload])
+  binaryEntry.headers = {
+    'content-type': 'application/octet-stream',
+    'content-length': String(htmlPayload.length),
+    // Header encoding is transport encoding; the inner name remains the same
+    // percent-encoded logical input used by TUS/JSON/MCP clients.
+    'x-mind-file-name': encodeURIComponent(encodedEntryName),
+    'x-mind-mime-type': 'text/html'
+  }
+  const binaryNamed = await store.ingestBinaryRequest(db, 'room-binary-name', binaryEntry)
+  assert.equal(binaryNamed.fileName, entryName)
+  const jsonNamed = await store.ingestUpload(db, 'room-json-name', {
+    fileName: encodedEntryName, mimeType: 'text/html', contentBase64: htmlPayload.toString('base64')
+  })
+  assert.equal(jsonNamed.fileName, entryName)
+  const { resolveAttachmentUploadInput, attachmentMetaForNode } = await import('../bin/mcpAttachmentUpload.mjs')
+  const mcpInput = await resolveAttachmentUploadInput({
+    file_name: encodedEntryName, mime_type: 'text/html', content_base64: htmlPayload.toString('base64')
+  })
+  const mcpNamed = await store.ingestUpload(db, 'room-mcp-name', mcpInput)
+  assert.equal(mcpNamed.fileName, entryName)
+  assert.equal(attachmentMetaForNode(mcpNamed).attachmentName, entryName)
 
   const ensured = await store.ensureSources(db, 'room-demo', [
     { attachmentId: replacement.id, name: 'a.txt' },

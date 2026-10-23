@@ -53,6 +53,8 @@ import {
   patchDelta,
   publicNodeData,
   readFieldVersions,
+  fieldGroupOf,
+  keysForGroups,
   FV_KEY
 } from '../utils/fieldMerge'
 import { createCollaborationStore } from '../utils/collaborationStore'
@@ -614,6 +616,8 @@ class Cooperate {
     this.ackedUids = new Set()
     this.pendingUids = new Set()
     this._pendingTextUids = new Set()
+    this._pendingAttachmentPatchByUid = new Map()
+    this._attachmentPatchIntentSeq = 0
     this._httpTextFlushAfterRender = false
     this._localIntentEpochByUid = new Map()
     this._localIntentSeq = 0
@@ -1671,6 +1675,7 @@ class Cooperate {
     this.ackedUids && this.ackedUids.clear()
     this.pendingUids && this.pendingUids.clear()
     this.httpTextFlushQueued = false
+    this._pendingAttachmentPatchByUid && this._pendingAttachmentPatchByUid.clear()
     this.deletedUids && this.deletedUids.clear()
     this.abandonedInsertUids && this.abandonedInsertUids.clear()
     this.recentHttpDeleted && this.recentHttpDeleted.clear()
@@ -2131,7 +2136,25 @@ class Cooperate {
 
   onAfterExecCommand(name) {
     if (this.collabV2Adapter && !this.isApplyingRemote && !this.isSetData && !this.httpReplacing) {
-      this.recordLocalIntentUids(this.commandIntentUids(name, Array.prototype.slice.call(arguments, 1)))
+      const commandUids = this.commandIntentUids(name, Array.prototype.slice.call(arguments, 1))
+      this.recordLocalIntentUids(commandUids)
+    }
+    if (
+      this.httpCollabMode &&
+      !this.isApplyingRemote &&
+      !this.isSetData &&
+      !this.httpReplacing &&
+      name === 'SET_NODE_ATTACHMENT'
+    ) {
+      if (!this._pendingAttachmentPatchByUid) this._pendingAttachmentPatchByUid = new Map()
+      if (!this._pendingTextUids) this._pendingTextUids = new Set()
+      const commandUids = this.commandIntentUids(name, Array.prototype.slice.call(arguments, 1))
+      commandUids.forEach(uid => {
+        this._attachmentPatchIntentSeq = (this._attachmentPatchIntentSeq || 0) + 1
+        this._pendingAttachmentPatchByUid.set(uid, this._attachmentPatchIntentSeq)
+        this._pendingTextUids.add(uid)
+      })
+      if (commandUids.length) this.scheduleHttpTextSync()
     }
     if (this.collabV2Adapter && (name === 'SET_NODE_TEXT' || name === 'SET_NODE_NOTE')) {
       const node = arguments[1]
@@ -4719,6 +4742,8 @@ class Cooperate {
     this.hydrateFailedUids = new Set()
     this.hydrateInflight = new Map()
     this.lastPushed = {}
+    this._pendingAttachmentPatchByUid = new Map()
+    this._attachmentPatchIntentSeq = 0
     this.ackedUids = new Set()
     this.pendingUids = new Set()
     this.resetLocalIntentState()
@@ -5221,6 +5246,7 @@ class Cooperate {
     this.hydrateFailedUids = new Set()
     this.hydrateInflight = new Map()
     this.lastPushed = {}
+    this._pendingAttachmentPatchByUid && this._pendingAttachmentPatchByUid.clear()
     this.ackedUids = new Set()
     this.pendingUids = new Set()
     this.recentPushed = new Map()
@@ -5434,6 +5460,7 @@ class Cooperate {
 
   afterHttpReplace(result, treeOverride) {
     this.lastPushed = {}
+    this._pendingAttachmentPatchByUid && this._pendingAttachmentPatchByUid.clear()
     this.ackedUids = new Set()
     this.pendingUids = new Set()
     this.recentPushed = new Map()
@@ -5467,6 +5494,7 @@ class Cooperate {
 
   resyncHttpBaseline(tree) {
     this.lastPushed = {}
+    this._pendingAttachmentPatchByUid && this._pendingAttachmentPatchByUid.clear()
     this.ackedUids = new Set()
     this.pendingUids = new Set()
     this.recentPushed = new Map()
@@ -7658,7 +7686,16 @@ class Cooperate {
 
   hasUnsyncedLocalText(node) {
     if (!node) return false
-    return !!this.nodePatchPayload(node, { onlyChanged: true })
+    const uid = node.getData && node.getData('uid')
+    const attachmentPatchPending =
+      uid && this._pendingAttachmentPatchByUid &&
+      this._pendingAttachmentPatchByUid.has(uid)
+    return !!this.nodePatchPayload(node, {
+      onlyChanged: true,
+      forceGroups: attachmentPatchPending
+        ? [fieldGroupOf('attachmentId')]
+        : undefined
+    })
   }
 
   isHttpTextRendererReady() {
@@ -7699,6 +7736,13 @@ class Cooperate {
       const node = renderer.findNodeByUid(uid)
       if (node && this.hasUnsyncedLocalText(node)) byUid.set(uid, node)
     })
+    if (this._pendingAttachmentPatchByUid) {
+      this._pendingAttachmentPatchByUid.forEach((_revision, uid) => {
+        if (byUid.has(uid) || skipUid(uid)) return
+        const node = renderer.findNodeByUid(uid)
+        if (node && this.hasUnsyncedLocalText(node)) byUid.set(uid, node)
+      })
+    }
     return Array.from(byUid.values())
   }
 
@@ -7830,6 +7874,15 @@ class Cooperate {
     Object.keys(delta).forEach(field => {
       if (delta[field] === undefined) delete delta[field]
     })
+    if (Array.isArray(options.forceGroups) && options.forceGroups.length) {
+      keysForGroups(options.forceGroups).forEach(key => {
+        const value = data[key]
+        delta[key] =
+          value === undefined || value === null || value === ''
+            ? null
+            : collabGeneralization.snapshotValue(value)
+      })
+    }
     return Object.keys(delta).length ? delta : null
   }
 
@@ -7928,7 +7981,14 @@ class Cooperate {
       // them first returns NODE_DELETED and would drop the orphan incorrectly.
       if (!this.isPersistAcked(uid)) return
       const full = this.nodePatchPayload(node)
-      const delta = this.nodePatchPayload(node, { onlyChanged: true })
+      const attachmentPatchRevision = this._pendingAttachmentPatchByUid &&
+        this._pendingAttachmentPatchByUid.get(uid)
+      const delta = this.nodePatchPayload(node, {
+        onlyChanged: true,
+        forceGroups: attachmentPatchRevision
+          ? [fieldGroupOf('attachmentId')]
+          : undefined
+      })
       if (!delta) return
       // Skip a payload that is already in flight unchanged. Relying only on the
       // pending Set is not enough: an active node can be re-collected from
@@ -7937,7 +7997,7 @@ class Cooperate {
       if (this._inflightTextKeys && this._inflightTextKeys.get(uid) === deltaKey) return
       if(this.fillRepairGuards?.has(uid))delta.expected=this.fillRepairGuards.get(uid)
       const snap = JSON.stringify(full)
-      items.push({ uid, node, target, full, delta, snap, deltaKey })
+      items.push({ uid, node, target, full, delta, snap, deltaKey, attachmentPatchRevision })
     })
     if (!this._inflightTextKeys) this._inflightTextKeys = new Map()
     items.forEach(item => this._inflightTextKeys.set(item.uid, item.deltaKey))
@@ -7961,6 +8021,12 @@ class Cooperate {
             note: item.full.note,
             full: collabGeneralization.snapshotValue(item.full),
             snap: item.snap
+          }
+          if (
+            item.attachmentPatchRevision &&
+            this._pendingAttachmentPatchByUid.get(item.uid) === item.attachmentPatchRevision
+          ) {
+            this._pendingAttachmentPatchByUid.delete(item.uid)
           }
         })
         return true
@@ -7988,6 +8054,12 @@ class Cooperate {
               note: full.note,
               full: collabGeneralization.snapshotValue(full),
               snap
+            }
+            if (
+              item.attachmentPatchRevision &&
+              this._pendingAttachmentPatchByUid.get(uid) === item.attachmentPatchRevision
+            ) {
+              this._pendingAttachmentPatchByUid.delete(uid)
             }
           })
           .catch(err => {
@@ -8750,6 +8822,7 @@ class Cooperate {
   forgetHttpUid(uid) {
     if (!uid) return
     delete this.lastPushed[uid]
+    if (this._pendingAttachmentPatchByUid) this._pendingAttachmentPatchByUid.delete(uid)
     if (this.ackedUids) this.ackedUids.delete(uid)
     if (this.pendingUids) this.pendingUids.delete(uid)
     this.recentPushed.delete(uid)
