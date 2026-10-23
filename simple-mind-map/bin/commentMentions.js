@@ -76,12 +76,26 @@ function rowsForComment(nodeUid, comment) {
 }
 
 // 从整图快照抽取所有仍有效的提及
+function textMentionComments(data, nodeUid) {
+  const text = stripHtml(data && data.text)
+  const seen = new Set()
+  return (Array.isArray(data && data.textMentions) ? data.textMentions : []).filter(m => {
+    if (!m || !m.id || !m.userId || !m.name || seen.has(m.userId)) return false
+    const escaped = String(m.name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    if (!new RegExp('@' + escaped + '(?=$|[\\s，。！？、;；,.:：!?)）])').test(text)) return false
+    seen.add(m.userId)
+    return true
+  }).map(m => ({ id: `node-text:${nodeUid}:${m.id}`, content: text, time: Number(m.time) || 0,
+    userId: m.authorId || '', userName: m.authorName || '', avatar: m.authorAvatar || '',
+    mentions: [{ userId: String(m.userId), name: String(m.name) }], source: 'node_text' }))
+}
+
 function extractFromNodes(nodes) {
   const rows = []
   for (const uid of Object.keys(nodes || {})) {
     const node = nodes[uid]
     const data = (node && node.data) || {}
-    if (!Array.isArray(data.comments) || !data.comments.length) continue
+    for (const c of textMentionComments(data, data.uid || uid)) rows.push(...rowsForComment(data.uid || uid, c))
     for (const c of liveComments(data.comments)) rows.push(...rowsForComment(data.uid || uid, c))
   }
   return rows
@@ -300,7 +314,7 @@ async function syncRoom(pool, roomKey, targetVersion, loadSnapshot) {
     if (!full) {
       const res = await client.query(
         `select version, operation_type,
-                case when payload::text like '%"comments"%' then payload else null end as payload
+                case when payload::text like '%"comments"%' or payload::text like '%"textMentions"%' then payload else null end as payload
            from room_operations
           where room_key = $1 and version > $2 and version <= $3
           order by version`,
@@ -309,6 +323,8 @@ async function syncRoom(pool, roomKey, targetVersion, loadSnapshot) {
       ops = res.rows
       // 有缺口（已归档 / 未落库）或整图类操作 → 整房重建更安全
       if (ops.length !== target - from || ops.some(op => FULL_REBUILD_OP_RE.test(String(op.operation_type || '')))) full = true
+      // Text mentions are indexed from the committed snapshot, including removals.
+      if (ops.some(op => op.payload && JSON.stringify(op.payload).includes('"textMentions"'))) full = true
     }
     if (full) {
       const v = await rebuildRoom(client, roomKey, loadSnapshot)
@@ -498,7 +514,9 @@ async function listMentions(pool, req, options = {}, deps = {}) {
       const nodes = loaded && loaded.obj
       const node = nodes && nodes[row.node_uid]
       const data = (node && node.data) || null
-      const comment = data && liveComments(data.comments).find(c => c.id === row.comment_id)
+      const comment = data && (String(row.comment_id).startsWith('node-text:')
+        ? textMentionComments(data, row.node_uid).find(c => c.id === row.comment_id)
+        : liveComments(data.comments).find(c => c.id === row.comment_id))
       if (!comment) {
         if (!stale.has(row.room_key)) stale.set(row.room_key, [])
         stale.get(row.room_key).push(row.comment_id)
@@ -527,6 +545,7 @@ async function listMentions(pool, req, options = {}, deps = {}) {
     return {
       id: row.comment_id,
       comment_id: row.comment_id,
+      source: comment.source || 'comment',
       room_key: row.room_key,
       room_name: title || '未命名脑图',
       node_uid: row.node_uid,
@@ -667,6 +686,7 @@ module.exports = {
   initSchema,
   mentionKey,
   rowsForComment,
+  textMentionComments,
   extractFromNodes,
   extractFromPayload,
   identityOf,

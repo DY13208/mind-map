@@ -69,7 +69,7 @@ export function mentionRoute(item) {
     query: {
       room: String((item && item.room_key) || ''),
       focus: String((item && item.node_uid) || ''),
-      comment: String((item && (item.comment_id || item.id)) || '')
+      ...(item && (item.source === 'node_text' || String(item.comment_id || item.id || '').startsWith('node-text:')) ? {} : { comment: String((item && (item.comment_id || item.id)) || '') })
     }
   }
 }

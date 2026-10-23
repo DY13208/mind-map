@@ -94,7 +94,7 @@
       <div v-else-if="readonly" class="ncEmpty">暂无评论</div>
 
       <div v-if="!readonly" class="ncComposer">
-        <div v-if="mentionOpen && mentionCandidates.length" class="ncSuggest" data-testid="comment-mention-list">
+        <div v-if="mentionOpen" class="ncSuggest" data-testid="comment-mention-list" style="max-height: 280px; overflow-y: auto">
           <div
             v-for="(m, i) in mentionCandidates"
             :key="m.userId || m.name"
@@ -107,7 +107,12 @@
               <template v-else>{{ initial(m.name) }}</template>
             </span>
             <span>{{ m.name }}</span>
+            <small>{{ m.userId }}</small>
           </div>
+          <div v-if="mentionLoading" class="ncSuggestItem">正在加载人员…</div>
+          <div v-else-if="mentionError" class="ncSuggestItem" @mousedown.prevent="searchDirectory(false)">{{ mentionError }}，点击重试</div>
+          <div v-else-if="!mentionCandidates.length" class="ncSuggestItem">没有匹配人员</div>
+          <div v-if="mentionNextOffset !== null && !mentionLoading" class="ncSuggestItem" @mousedown.prevent="searchDirectory(true)">加载更多人员</div>
         </div>
         <div v-if="emojiOpen" class="ncEmojiPanel" data-testid="comment-emoji-panel">
           <span v-for="e in emojis" :key="e" class="ncEmoji" @mousedown.prevent="insertText(e)">{{ e }}</span>
@@ -151,6 +156,7 @@ import { currentCommentUser } from '@/utils/commentUser'
 import { markCommentsRead, collectMentions, splitMentions } from '@/utils/commentRead'
 import { roomFromLocation } from '@/utils/roomLocation'
 import shareService from '@/services/shareService'
+import { searchMentionUsers } from '@/services/mentionUsers'
 import { mergeComments, liveComments } from 'simple-mind-map/src/utils/nodeComment'
 
 const CARD_WIDTH = 320
@@ -161,7 +167,6 @@ const CLOSE_EVENTS = ['node_dragging', 'mode_change', 'node_contextmenu']
 const REPOSITION_EVENTS = ['scale', 'translate']
 const AVATAR_COLORS = ['#5b8ff9', '#5ad8a6', '#f6bd16', '#e8684a', '#6dc8ec', '#9270ca', '#ff9d4d', '#269a99']
 const EMOJIS = ['👍', '👏', '🎉', '😀', '😂', '🤔', '😅', '🙏', '💪', '✅', '❌', '❤️', '🔥', '👀', '📌', '⚠️']
-const memberCache = {}
 
 function isImage(value) {
   const url = String(value || '').trim()
@@ -197,6 +202,10 @@ export default {
       emojiOpen: false,
       emojis: EMOJIS,
       members: [],
+      directoryMembers: [],
+      mentionLoading: false,
+      mentionError: '',
+      mentionNextOffset: null,
       mentionOpen: false,
       mentionQuery: '',
       mentionIndex: 0,
@@ -243,14 +252,19 @@ export default {
         map.set(key, { userId: String(userId || ''), name: String(name), avatar: String(avatar || '') })
       }
       this.members.forEach(m => add(m.userId || m.id, m.name, m.avatar))
+      this.directoryMembers.forEach(m => add(m.userId, m.name, m.avatar))
       this.comments.forEach(c => add(c.userId, c.userName, c.avatar))
       const me = this.currentUser.userId
       return Array.from(map.values()).filter(m => !me || m.userId !== me)
     },
     mentionCandidates() {
       const q = this.mentionQuery.toLowerCase()
-      return this.mentionPool.filter(m => !q || m.name.toLowerCase().includes(q)).slice(0, 8)
+      return this.mentionPool.filter(m => !q || m.name.toLowerCase().includes(q) || m.userId.toLowerCase().includes(q))
     }
+  },
+  watch: {
+    mentionQuery() { this.queueDirectorySearch() },
+    mentionOpen(value) { if (value) this.queueDirectorySearch(); else { clearTimeout(this._mentionTimer); this._mentionSearchId = (this._mentionSearchId || 0) + 1 } }
   },
   created() {
     this.$bus.$on('node_commentClick', this.onMarkerClick)
@@ -270,6 +284,8 @@ export default {
     if (typeof window !== 'undefined') window.addEventListener('resize', this.reposition)
   },
   beforeDestroy() {
+    clearTimeout(this._mentionTimer)
+    this._mentionSearchId = (this._mentionSearchId || 0) + 1
     this.$bus.$off('node_commentClick', this.onMarkerClick)
     this.$bus.$off('showNodeComment', this.open)
     this.$bus.$off('node_tree_render_end', this.syncFromNode)
@@ -372,17 +388,32 @@ export default {
     async loadMembers() {
       const roomKey = this.roomKey
       if (!roomKey || this.readonly) return
-      if (memberCache[roomKey]) {
-        this.members = memberCache[roomKey]
-        return
-      }
       try {
         const list = await shareService.getMembers(roomKey)
-        memberCache[roomKey] = Array.isArray(list) ? list : []
-        this.members = memberCache[roomKey]
+        if (roomKey === this.roomKey) this.members = Array.isArray(list) ? list : []
       } catch (e) {
         this.members = []
       }
+    },
+    queueDirectorySearch() {
+      clearTimeout(this._mentionTimer)
+      this._mentionSearchId = (this._mentionSearchId || 0) + 1
+      this.directoryMembers = []
+      this.mentionNextOffset = null
+      if (this.mentionOpen) this._mentionTimer = setTimeout(() => this.searchDirectory(false), 150)
+    },
+    async searchDirectory(more) {
+      const id = this._mentionSearchId = (this._mentionSearchId || 0) + 1
+      const room = this.roomKey
+      this.mentionLoading = true
+      this.mentionError = ''
+      try {
+        const result = await searchMentionUsers(this.mentionQuery, more ? this.mentionNextOffset : 0)
+        if (id !== this._mentionSearchId || room !== this.roomKey || !this.mentionOpen) return
+        this.directoryMembers = more ? this.directoryMembers.concat(result.list) : result.list
+        this.mentionNextOffset = result.nextOffset
+      } catch (e) { if (id === this._mentionSearchId) this.mentionError = '人员加载失败' }
+      finally { if (id === this._mentionSearchId) this.mentionLoading = false }
     },
     collectThreads() {
       const mindMap = this.node && this.node.mindMap

@@ -869,6 +869,7 @@ const NODE_DATA_PATCH_KEYS = [
   'formula',
   'attachmentUrl',
   'knowledgeFiles',
+  'textMentions',
   'attachmentName',
   'attachmentId',
   'attachmentMimeType',

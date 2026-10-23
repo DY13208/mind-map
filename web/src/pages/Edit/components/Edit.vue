@@ -64,6 +64,7 @@
     <NodeAttachmentPreview v-if="mindMap"></NodeAttachmentPreview>
     <NodeHyperlinkPopover v-if="mindMap"></NodeHyperlinkPopover>
     <NodeCommentCard v-if="mindMap"></NodeCommentCard>
+    <NodeTextMention v-if="mindMap" :mind-map="mindMap" :readonly="isReadonly" />
     <LeaveIntentTrigger v-if="mindMap" :mindMap="mindMap" />
     <CooperateDialog :mindMap="mindMap"></CooperateDialog>
     <ConflictDraftInbox v-if="mindMap" :mindMap="mindMap"></ConflictDraftInbox>
@@ -173,6 +174,7 @@ import NodeAttachment from './NodeAttachment.vue'
 import NodeAttachmentPreview from './NodeAttachmentPreview.vue'
 import NodeHyperlinkPopover from './NodeHyperlinkPopover.vue'
 import NodeCommentCard from './NodeCommentCard.vue'
+import NodeTextMention from './NodeTextMention.vue'
 import LeaveIntentTrigger from './LeaveIntentTrigger.vue'
 import { isNodeCommentUnread } from '@/utils/commentRead'
 import { currentCommentUser } from '@/utils/commentUser'
@@ -254,6 +256,7 @@ export default {
     NodeAttachmentPreview,
     NodeHyperlinkPopover,
     NodeCommentCard,
+    NodeTextMention,
     LeaveIntentTrigger,
     CooperateDialog,
     ConflictDraftInbox,

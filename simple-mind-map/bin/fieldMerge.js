@@ -8,6 +8,7 @@ const FIELD_GROUPS = {
   hyperlink: ['hyperlink', 'hyperlinkTitle'],
   mapRef: ['mapRef'],
   knowledgeFiles: ['knowledgeFiles'],
+  textMentions: ['textMentions'],
   outerFrame: ['outerFrame'],
   generalization: ['generalization'],
   associativeLine: [
