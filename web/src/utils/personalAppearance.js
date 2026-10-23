@@ -10,6 +10,7 @@ export function bindPersonalAppearance(mindMap, roomKey, userId, getState, saveS
   let stopped = false
   let dirty = false
   let timer = null
+  let fetchId = 0
   const cache = () => {
     try { localStorage.setItem(key, JSON.stringify(state)) } catch (err) {}
   }
@@ -43,6 +44,7 @@ export function bindPersonalAppearance(mindMap, roomKey, userId, getState, saveS
   const changed = () => {
     if (stopped || applying || (mindMap.cooperate && mindMap.cooperate.isApplyingRemote)) return
     dirty = true
+    fetchId += 1
     state = copy({
       theme: mindMap.getTheme(),
       themeConfig: mindMap.getCustomThemeConfig() || {},
@@ -56,9 +58,10 @@ export function bindPersonalAppearance(mindMap, roomKey, userId, getState, saveS
   events.forEach(event => mindMap.on(event, changed))
   mindMap.on('node_tree_render_end', restore)
   restore()
+  const openedFetch = ++fetchId
   getState(roomKey).then(result => {
     // A delayed server response must not undo an edit made while it was loading.
-    if (stopped || dirty) return
+    if (stopped || dirty || openedFetch !== fetchId) return
     const remote = result && result.state || {}
     for (const field of ['theme', 'themeConfig', 'layout']) {
       if (Object.prototype.hasOwnProperty.call(remote, field)) state[field] = copy(remote[field])

@@ -343,6 +343,12 @@ import {
   loadPersonalExpandState,
   savePersonalExpandState
 } from '@/utils/personalExpandState'
+import {
+  copyExpandState,
+  mergeIncomingExpand,
+  shouldAcceptRemoteViewState,
+  shouldPersistExpandChange
+} from '@/utils/personalViewPolicy'
 import { bindPersonalAppearance } from '@/utils/personalAppearance'
 import { applyRoomAccess, fileRoleLabelKey, memberRoleLabelKey } from '@/utils/roomAcl'
 import { createCollaborationAdapter } from 'simple-mind-map/bin/collabV2/adapter'
@@ -484,6 +490,9 @@ export default {
       personalExpandOnCommand: null,
       personalExpandOnRender: null,
       personalExpandOnChange: null,
+      personalExpandFetchId: 0,
+      personalExpandOverviewFrozen: false,
+      personalExpandOverviewSnapshot: null,
       largeMapInitialOverview: false
     }
   },
@@ -1176,9 +1185,12 @@ export default {
       let locallyChanged = false
       let localRevision = 0
       const restoreGate = createExpandRestoreGate()
+      this.personalExpandFetchId += 1
       const persist = () => {
+        if (this.personalExpandOverviewFrozen) return
         locallyChanged = true
         localRevision += 1
+        this.personalExpandFetchId += 1
         if (!this.personalExpandState) return
         savePersonalExpandState(roomKey, userId, this.personalExpandState)
         clearTimeout(this.personalExpandRemoteTimer)
@@ -1190,6 +1202,7 @@ export default {
         }, 350)
       }
       const snapshotNow = () => {
+        if (this.personalExpandOverviewFrozen) return
         if (!this.personalExpandState || !this.mindMap) return
         this.personalExpandState = collectPersonalExpandState(
           this.mindMap,
@@ -1198,6 +1211,7 @@ export default {
         persist()
       }
       this.personalExpandOnCommand = (name, ...args) => {
+        if (this.personalExpandOverviewFrozen) return
         if (name === 'SET_NODE_EXPAND') {
           const node = args[0]
           const uid =
@@ -1236,7 +1250,17 @@ export default {
           }
         }
       }
-      this.personalExpandOnChange = snapshotNow
+      this.personalExpandOnChange = (meta = {}) => {
+        if (
+          !shouldPersistExpandChange(meta, {
+            overviewFrozen: this.personalExpandOverviewFrozen,
+            applying: this.personalExpandApplying
+          })
+        ) {
+          return
+        }
+        snapshotNow()
+      }
       this.mindMap.on('personal_expand_change', this.personalExpandOnChange)
       this.personalExpandOnRender = (meta = {}) => {
         if (this.largeMapInitialOverview || this.personalExpandApplying || !this.mindMap) return
@@ -1267,19 +1291,44 @@ export default {
       this.mindMap.on('node_tree_render_end', this.personalExpandOnRender)
       // setData 的首次渲染可能尚未开始，先尝试一次，后续由 render_end 补齐。
       this.personalExpandOnRender()
+      const fetchId = this.personalExpandFetchId
       getPersonalViewState(roomKey)
         .then(result => {
-          if (this.personalExpandRoomKey !== roomKey || locallyChanged) return
+          if (
+            !shouldAcceptRemoteViewState({
+              roomKey,
+              boundRoomKey: this.personalExpandRoomKey,
+              fetchId,
+              latestFetchId: this.personalExpandFetchId,
+              locallyChanged
+            })
+          ) {
+            return
+          }
           const remote =
             result && result.state && result.state.expand
               ? result.state.expand
               : {}
-          this.personalExpandState = {
-            ...this.personalExpandState,
-            ...remote
-          }
+          this.personalExpandState = mergeIncomingExpand(
+            this.personalExpandState,
+            remote,
+            {
+              roomKey,
+              boundRoomKey: this.personalExpandRoomKey,
+              fetchId,
+              latestFetchId: this.personalExpandFetchId,
+              locallyChanged
+            }
+          )
           savePersonalExpandState(roomKey, userId, this.personalExpandState)
-          if (!this.largeMapInitialOverview) this.restorePersonalExpandState()
+          if (this.personalExpandOverviewFrozen) {
+            this.personalExpandOverviewSnapshot = copyExpandState(
+              this.personalExpandState
+            )
+          }
+          if (!this.largeMapInitialOverview && !this.personalExpandOverviewFrozen) {
+            this.restorePersonalExpandState()
+          }
         })
         .catch(() => {})
     },
@@ -1335,13 +1384,17 @@ export default {
         this.personalExpandRemoteTimer = null
       }
       if (this.personalExpandState && this.personalExpandRoomKey) {
+        const toSave =
+          this.personalExpandOverviewFrozen && this.personalExpandOverviewSnapshot
+            ? this.personalExpandOverviewSnapshot
+            : this.personalExpandState
         savePersonalExpandState(
           this.personalExpandRoomKey,
           this.userId || 'local',
-          this.personalExpandState
+          toSave
         )
         savePersonalViewState(this.personalExpandRoomKey, {
-          expand: this.personalExpandState
+          expand: toSave
         }).catch(() => {})
       }
       if (this.mindMap) {
@@ -1361,6 +1414,8 @@ export default {
       this.personalExpandOnCommand = null
       this.personalExpandOnRender = null
       this.personalExpandApplying = false
+      this.personalExpandOverviewFrozen = false
+      this.personalExpandOverviewSnapshot = null
     },
 
     async onRoomRouteChange() {
@@ -2738,6 +2793,10 @@ export default {
         }
         let tree = preview.tree
         if (tree && this.largeMapInitialOverview) {
+          this.personalExpandOverviewFrozen = true
+          this.personalExpandOverviewSnapshot = copyExpandState(
+            this.personalExpandState
+          )
           tree.data = tree.data || {}
           tree.data.expand = true
           stubImportedTree(tree, {
@@ -2772,6 +2831,12 @@ export default {
         if (this.mindMap.renderer && this.mindMap.renderer.cancelRender) {
           this.mindMap.renderer.cancelRender()
         }
+        if (this.personalExpandOverviewSnapshot) {
+          this.personalExpandState = copyExpandState(
+            this.personalExpandOverviewSnapshot
+          )
+        }
+        this.personalExpandOverviewFrozen = false
         throw new Error('脑图概览绘制失败，请重试')
       }
       if (firstPaintReady && this.largeMapInitialOverview && this.mindMap.view) {
@@ -2796,8 +2861,14 @@ export default {
       if (!this.largeMapInitialOverview && typeof cooperate.hydrateRoomMetadata === 'function') {
         cooperate.hydrateRoomMetadata(preview)
       }
-      // 概览只用于首次绘制；完成后恢复个人展开偏好，包括按需加载后代。
+      // 概览只用于首次绘制；完成后恢复进入前的个人展开偏好。
       // 保持此标记会永久跳过展开状态和上次画布位置的恢复。
+      if (this.personalExpandOverviewSnapshot) {
+        this.personalExpandState = copyExpandState(
+          this.personalExpandOverviewSnapshot
+        )
+      }
+      this.personalExpandOverviewFrozen = false
       this.largeMapInitialOverview = false
       await this.restorePersonalExpandState()
       if (attemptId !== this._openAttemptId) return false

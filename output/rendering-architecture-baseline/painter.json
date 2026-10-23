@@ -1,0 +1,104 @@
+{
+  "startedAt": "2026-10-23T03:33:29.919Z",
+  "commit": "512953b5955b1af4bfc020c42c7c54ee0b8862e4",
+  "browser": "153.0.8010.12",
+  "node": "v22.23.1",
+  "sizes": [],
+  "sizesResult": [],
+  "layouts": [],
+  "rich": [],
+  "memory": null,
+  "profile": null,
+  "painter": [
+    {
+      "withPainter": false,
+      "initMs": 45117,
+      "idle": {
+        "n": 3,
+        "p50": 281.4,
+        "p95": 717.5,
+        "max": 717.5
+      },
+      "layout": {
+        "n": 3,
+        "p50": 108,
+        "p95": 461.5,
+        "max": 461.5
+      },
+      "paintTree": {
+        "n": 3,
+        "p50": 103.5,
+        "p95": 160.4,
+        "max": 160.4
+      }
+    },
+    {
+      "withPainter": true,
+      "initMs": 37563,
+      "idle": {
+        "n": 3,
+        "p50": 179.6,
+        "p95": 186.2,
+        "max": 186.2
+      },
+      "layout": {
+        "n": 3,
+        "p50": 42.8,
+        "p95": 59.3,
+        "max": 59.3
+      },
+      "paintTree": {
+        "n": 3,
+        "p50": 61.2,
+        "p95": 64.8,
+        "max": 64.8
+      }
+    },
+    {
+      "withPainter": false,
+      "initMs": 37343,
+      "idle": {
+        "n": 3,
+        "p50": 169.6,
+        "p95": 226.4,
+        "max": 226.4
+      },
+      "layout": {
+        "n": 3,
+        "p50": 48.1,
+        "p95": 65.3,
+        "max": 65.3
+      },
+      "paintTree": {
+        "n": 3,
+        "p50": 59.9,
+        "p95": 90.4,
+        "max": 90.4
+      }
+    },
+    {
+      "withPainter": true,
+      "initMs": 32196,
+      "idle": {
+        "n": 3,
+        "p50": 204.1,
+        "p95": 243.1,
+        "max": 243.1
+      },
+      "layout": {
+        "n": 3,
+        "p50": 59.4,
+        "p95": 68.5,
+        "max": 68.5
+      },
+      "paintTree": {
+        "n": 3,
+        "p50": 73,
+        "p95": 89.6,
+        "max": 89.6
+      }
+    }
+  ],
+  "pageErrors": [],
+  "finishedAt": "2026-10-23T03:36:14.071Z"
+}

@@ -50,7 +50,14 @@ class MiniMap {
     const bounds = { left: actualLeft, top: actualTop, width: Math.max(1, right - actualLeft), height: Math.max(1, bottom - actualTop) }
     const svg = SVG().size(bounds.width, bounds.height).viewbox(bounds.left, bounds.top, bounds.width, bounds.height)
     measured.forEach(node => {
-      ;(node._lines || []).forEach(line => { if (line && line.node) svg.add(line.clone()) })
+      const lines = node._lines || []
+      if (lines.length) {
+        lines.forEach(line => { if (line && line.node) svg.add(line.clone()) })
+      } else if (node._connectorSpecs) {
+        node._connectorSpecs.forEach(spec => {
+          if (spec && spec.d) svg.path(spec.d)
+        })
+      }
       ;(node._generalizationList || []).forEach(item => {
         if (item.generalizationLine && item.generalizationLine.node) svg.add(item.generalizationLine.clone())
       })

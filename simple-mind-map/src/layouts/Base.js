@@ -1099,6 +1099,7 @@ class Base {
       return
     }
     const nextPath = this.transformPath(path)
+    line._smmPath = nextPath
     const dom = line.node
     // Compare the live `d` attribute, not a private cache: other layouts,
     // plugins or hide paths can rewrite the same path element outside this

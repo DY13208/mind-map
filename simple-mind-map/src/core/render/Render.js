@@ -55,6 +55,10 @@ import {
 } from '../../utils/collabLayoutCleanup'
 import historyClipboard from '../../utils/historyClipboard'
 import remoteRenderScheduler from '../../utils/remoteRenderScheduler'
+import edgeGeometryModule from '../../utils/edgeGeometry'
+const edgeGeometry = edgeGeometryModule.boundsFromPath
+  ? edgeGeometryModule
+  : edgeGeometryModule.default
 
 // 布局列表
 const layouts = {
@@ -930,6 +934,71 @@ class Render {
 
   // Full layout paints use one budgeted DFS rather than a timer per child.
   // Explicit forceLoadNode/export keeps the existing synchronous full pass.
+  isPerfFlag(name) {
+    const flags = (this.mindMap.opt && this.mindMap.opt.performanceFlags) || {}
+    return !!flags[name]
+  }
+
+  getViewportWorldRect() {
+    const { transform } = this.mindMap.view.getTransformData()
+    const padding =
+      (this.mindMap.opt.performanceConfig &&
+        this.mindMap.opt.performanceConfig.padding) ||
+      0
+    const sx = transform.scaleX || 1
+    const sy = transform.scaleY || 1
+    return {
+      left: (-padding - transform.translateX) / sx,
+      top: (-padding - transform.translateY) / sy,
+      right: (this.mindMap.width + padding - transform.translateX) / sx,
+      bottom: (this.mindMap.height + padding - transform.translateY) / sy
+    }
+  }
+
+  nodeIntersectsViewport(node, viewport) {
+    if (!node || !viewport) return false
+    const left = node.left
+    const top = node.top
+    const right = left + (node.width || 0)
+    const bottom = top + (node.height || 0)
+    return (
+      right >= viewport.left &&
+      left <= viewport.right &&
+      bottom >= viewport.top &&
+      top <= viewport.bottom
+    )
+  }
+
+  shouldPaintNodeNow(node, viewport, pinned) {
+    if (!node || node.isRoot) return true
+    if (pinned && pinned.has(node)) return true
+    if (this.nodeIntersectsViewport(node, viewport)) return true
+    if (node.parent && this.nodeIntersectsViewport(node.parent, viewport)) return true
+    return false
+  }
+
+  rememberConnectorSpecs(node) {
+    if (!node || (node.getData && node.getData('expand') === false)) return
+    const live = node._lines || []
+    if (live.length) {
+      node._connectorSpecs = live
+        .map(line => {
+          const d =
+            (line && line._smmPath) ||
+            (line && line.node && line.node.getAttribute && line.node.getAttribute('d'))
+          return d ? { d } : null
+        })
+        .filter(Boolean)
+      return
+    }
+    if (node._connectorSpecs && node._connectorSpecs.length) return
+    const captured = edgeGeometry.captureNodeConnectors(node)
+    node._connectorSpecs = captured.map(item => ({
+      d: item.d,
+      bounds: item.bounds
+    }))
+  }
+
   paintLayoutTree(callback, forceRender, asyncPaint) {
     const generation = this._renderGeneration
     const cancelled = () => this._destroyed || generation !== this._renderGeneration
@@ -945,7 +1014,18 @@ class Render {
       this.root.render(() => { done().catch(error => this.mindMap.opt.errorHandler('render_error', error)) }, forceRender)
       return
     }
+    // Skip is DOM-only. data.expand / personal view state are never written here.
+    const lazy =
+      !forceRender &&
+      this.mindMap.opt.openPerformance &&
+      this.isPerfFlag('lazyOffscreenPaint')
+    const viewport = lazy ? this.getViewportWorldRect() : null
+    const pinned = lazy ? this.collectPinnedViewportNodes() : null
     walkLayoutInSlices([this.root, null, node => {
+      if (lazy && !this.shouldPaintNodeNow(node, viewport, pinned)) {
+        this.rememberConnectorSpecs(node)
+        return node.getData('expand') === false
+      }
       node.render(() => {}, forceRender, false, true)
       return node.getData('expand') === false
     }, null, true], { cancelled }).then(completed => {
@@ -977,12 +1057,21 @@ class Render {
         ? cached.bounds
         : null
       if (!bounds) {
-        const rect = element.getBBox()
-        // Native getBBox omits painted stroke and marker extents. Use a
-        // conservative miter envelope and the built-in 20px marker reserve.
-        const padding = Math.max(strokeWidth / 2 * Math.max(1, miterLimit), markers.some(Boolean) ? 20 : 0)
-        bounds = { left: rect.x - padding, top: rect.y - padding,
-          right: rect.x + rect.width + padding, bottom: rect.y + rect.height + padding }
+        if (this.isPerfFlag('analyticEdgeBounds')) {
+          bounds = edgeGeometry.boundsFromPathWithStroke(d, {
+            strokeWidth,
+            miterLimit,
+            hasMarker: markers.some(Boolean)
+          })
+        }
+        if (!bounds) {
+          const rect = element.getBBox()
+          // Native getBBox omits painted stroke and marker extents. Use a
+          // conservative miter envelope and the built-in 20px marker reserve.
+          const padding = Math.max(strokeWidth / 2 * Math.max(1, miterLimit), markers.some(Boolean) ? 20 : 0)
+          bounds = { left: rect.x - padding, top: rect.y - padding,
+            right: rect.x + rect.width + padding, bottom: rect.y + rect.height + padding }
+        }
         this._edgeBounds.set(element, { d, strokeWidth, miterLimit, markerStart: markers[0], markerEnd: markers[1], bounds })
       }
       const item = { element, parent, bounds }
@@ -998,7 +1087,31 @@ class Render {
         items.push({ node, bounds: { left, top, right: left + width, bottom: top + height } })
         if (node.group && node.group.node.parentNode) visibleNodes.add(node)
         yield
-        for (const line of node._lines || []) { addEdge(line.node); yield }
+        const lines = node._lines || []
+        if (lines.length) {
+          for (const line of lines) { addEdge(line.node); yield }
+        } else if (renderer.isPerfFlag('lazyOffscreenPaint')) {
+          renderer.rememberConnectorSpecs(node)
+          const parent = renderer.mindMap.lineDraw.node
+          for (const spec of node._connectorSpecs || []) {
+            const raw = spec.bounds || edgeGeometry.boundsFromPath(spec.d)
+            const bounds = edgeGeometry.inflateBounds(raw, {
+              strokeWidth: 1,
+              miterLimit: 4,
+              hasMarker: false
+            })
+            if (bounds) {
+              items.push({
+                element: null,
+                parent,
+                bounds,
+                d: spec.d,
+                sourceNode: node
+              })
+            }
+            yield
+          }
+        }
         for (const item of node._generalizationList || []) {
           if (item.generalizationLine) addEdge(item.generalizationLine.node)
           yield
@@ -1085,7 +1198,8 @@ class Render {
     this._pinnedViewportNodesGen = this._renderGeneration || 0
     this._pinnedViewportNodesCache = pinned
     pinned.forEach(node => nodes.add(node))
-    const edges = new Set(candidates.filter(item => item.element))
+    const lazyPaint = this.isPerfFlag('lazyOffscreenPaint')
+    const edges = new Set(candidates.filter(item => item.element || (lazyPaint && item.d)))
     const tasks = []
     ;(this._visibleViewportNodes || []).forEach(node => {
       if (!nodes.has(node) && !pinned.has(node)) tasks.push(() => {
@@ -1095,7 +1209,7 @@ class Render {
     })
     ;(this._visibleViewportEdges || []).forEach(item => {
       if (!edges.has(item)) tasks.push(() => {
-        item.element.remove()
+        if (item.element) item.element.remove()
         this._visibleViewportEdges.delete(item)
       })
     })
@@ -1111,13 +1225,31 @@ class Render {
         return
       }
       tasks.push(() => {
-      node.render(() => {}, pinned.has(node), false, true, true)
+      // Flags off: keep the old skipLine=true path. Lazy paint must draw
+      // outgoing lines on first mount because paintLayoutTree skipped them.
+      const skipLine = !lazyPaint || attached
+      node.render(() => {}, pinned.has(node), false, true, skipLine)
       this._visibleViewportNodes.add(node)
       })
     })
     edges.forEach(item => tasks.push(() => {
-      if (item.element.parentNode !== item.parent) item.parent.appendChild(item.element)
-      this._visibleViewportEdges.add(item)
+      if (lazyPaint && !item.element && item.sourceNode) {
+        if (!(item.sourceNode._lines || []).length) item.sourceNode.renderLine()
+        const match = (item.sourceNode._lines || []).find(line => {
+          const d =
+            (line && line._smmPath) ||
+            (line && line.node && line.node.getAttribute && line.node.getAttribute('d'))
+          return d === item.d
+        })
+        if (match) {
+          item.element = match.node
+          item.parent = this.mindMap.lineDraw.node
+        }
+      }
+      if (item.element && item.parent && item.element.parentNode !== item.parent) {
+        item.parent.appendChild(item.element)
+      }
+      if (item.element) this._visibleViewportEdges.add(item)
     }))
     // Update the actual attached sets per task. A superseding view must see
     // partial attachment, not the previous pass's not-yet-painted targets.
@@ -3615,8 +3747,8 @@ class Render {
       }
     }
     if (needRender) {
-      // Save navigation-driven expansion before render restores personal state.
-      this.mindMap.emit('personal_expand_change')
+      // Temporary reveal for search/locate. Do not persist as a user preference.
+      this.mindMap.emit('personal_expand_change', { source: 'reveal' })
       this.mindMap.render(callback)
     } else {
       callback()

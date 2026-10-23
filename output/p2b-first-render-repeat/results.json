@@ -1,0 +1,416 @@
+{
+  "startedAt": "2026-10-23T05:36:35.376Z",
+  "size": 6000,
+  "rounds": 8,
+  "runs": [
+    {
+      "label": "p1",
+      "wall": 5368.9,
+      "bbox": 42018,
+      "layouts": 1,
+      "nodeRender": 6001,
+      "mutAdd": 6009,
+      "mutRemove": 5986,
+      "phases": {
+        "layout": 110.4,
+        "index": 99.6,
+        "paintViewport": 30.1,
+        "nodeRender": 219.5
+      },
+      "dom": {
+        "groups": 1,
+        "paths": 15,
+        "svg": 26,
+        "model": 6000
+      }
+    },
+    {
+      "label": "p1ab",
+      "wall": 4754.6,
+      "bbox": 36019,
+      "layouts": 1,
+      "nodeRender": 14,
+      "mutAdd": 118,
+      "mutRemove": 95,
+      "phases": {
+        "layout": 8.2,
+        "index": 52.2,
+        "paintViewport": 1.2,
+        "nodeRender": 16.4
+      },
+      "dom": {
+        "groups": 1,
+        "paths": 15,
+        "svg": 26,
+        "model": 6000
+      }
+    },
+    {
+      "label": "p1",
+      "wall": 6522.4,
+      "bbox": 42018,
+      "layouts": 1,
+      "nodeRender": 6001,
+      "mutAdd": 6009,
+      "mutRemove": 5986,
+      "phases": {
+        "layout": 8.1,
+        "index": 54.7,
+        "paintViewport": 27.8,
+        "nodeRender": 170.4
+      },
+      "dom": {
+        "groups": 1,
+        "paths": 15,
+        "svg": 26,
+        "model": 6000
+      }
+    },
+    {
+      "label": "p1ab",
+      "wall": 5298.8,
+      "bbox": 36019,
+      "layouts": 1,
+      "nodeRender": 14,
+      "mutAdd": 118,
+      "mutRemove": 95,
+      "phases": {
+        "layout": 9,
+        "index": 35.8,
+        "paintViewport": 0.8,
+        "nodeRender": 13.9
+      },
+      "dom": {
+        "groups": 1,
+        "paths": 15,
+        "svg": 26,
+        "model": 6000
+      }
+    },
+    {
+      "label": "p1",
+      "wall": 5640.4,
+      "bbox": 42018,
+      "layouts": 1,
+      "nodeRender": 6001,
+      "mutAdd": 6009,
+      "mutRemove": 5986,
+      "phases": {
+        "layout": 8.3,
+        "index": 123,
+        "paintViewport": 34.7,
+        "nodeRender": 310
+      },
+      "dom": {
+        "groups": 1,
+        "paths": 15,
+        "svg": 26,
+        "model": 6000
+      }
+    },
+    {
+      "label": "p1ab",
+      "wall": 5440.8,
+      "bbox": 36019,
+      "layouts": 1,
+      "nodeRender": 14,
+      "mutAdd": 118,
+      "mutRemove": 95,
+      "phases": {
+        "layout": 8.4,
+        "index": 30.5,
+        "paintViewport": 1.1,
+        "nodeRender": 8.4
+      },
+      "dom": {
+        "groups": 1,
+        "paths": 15,
+        "svg": 26,
+        "model": 6000
+      }
+    },
+    {
+      "label": "p1",
+      "wall": 4266,
+      "bbox": 42018,
+      "layouts": 1,
+      "nodeRender": 6001,
+      "mutAdd": 6009,
+      "mutRemove": 5986,
+      "phases": {
+        "layout": 8.1,
+        "index": 60.7,
+        "paintViewport": 16.6,
+        "nodeRender": 111.1
+      },
+      "dom": {
+        "groups": 1,
+        "paths": 15,
+        "svg": 26,
+        "model": 6000
+      }
+    },
+    {
+      "label": "p1ab",
+      "wall": 4724.1,
+      "bbox": 36019,
+      "layouts": 1,
+      "nodeRender": 14,
+      "mutAdd": 118,
+      "mutRemove": 95,
+      "phases": {
+        "layout": 8.1,
+        "index": 80.3,
+        "paintViewport": 1.2,
+        "nodeRender": 19.9
+      },
+      "dom": {
+        "groups": 1,
+        "paths": 15,
+        "svg": 26,
+        "model": 6000
+      }
+    },
+    {
+      "label": "p1",
+      "wall": 8728.7,
+      "bbox": 42018,
+      "layouts": 1,
+      "nodeRender": 6001,
+      "mutAdd": 6009,
+      "mutRemove": 5986,
+      "phases": {
+        "layout": 8.6,
+        "index": 136.9,
+        "paintViewport": 33.7,
+        "nodeRender": 214.5
+      },
+      "dom": {
+        "groups": 1,
+        "paths": 15,
+        "svg": 26,
+        "model": 6000
+      }
+    },
+    {
+      "label": "p1ab",
+      "wall": 5386.9,
+      "bbox": 36019,
+      "layouts": 1,
+      "nodeRender": 14,
+      "mutAdd": 118,
+      "mutRemove": 95,
+      "phases": {
+        "layout": 9.1,
+        "index": 31.2,
+        "paintViewport": 0.8,
+        "nodeRender": 11
+      },
+      "dom": {
+        "groups": 1,
+        "paths": 15,
+        "svg": 26,
+        "model": 6000
+      }
+    },
+    {
+      "label": "p1",
+      "wall": 6794.5,
+      "bbox": 42018,
+      "layouts": 1,
+      "nodeRender": 6001,
+      "mutAdd": 6009,
+      "mutRemove": 5986,
+      "phases": {
+        "layout": 8.2,
+        "index": 59.5,
+        "paintViewport": 18.3,
+        "nodeRender": 159.5
+      },
+      "dom": {
+        "groups": 1,
+        "paths": 15,
+        "svg": 26,
+        "model": 6000
+      }
+    },
+    {
+      "label": "p1ab",
+      "wall": 5113.4,
+      "bbox": 36019,
+      "layouts": 1,
+      "nodeRender": 14,
+      "mutAdd": 118,
+      "mutRemove": 95,
+      "phases": {
+        "layout": 8.1,
+        "index": 28.3,
+        "paintViewport": 0.4,
+        "nodeRender": 8.4
+      },
+      "dom": {
+        "groups": 1,
+        "paths": 15,
+        "svg": 26,
+        "model": 6000
+      }
+    },
+    {
+      "label": "p1",
+      "wall": 5061.5,
+      "bbox": 42018,
+      "layouts": 1,
+      "nodeRender": 6001,
+      "mutAdd": 6009,
+      "mutRemove": 5986,
+      "phases": {
+        "layout": 8,
+        "index": 109.5,
+        "paintViewport": 24.3,
+        "nodeRender": 163.3
+      },
+      "dom": {
+        "groups": 1,
+        "paths": 15,
+        "svg": 26,
+        "model": 6000
+      }
+    },
+    {
+      "label": "p1ab",
+      "wall": 6624.3,
+      "bbox": 36019,
+      "layouts": 1,
+      "nodeRender": 14,
+      "mutAdd": 118,
+      "mutRemove": 95,
+      "phases": {
+        "layout": 8,
+        "index": 52.8,
+        "paintViewport": 0.8,
+        "nodeRender": 18.1
+      },
+      "dom": {
+        "groups": 1,
+        "paths": 15,
+        "svg": 26,
+        "model": 6000
+      }
+    },
+    {
+      "label": "p1",
+      "wall": 4397.2,
+      "bbox": 42018,
+      "layouts": 1,
+      "nodeRender": 6001,
+      "mutAdd": 6009,
+      "mutRemove": 5986,
+      "phases": {
+        "layout": 8.7,
+        "index": 60.1,
+        "paintViewport": 16,
+        "nodeRender": 118
+      },
+      "dom": {
+        "groups": 1,
+        "paths": 15,
+        "svg": 26,
+        "model": 6000
+      }
+    },
+    {
+      "label": "p1ab",
+      "wall": 3866.7,
+      "bbox": 36019,
+      "layouts": 1,
+      "nodeRender": 14,
+      "mutAdd": 118,
+      "mutRemove": 95,
+      "phases": {
+        "layout": 8.4,
+        "index": 66.6,
+        "paintViewport": 1,
+        "nodeRender": 12.8
+      },
+      "dom": {
+        "groups": 1,
+        "paths": 15,
+        "svg": 26,
+        "model": 6000
+      }
+    }
+  ],
+  "errors": [],
+  "p1": {
+    "n": 8,
+    "wall": {
+      "p50": 5368.9,
+      "p95": 6794.5,
+      "min": 4266,
+      "max": 8728.7
+    },
+    "bbox": {
+      "p50": 42018,
+      "p95": 42018
+    },
+    "nodeRender": {
+      "p50": 6001,
+      "p95": 6001
+    },
+    "mutAdd": {
+      "p50": 6009,
+      "p95": 6009
+    },
+    "phases": {
+      "layout": 8.2,
+      "index": 60.7,
+      "paintViewport": 24.3,
+      "nodeRender": 163.3
+    },
+    "lastDom": {
+      "groups": 1,
+      "paths": 15,
+      "svg": 26,
+      "model": 6000
+    }
+  },
+  "p1ab": {
+    "n": 8,
+    "wall": {
+      "p50": 5113.4,
+      "p95": 5440.8,
+      "min": 3866.7,
+      "max": 6624.3
+    },
+    "bbox": {
+      "p50": 36019,
+      "p95": 36019
+    },
+    "nodeRender": {
+      "p50": 14,
+      "p95": 14
+    },
+    "mutAdd": {
+      "p50": 118,
+      "p95": 118
+    },
+    "phases": {
+      "layout": 8.2,
+      "index": 35.8,
+      "paintViewport": 0.8,
+      "nodeRender": 12.8
+    },
+    "lastDom": {
+      "groups": 1,
+      "paths": 15,
+      "svg": 26,
+      "model": 6000
+    }
+  },
+  "verdict": {
+    "p50Ratio": 0.952,
+    "likelyRealRegression": false,
+    "likelyNoise": true
+  },
+  "harnessErrors": []
+}

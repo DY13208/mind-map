@@ -1,0 +1,88 @@
+{
+  "startedAt": "2026-10-23T03:31:47.811Z",
+  "commit": "512953b5955b1af4bfc020c42c7c54ee0b8862e4",
+  "browser": "153.0.8010.12",
+  "node": "v22.23.1",
+  "sizes": [],
+  "sizesResult": [],
+  "layouts": [],
+  "rich": [],
+  "memory": null,
+  "profile": null,
+  "probeRemoteStyle": [
+    {
+      "n": 1000,
+      "before": {
+        "svgElements": 353,
+        "nodeGroupsAttached": 33,
+        "pathsAttached": 48,
+        "modelNodes": 1002,
+        "lruSize": 1000,
+        "totalDomElements": 467
+      },
+      "syncMs": 12.099999994039536,
+      "afterStyleOnly": {
+        "svgElements": 1306,
+        "nodeGroupsAttached": 33,
+        "pathsAttached": 1001,
+        "modelNodes": 1002,
+        "lruSize": 1000,
+        "totalDomElements": 1420
+      },
+      "afterPan": {
+        "svgElements": 1306,
+        "nodeGroupsAttached": 33,
+        "pathsAttached": 1001,
+        "modelNodes": 1002,
+        "lruSize": 1000,
+        "totalDomElements": 1420
+      },
+      "afterFullRender": {
+        "svgElements": 353,
+        "nodeGroupsAttached": 33,
+        "pathsAttached": 48,
+        "modelNodes": 1002,
+        "lruSize": 1000,
+        "totalDomElements": 467
+      }
+    },
+    {
+      "n": 6000,
+      "before": {
+        "svgElements": 142,
+        "nodeGroupsAttached": 13,
+        "pathsAttached": 33,
+        "modelNodes": 6002,
+        "lruSize": 1000,
+        "totalDomElements": 756
+      },
+      "syncMs": 37.099999994039536,
+      "afterStyleOnly": {
+        "svgElements": 6110,
+        "nodeGroupsAttached": 13,
+        "pathsAttached": 6001,
+        "modelNodes": 6002,
+        "lruSize": 1000,
+        "totalDomElements": 6724
+      },
+      "afterPan": {
+        "svgElements": 6038,
+        "nodeGroupsAttached": 5,
+        "pathsAttached": 5993,
+        "modelNodes": 6002,
+        "lruSize": 1000,
+        "totalDomElements": 6652
+      },
+      "afterFullRender": {
+        "svgElements": 70,
+        "nodeGroupsAttached": 5,
+        "pathsAttached": 25,
+        "modelNodes": 6002,
+        "lruSize": 1000,
+        "totalDomElements": 684
+      }
+    }
+  ],
+  "pageErrors": [],
+  "finishedAt": "2026-10-23T03:32:23.893Z"
+}

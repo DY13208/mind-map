@@ -1,0 +1,192 @@
+{
+  "ok": true,
+  "loginStatus": 200,
+  "authenticated": true,
+  "userId": "yangxiaodong",
+  "userName": "杨晓东Shadow🏹",
+  "roomCount": 100,
+  "total": 318,
+  "testish": [
+    {
+      "roomKey": "c2-profile-10000-1788764780684",
+      "title": "C2 Profile 10000",
+      "folderId": null,
+      "updatedAt": "2026-09-09T01:23:47.181Z",
+      "role": "admin"
+    },
+    {
+      "roomKey": "c2-profile-10000-1788764689226",
+      "title": "C2 Profile 10000",
+      "folderId": null,
+      "updatedAt": "2026-09-07T07:04:49.508Z",
+      "role": "admin"
+    },
+    {
+      "roomKey": "c2-profile-5000-1788764670059",
+      "title": "C2 Profile 5000",
+      "folderId": null,
+      "updatedAt": "2026-09-07T07:04:30.136Z",
+      "role": "admin"
+    },
+    {
+      "roomKey": "c2-profile-1000-1788764665084",
+      "title": "C2 Profile 1000",
+      "folderId": null,
+      "updatedAt": "2026-09-07T07:04:25.219Z",
+      "role": "admin"
+    },
+    {
+      "roomKey": "c2-profile-10000-1788764407103",
+      "title": "C2 Profile 10000",
+      "folderId": null,
+      "updatedAt": "2026-09-07T07:00:15.019Z",
+      "role": "admin"
+    },
+    {
+      "roomKey": "c2-profile-10000-1788764407156",
+      "title": "C2 Profile 10000",
+      "folderId": null,
+      "updatedAt": "2026-09-07T07:00:07.565Z",
+      "role": "admin"
+    },
+    {
+      "roomKey": "c2-profile-1000-1788764369215",
+      "title": "C2 Profile 1000",
+      "folderId": null,
+      "updatedAt": "2026-09-07T06:59:34.824Z",
+      "role": "admin"
+    },
+    {
+      "roomKey": "c2-profile-10000-1788764187409",
+      "title": "C2 Profile 10000",
+      "folderId": null,
+      "updatedAt": "2026-09-07T06:57:36.417Z",
+      "role": "admin"
+    },
+    {
+      "roomKey": "c2-profile-5000-1788764165932",
+      "title": "C2 Profile 5000",
+      "folderId": null,
+      "updatedAt": "2026-09-07T06:56:10.702Z",
+      "role": "admin"
+    },
+    {
+      "roomKey": "c2-profile-1000-1788764159350",
+      "title": "C2 Profile 1000",
+      "folderId": null,
+      "updatedAt": "2026-09-07T06:56:05.759Z",
+      "role": "admin"
+    },
+    {
+      "roomKey": "c2-profile-10000-1788763609972",
+      "title": "C2 Profile 10000",
+      "folderId": null,
+      "updatedAt": "2026-09-07T06:46:56.428Z",
+      "role": "admin"
+    },
+    {
+      "roomKey": "c2-profile-5000-1788763583090",
+      "title": "C2 Profile 5000",
+      "folderId": null,
+      "updatedAt": "2026-09-07T06:46:28.897Z",
+      "role": "admin"
+    },
+    {
+      "roomKey": "c2-profile-1000-1788763543032",
+      "title": "C2 Profile 1000",
+      "folderId": null,
+      "updatedAt": "2026-09-07T06:45:51.769Z",
+      "role": "admin"
+    },
+    {
+      "roomKey": "c2-browser-20000-1788761566040",
+      "title": "C2 Browser 20000",
+      "folderId": null,
+      "updatedAt": "2026-09-07T06:14:01.595Z",
+      "role": "admin"
+    },
+    {
+      "roomKey": "c2-browser-10000-1788761472060",
+      "title": "C2 Browser 10000",
+      "folderId": null,
+      "updatedAt": "2026-09-07T06:11:12.173Z",
+      "role": "admin"
+    },
+    {
+      "roomKey": "c2-browser-5000-1788761408598",
+      "title": "C2 Browser 5000",
+      "folderId": null,
+      "updatedAt": "2026-09-07T06:10:52.233Z",
+      "role": "admin"
+    },
+    {
+      "roomKey": "c2-browser-1000-1788761405584",
+      "title": "C2 Browser 1000",
+      "folderId": null,
+      "updatedAt": "2026-09-07T06:10:05.652Z",
+      "role": "admin"
+    },
+    {
+      "roomKey": "p0-persist-500-duplicate-middle-d7b83bf0-bc20-4226-9036-a7b056a11309",
+      "title": "500-duplicate-middle",
+      "folderId": null,
+      "updatedAt": "2026-09-07T02:51:21.319Z",
+      "role": "editor"
+    },
+    {
+      "roomKey": "p0-persist-200-empty-last-8168dd5f-a714-4198-92e4-e697cf3760c2",
+      "title": "200-empty-last",
+      "folderId": null,
+      "updatedAt": "2026-09-07T02:51:19.854Z",
+      "role": "editor"
+    },
+    {
+      "roomKey": "p0-persist-200-empty-append-5681c241-f4a5-440b-9a7c-9a2a3cde6276",
+      "title": "200-empty-append",
+      "folderId": null,
+      "updatedAt": "2026-09-07T02:51:19.496Z",
+      "role": "editor"
+    },
+    {
+      "roomKey": "p0-persist-50-empty-last-57d99954-7874-42c2-bf2d-f7a791cf84fa",
+      "title": "50-empty-last",
+      "folderId": null,
+      "updatedAt": "2026-09-07T02:51:15.868Z",
+      "role": "editor"
+    }
+  ],
+  "sampleTitles": [
+    "UN项目工程 | room-vybh2lxq",
+    "100-canonical-append | p0-persist-100-canonical-append-8dafb3f8-ec16-4449-8996-bbee68976d5c",
+    "蔡徐坤 | room-pcn07z54",
+    "未命名123脑图 | room-bnfzxb05",
+    "500-padded-middle | p0-persist-500-padded-middle-ea2cc673-46e7-4b76-b3ae-51a754ca1bb0",
+    "socket-v2 | v2-socket-1791794960039",
+    "C：UN项目利润分 | room-asxwvl6y",
+    "思维导图 | room-ayd6ao2j",
+    "法务 | room-vewikxbg",
+    "未命名脑图cw1 | room-6b5wc9z3",
+    "Root | v2-socket-1791794911408",
+    "思维导图 (1) | room-0ij72axr",
+    "UN项目工程--副本 | room-tlo97ek3",
+    "财务 | room-lo1vw2c8",
+    "500-canonical-middle | p0-persist-500-canonical-middle-e5f17402-b7f9-4c41-9580-f09266f85015",
+    "未命名脑图 | room-sa69z20y",
+    "C：CG项目利润分 | room-2yaz570x",
+    "C：CG项目利润分 | room-ro34t40w",
+    "AI | room-aeqcd93o",
+    "人事 | room-2e5pafbk",
+    "公司 | room-9mndp8zz",
+    "未命名脑图 | room-d2pbrzkc",
+    "Root | p0-persist-500-empty-last-58b006d3-57ae-4e88-a7c9-2d12e4d6e81c",
+    "C2 Profile 10000 | c2-profile-10000-1788764780684",
+    "C2 Profile 10000 | c2-profile-10000-1788764689226",
+    "C2 Profile 5000 | c2-profile-5000-1788764670059",
+    "C2 Profile 1000 | c2-profile-1000-1788764665084",
+    "C2 Profile 10000 | c2-profile-10000-1788764407103",
+    "C2 Profile 10000 | c2-profile-10000-1788764407156",
+    "C2 Profile 1000 | c2-profile-1000-1788764369215"
+  ],
+  "filesStatus": 200,
+  "filesError": null
+}

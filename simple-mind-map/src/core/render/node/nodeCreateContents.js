@@ -9,6 +9,10 @@ import {
   getNodeRichTextStyles,
   measureText as measureTextCanvas
 } from '../../../utils'
+import p1PerfPlanModule from '../../../utils/p1PerfPlan'
+const p1PerfPlan = p1PerfPlanModule.wrapPlainTextLines
+  ? p1PerfPlanModule
+  : p1PerfPlanModule.default
 import { Image as SVGImage, SVG, A, G, Rect, Text, Circle, Path } from '@svgdotjs/svg.js'
 import iconsSvg from '../../../svg/icons'
 import { noneRichTextNodeLineHeight, CONSTANTS } from '../../../constants/constant'
@@ -33,6 +37,57 @@ const measureText = (text, style) => {
   style.text(node)
   g.add(node)
   return g.bbox()
+}
+
+const wrapPlainParagraphsWithSvg = (paragraphs, maxWidth, style) => {
+  return paragraphs.map(item => {
+    const arr = String(item).split('')
+    const lines = []
+    let line = []
+    while (arr.length) {
+      const str = arr.shift()
+      const next = [...line, str].join('')
+      if (measureText(next, style).width <= maxWidth) line.push(str)
+      else {
+        lines.push(line.join(''))
+        line = [str]
+      }
+    }
+    if (line.length) lines.push(line.join(''))
+    return lines.join('\n')
+  })
+}
+
+const wrapPlainParagraphs = (paragraphs, maxWidth, node) => {
+  const flags = (node.mindMap && node.mindMap.opt && node.mindMap.opt.performanceFlags) || {}
+  const joined = paragraphs.join('\n')
+  const fontSize = node.getStyle('fontSize', false)
+  const fontWeight = node.getStyle('fontWeight', false)
+  const fontStyle = node.getStyle('fontStyle', false)
+  const styleObj = {
+    italic: fontStyle === 'italic',
+    bold: fontWeight === 'bold' || fontWeight === '700' || Number(fontWeight) >= 700,
+    fontSize,
+    fontFamily: node.getStyle('fontFamily', false) || '微软雅黑, Microsoft YaHei',
+    letterSpacing: node.getStyle('letterSpacing', false),
+    fontWeight,
+    fontStyle,
+    text: joined
+  }
+  if (
+    flags.canvasTextMeasure &&
+    !p1PerfPlan.canvasPlainTextFallbackReason(styleObj)
+  ) {
+    try {
+      const measureWidth = text => measureTextCanvas(text || '﻿', styleObj).width
+      return paragraphs.map(item =>
+        p1PerfPlan.wrapPlainTextLines(item, measureWidth, maxWidth).join('\n')
+      )
+    } catch (error) {
+      return wrapPlainParagraphsWithSvg(paragraphs, maxWidth, node.style)
+    }
+  }
+  return wrapPlainParagraphsWithSvg(paragraphs, maxWidth, node.style)
 }
 
 // Simple rich-text HTML that can be measured without forced DOM reflow.
@@ -482,28 +537,8 @@ function createTextNode(specifyText) {
   const hasCustomWidth = this.hasCustomWidth()
   const maxWidth = hasCustomWidth ? this.customTextWidth : textAutoWrapWidth
   let isMultiLine = textArr.length > 1
-  textArr.forEach((item, index) => {
-    let arr = item.split('')
-    let lines = []
-    let line = []
-    while (arr.length) {
-      let str = arr.shift()
-      let text = [...line, str].join('')
-      if (measureText(text, this.style).width <= maxWidth) {
-        line.push(str)
-      } else {
-        lines.push(line.join(''))
-        line = [str]
-      }
-    }
-    if (line.length > 0) {
-      lines.push(line.join(''))
-    }
-    if (lines.length > 1) {
-      isMultiLine = true
-    }
-    textArr[index] = lines.join('\n')
-  })
+  textArr = wrapPlainParagraphs(textArr, maxWidth, this)
+  if (textArr.some(item => String(item).includes('\n'))) isMultiLine = true
   textArr = textArr.join('\n').replace(/\n$/g, '').split(/\n/gim)
   textArr.forEach((item, index) => {
     // 避免尾部的空行不占宽度

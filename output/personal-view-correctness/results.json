@@ -1,0 +1,25 @@
+{
+  "startedAt": "2026-10-23T05:44:08.826Z",
+  "errors": [],
+  "off": {
+    "flags": "off",
+    "afterSearchParent": true,
+    "revealOnly": true,
+    "searchUsedUserCommand": false,
+    "afterUserOpen": false,
+    "userEvent": true,
+    "remoteDidNotExpand": true,
+    "preferenceUnchanged": true
+  },
+  "p1ab": {
+    "flags": "p1ab",
+    "afterSearchParent": true,
+    "revealOnly": true,
+    "searchUsedUserCommand": false,
+    "afterUserOpen": false,
+    "userEvent": true,
+    "remoteDidNotExpand": true,
+    "preferenceUnchanged": true
+  },
+  "harnessErrors": []
+}

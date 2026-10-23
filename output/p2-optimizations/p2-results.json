@@ -1,0 +1,297 @@
+{
+  "startedAt": "2026-10-23T04:34:32.231Z",
+  "sizes": [
+    {
+      "n": 1000,
+      "flags": "off",
+      "initMs": 5631.9,
+      "initBBox": 58991,
+      "idleWall": 113.4,
+      "idleBBox": 46,
+      "editWall": 98.6,
+      "editLayouts": 1,
+      "dom": {
+        "svgElements": 219,
+        "nodeGroupsAttached": 24,
+        "pathsAttached": 67,
+        "modelNodes": 1000
+      }
+    },
+    {
+      "n": 1000,
+      "flags": "p1",
+      "initMs": 1411.9,
+      "initBBox": 7455,
+      "idleWall": 60,
+      "idleBBox": 6,
+      "editWall": 56.9,
+      "editLayouts": 1,
+      "dom": {
+        "svgElements": 219,
+        "nodeGroupsAttached": 24,
+        "pathsAttached": 67,
+        "modelNodes": 1000
+      }
+    },
+    {
+      "n": 1000,
+      "flags": "p1a",
+      "initMs": 1293.6,
+      "initBBox": 6456,
+      "idleWall": 43.7,
+      "idleBBox": 6,
+      "editWall": 45.4,
+      "editLayouts": 1,
+      "dom": {
+        "svgElements": 219,
+        "nodeGroupsAttached": 24,
+        "pathsAttached": 67,
+        "modelNodes": 1000
+      }
+    },
+    {
+      "n": 1000,
+      "flags": "p1ab",
+      "initMs": 1209.9,
+      "initBBox": 6456,
+      "idleWall": 38.2,
+      "idleBBox": 6,
+      "editWall": 39.2,
+      "editLayouts": 1,
+      "dom": {
+        "svgElements": 224,
+        "nodeGroupsAttached": 24,
+        "pathsAttached": 72,
+        "modelNodes": 1000
+      }
+    },
+    {
+      "n": 3000,
+      "flags": "off",
+      "initMs": 17699.6,
+      "initBBox": 184489,
+      "idleWall": 153.7,
+      "idleBBox": 46,
+      "editWall": 132.4,
+      "editLayouts": 1,
+      "dom": {
+        "svgElements": 45,
+        "nodeGroupsAttached": 2,
+        "pathsAttached": 27,
+        "modelNodes": 3000
+      }
+    },
+    {
+      "n": 3000,
+      "flags": "p1",
+      "initMs": 2246.5,
+      "initBBox": 21037,
+      "idleWall": 106,
+      "idleBBox": 6,
+      "editWall": 71.1,
+      "editLayouts": 1,
+      "dom": {
+        "svgElements": 45,
+        "nodeGroupsAttached": 2,
+        "pathsAttached": 27,
+        "modelNodes": 3000
+      }
+    },
+    {
+      "n": 3000,
+      "flags": "p1a",
+      "initMs": 3231,
+      "initBBox": 18038,
+      "idleWall": 262.1,
+      "idleBBox": 6,
+      "editWall": 187.8,
+      "editLayouts": 1,
+      "dom": {
+        "svgElements": 45,
+        "nodeGroupsAttached": 2,
+        "pathsAttached": 27,
+        "modelNodes": 3000
+      }
+    },
+    {
+      "n": 3000,
+      "flags": "p1ab",
+      "initMs": 2388,
+      "initBBox": 18038,
+      "idleWall": 85.3,
+      "idleBBox": 6,
+      "editWall": 56.5,
+      "editLayouts": 1,
+      "dom": {
+        "svgElements": 45,
+        "nodeGroupsAttached": 2,
+        "pathsAttached": 27,
+        "modelNodes": 3000
+      }
+    },
+    {
+      "n": 6000,
+      "flags": "p1",
+      "initMs": 4633.1,
+      "initBBox": 42094,
+      "idleWall": 305.8,
+      "idleBBox": 6,
+      "editWall": 211,
+      "editLayouts": 1,
+      "dom": {
+        "svgElements": 62,
+        "nodeGroupsAttached": 5,
+        "pathsAttached": 23,
+        "modelNodes": 6000
+      }
+    },
+    {
+      "n": 6000,
+      "flags": "p1a",
+      "initMs": 5488.4,
+      "initBBox": 36095,
+      "idleWall": 396.5,
+      "idleBBox": 6,
+      "editWall": 313.7,
+      "editLayouts": 1,
+      "dom": {
+        "svgElements": 62,
+        "nodeGroupsAttached": 5,
+        "pathsAttached": 23,
+        "modelNodes": 6000
+      }
+    },
+    {
+      "n": 6000,
+      "flags": "p1ab",
+      "initMs": 7198.6,
+      "initBBox": 36095,
+      "idleWall": 202,
+      "idleBBox": 6,
+      "editWall": 194,
+      "editLayouts": 1,
+      "dom": {
+        "svgElements": 74,
+        "nodeGroupsAttached": 5,
+        "pathsAttached": 35,
+        "modelNodes": 6000
+      }
+    },
+    {
+      "n": 10000,
+      "flags": "p1",
+      "initMs": 11315.5,
+      "initBBox": 70113,
+      "idleWall": 442,
+      "idleBBox": 6,
+      "editWall": 495.6,
+      "editLayouts": 1,
+      "dom": {
+        "svgElements": 92,
+        "nodeGroupsAttached": 6,
+        "pathsAttached": 46,
+        "modelNodes": 10000
+      }
+    },
+    {
+      "n": 10000,
+      "flags": "p1a",
+      "initMs": 10146.3,
+      "initBBox": 60114,
+      "idleWall": 524.3,
+      "idleBBox": 6,
+      "editWall": 554.4,
+      "editLayouts": 1,
+      "dom": {
+        "svgElements": 92,
+        "nodeGroupsAttached": 6,
+        "pathsAttached": 46,
+        "modelNodes": 10000
+      }
+    },
+    {
+      "n": 10000,
+      "flags": "p1ab",
+      "initMs": 8149.4,
+      "initBBox": 60114,
+      "idleWall": 189.8,
+      "idleBBox": 6,
+      "editWall": 176.5,
+      "editLayouts": 1,
+      "dom": {
+        "svgElements": 92,
+        "nodeGroupsAttached": 6,
+        "pathsAttached": 46,
+        "modelNodes": 10000
+      }
+    }
+  ],
+  "probes": {
+    "edgeBounds": {
+      "compared": 39,
+      "missing": 0,
+      "maxAbsDiff": 953,
+      "worst": {
+        "d": "M 917,-107 L 935,-107 L 935,-231.5 Q 935,-236.5 940,-236.5 L 953,-236.5",
+        "max": 953,
+        "bbox": {
+          "left": -2,
+          "top": -2,
+          "right": 2,
+          "bottom": 2
+        },
+        "analytic": {
+          "left": 915,
+          "top": -238.5,
+          "right": 955,
+          "bottom": -105
+        }
+      }
+    },
+    "pageErrors": [],
+    "expand-off": {
+      "flags": "off",
+      "collapseKept": true,
+      "stillCollapsed": true,
+      "remountCollapsed": true,
+      "panDidNotChangeExpand": true,
+      "returnDidNotChangeExpand": true,
+      "groupDetached": true,
+      "remoteDidNotResetExpand": true,
+      "expandBefore": true,
+      "expandAfterRemote": true,
+      "leafExpandKept": true,
+      "renderErrors": []
+    },
+    "expand-p1": {
+      "flags": "p1",
+      "collapseKept": true,
+      "stillCollapsed": true,
+      "remountCollapsed": true,
+      "panDidNotChangeExpand": true,
+      "returnDidNotChangeExpand": true,
+      "groupDetached": true,
+      "remoteDidNotResetExpand": true,
+      "expandBefore": true,
+      "expandAfterRemote": true,
+      "leafExpandKept": true,
+      "renderErrors": []
+    },
+    "expand-p1ab": {
+      "flags": "p1ab",
+      "collapseKept": true,
+      "stillCollapsed": true,
+      "remountCollapsed": true,
+      "panDidNotChangeExpand": true,
+      "returnDidNotChangeExpand": true,
+      "groupDetached": true,
+      "remoteDidNotResetExpand": true,
+      "expandBefore": true,
+      "expandAfterRemote": true,
+      "leafExpandKept": true,
+      "renderErrors": []
+    }
+  },
+  "errors": [],
+  "harnessErrors": []
+}

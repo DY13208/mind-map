@@ -1,0 +1,276 @@
+[
+  {
+    "room": "c2-profile-1000-1788764665084",
+    "/api/files/c2-profile-1000-1788764665084/info": {
+      "status": 200,
+      "keys": [
+        "ok",
+        "viewingHistory",
+        "file"
+      ],
+      "revision": 1,
+      "title": "C2 Profile 1000"
+    },
+    "/api/files/c2-profile-1000-1788764665084?format=meta": {
+      "status": 200,
+      "keys": [
+        "room_key",
+        "version",
+        "title",
+        "share_url",
+        "updated_at",
+        "metadata",
+        "theme",
+        "layout",
+        "role",
+        "canView",
+        "canEdit",
+        "canManage",
+        "shareId",
+        "legacyOpen"
+      ],
+      "title": "C2 Profile 1000"
+    },
+    "/api/files/c2-profile-1000-1788764665084/snapshot?format=meta": {
+      "status": 404,
+      "keys": [
+        "error",
+        "code"
+      ]
+    }
+  },
+  {
+    "room": "c2-profile-1000-1788764369215",
+    "/api/files/c2-profile-1000-1788764369215/info": {
+      "status": 200,
+      "keys": [
+        "ok",
+        "viewingHistory",
+        "file"
+      ],
+      "revision": 2,
+      "title": "C2 Profile 1000"
+    },
+    "/api/files/c2-profile-1000-1788764369215?format=meta": {
+      "status": 200,
+      "keys": [
+        "room_key",
+        "version",
+        "title",
+        "share_url",
+        "updated_at",
+        "metadata",
+        "theme",
+        "layout",
+        "role",
+        "canView",
+        "canEdit",
+        "canManage",
+        "shareId",
+        "legacyOpen"
+      ],
+      "title": "C2 Profile 1000"
+    },
+    "/api/files/c2-profile-1000-1788764369215/snapshot?format=meta": {
+      "status": 404,
+      "keys": [
+        "error",
+        "code"
+      ]
+    }
+  },
+  {
+    "room": "c2-browser-5000-1788761408598",
+    "/api/files/c2-browser-5000-1788761408598/info": {
+      "status": 200,
+      "keys": [
+        "ok",
+        "viewingHistory",
+        "file"
+      ],
+      "revision": 3,
+      "title": "C2 Browser 5000"
+    },
+    "/api/files/c2-browser-5000-1788761408598?format=meta": {
+      "status": 200,
+      "keys": [
+        "room_key",
+        "version",
+        "title",
+        "share_url",
+        "updated_at",
+        "metadata",
+        "theme",
+        "layout",
+        "role",
+        "canView",
+        "canEdit",
+        "canManage",
+        "shareId",
+        "legacyOpen"
+      ],
+      "title": "C2 Browser 5000"
+    },
+    "/api/files/c2-browser-5000-1788761408598/snapshot?format=meta": {
+      "status": 404,
+      "keys": [
+        "error",
+        "code"
+      ]
+    }
+  },
+  {
+    "room": "c2-browser-10000-1788761472060",
+    "/api/files/c2-browser-10000-1788761472060/info": {
+      "status": 200,
+      "keys": [
+        "ok",
+        "viewingHistory",
+        "file"
+      ],
+      "revision": 1,
+      "title": "C2 Browser 10000"
+    },
+    "/api/files/c2-browser-10000-1788761472060?format=meta": {
+      "status": 200,
+      "keys": [
+        "room_key",
+        "version",
+        "title",
+        "share_url",
+        "updated_at",
+        "metadata",
+        "theme",
+        "layout",
+        "role",
+        "canView",
+        "canEdit",
+        "canManage",
+        "shareId",
+        "legacyOpen"
+      ],
+      "title": "C2 Browser 10000"
+    },
+    "/api/files/c2-browser-10000-1788761472060/snapshot?format=meta": {
+      "status": 404,
+      "keys": [
+        "error",
+        "code"
+      ]
+    }
+  },
+  {
+    "room": "p0-persist-50-empty-last-57d99954-7874-42c2-bf2d-f7a791cf84fa",
+    "/api/files/p0-persist-50-empty-last-57d99954-7874-42c2-bf2d-f7a791cf84fa/info": {
+      "status": 200,
+      "keys": [
+        "ok",
+        "viewingHistory",
+        "file"
+      ],
+      "revision": 1,
+      "title": "50-empty-last"
+    },
+    "/api/files/p0-persist-50-empty-last-57d99954-7874-42c2-bf2d-f7a791cf84fa?format=meta": {
+      "status": 200,
+      "keys": [
+        "room_key",
+        "version",
+        "title",
+        "share_url",
+        "updated_at",
+        "metadata",
+        "role",
+        "canView",
+        "canEdit",
+        "canManage",
+        "shareId",
+        "legacyOpen"
+      ],
+      "title": "50-empty-last"
+    },
+    "/api/files/p0-persist-50-empty-last-57d99954-7874-42c2-bf2d-f7a791cf84fa/snapshot?format=meta": {
+      "status": 404,
+      "keys": [
+        "error",
+        "code"
+      ]
+    }
+  },
+  {
+    "room": "p0-persist-200-empty-last-8168dd5f-a714-4198-92e4-e697cf3760c2",
+    "/api/files/p0-persist-200-empty-last-8168dd5f-a714-4198-92e4-e697cf3760c2/info": {
+      "status": 200,
+      "keys": [
+        "ok",
+        "viewingHistory",
+        "file"
+      ],
+      "revision": 1,
+      "title": "200-empty-last"
+    },
+    "/api/files/p0-persist-200-empty-last-8168dd5f-a714-4198-92e4-e697cf3760c2?format=meta": {
+      "status": 200,
+      "keys": [
+        "room_key",
+        "version",
+        "title",
+        "share_url",
+        "updated_at",
+        "metadata",
+        "role",
+        "canView",
+        "canEdit",
+        "canManage",
+        "shareId",
+        "legacyOpen"
+      ],
+      "title": "200-empty-last"
+    },
+    "/api/files/p0-persist-200-empty-last-8168dd5f-a714-4198-92e4-e697cf3760c2/snapshot?format=meta": {
+      "status": 404,
+      "keys": [
+        "error",
+        "code"
+      ]
+    }
+  },
+  {
+    "room": "p0-persist-500-canonical-middle-e5f17402-b7f9-4c41-9580-f09266f85015",
+    "/api/files/p0-persist-500-canonical-middle-e5f17402-b7f9-4c41-9580-f09266f85015/info": {
+      "status": 200,
+      "keys": [
+        "ok",
+        "viewingHistory",
+        "file"
+      ],
+      "revision": 6,
+      "title": "500-canonical-middle"
+    },
+    "/api/files/p0-persist-500-canonical-middle-e5f17402-b7f9-4c41-9580-f09266f85015?format=meta": {
+      "status": 200,
+      "keys": [
+        "room_key",
+        "version",
+        "title",
+        "share_url",
+        "updated_at",
+        "metadata",
+        "role",
+        "canView",
+        "canEdit",
+        "canManage",
+        "shareId",
+        "legacyOpen"
+      ],
+      "title": "500-canonical-middle"
+    },
+    "/api/files/p0-persist-500-canonical-middle-e5f17402-b7f9-4c41-9580-f09266f85015/snapshot?format=meta": {
+      "status": 404,
+      "keys": [
+        "error",
+        "code"
+      ]
+    }
+  }
+]

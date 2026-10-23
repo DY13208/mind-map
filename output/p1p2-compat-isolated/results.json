@@ -1,0 +1,422 @@
+{
+  "startedAt": "2026-10-23T05:36:35.567Z",
+  "errors": [],
+  "geometry": {
+    "diffs": [],
+    "expandEqual": true,
+    "nodes": 5
+  },
+  "layoutsOff": [
+    {
+      "layout": "logicalStructure",
+      "ok": true,
+      "nodes": 5,
+      "groups": 5,
+      "note": "备注内容",
+      "comments": 1,
+      "hyperlink": "https://example.com/doc",
+      "attachment": "附件.pdf",
+      "expand": {
+        "root": true,
+        "feat": true,
+        "leaf-a": true,
+        "leaf-b": true,
+        "collapsed": false,
+        "hidden": true
+      }
+    },
+    {
+      "layout": "logicalStructureLeft",
+      "ok": true,
+      "nodes": 5,
+      "groups": 5,
+      "note": "备注内容",
+      "comments": 1,
+      "hyperlink": "https://example.com/doc",
+      "attachment": "附件.pdf",
+      "expand": {
+        "root": true,
+        "feat": true,
+        "leaf-a": true,
+        "leaf-b": true,
+        "collapsed": false,
+        "hidden": true
+      }
+    },
+    {
+      "layout": "mindMap",
+      "ok": true,
+      "nodes": 5,
+      "groups": 5,
+      "note": "备注内容",
+      "comments": 1,
+      "hyperlink": "https://example.com/doc",
+      "attachment": "附件.pdf",
+      "expand": {
+        "root": true,
+        "feat": true,
+        "leaf-a": true,
+        "leaf-b": true,
+        "collapsed": false,
+        "hidden": true
+      }
+    },
+    {
+      "layout": "organizationStructure",
+      "ok": true,
+      "nodes": 5,
+      "groups": 5,
+      "note": "备注内容",
+      "comments": 1,
+      "hyperlink": "https://example.com/doc",
+      "attachment": "附件.pdf",
+      "expand": {
+        "root": true,
+        "feat": true,
+        "leaf-a": true,
+        "leaf-b": true,
+        "collapsed": false,
+        "hidden": true
+      }
+    },
+    {
+      "layout": "catalogOrganization",
+      "ok": true,
+      "nodes": 5,
+      "groups": 5,
+      "note": "备注内容",
+      "comments": 1,
+      "hyperlink": "https://example.com/doc",
+      "attachment": "附件.pdf",
+      "expand": {
+        "root": true,
+        "feat": true,
+        "leaf-a": true,
+        "leaf-b": true,
+        "collapsed": false,
+        "hidden": true
+      }
+    },
+    {
+      "layout": "timeline",
+      "ok": true,
+      "nodes": 5,
+      "groups": 5,
+      "note": "备注内容",
+      "comments": 1,
+      "hyperlink": "https://example.com/doc",
+      "attachment": "附件.pdf",
+      "expand": {
+        "root": true,
+        "feat": true,
+        "leaf-a": true,
+        "leaf-b": true,
+        "collapsed": false,
+        "hidden": true
+      }
+    },
+    {
+      "layout": "timeline2",
+      "ok": true,
+      "nodes": 5,
+      "groups": 5,
+      "note": "备注内容",
+      "comments": 1,
+      "hyperlink": "https://example.com/doc",
+      "attachment": "附件.pdf",
+      "expand": {
+        "root": true,
+        "feat": true,
+        "leaf-a": true,
+        "leaf-b": true,
+        "collapsed": false,
+        "hidden": true
+      }
+    },
+    {
+      "layout": "verticalTimeline",
+      "ok": true,
+      "nodes": 5,
+      "groups": 5,
+      "note": "备注内容",
+      "comments": 1,
+      "hyperlink": "https://example.com/doc",
+      "attachment": "附件.pdf",
+      "expand": {
+        "root": true,
+        "feat": true,
+        "leaf-a": true,
+        "leaf-b": true,
+        "collapsed": false,
+        "hidden": true
+      }
+    },
+    {
+      "layout": "fishbone",
+      "ok": true,
+      "nodes": 5,
+      "groups": 5,
+      "note": "备注内容",
+      "comments": 1,
+      "hyperlink": "https://example.com/doc",
+      "attachment": "附件.pdf",
+      "expand": {
+        "root": true,
+        "feat": true,
+        "leaf-a": true,
+        "leaf-b": true,
+        "collapsed": false,
+        "hidden": true
+      }
+    }
+  ],
+  "layoutsOn": [
+    {
+      "layout": "logicalStructure",
+      "ok": true,
+      "nodes": 5,
+      "groups": 5,
+      "note": "备注内容",
+      "comments": 1,
+      "hyperlink": "https://example.com/doc",
+      "attachment": "附件.pdf",
+      "expand": {
+        "root": true,
+        "feat": true,
+        "leaf-a": true,
+        "leaf-b": true,
+        "collapsed": false,
+        "hidden": true
+      }
+    },
+    {
+      "layout": "logicalStructureLeft",
+      "ok": true,
+      "nodes": 5,
+      "groups": 5,
+      "note": "备注内容",
+      "comments": 1,
+      "hyperlink": "https://example.com/doc",
+      "attachment": "附件.pdf",
+      "expand": {
+        "root": true,
+        "feat": true,
+        "leaf-a": true,
+        "leaf-b": true,
+        "collapsed": false,
+        "hidden": true
+      }
+    },
+    {
+      "layout": "mindMap",
+      "ok": true,
+      "nodes": 5,
+      "groups": 5,
+      "note": "备注内容",
+      "comments": 1,
+      "hyperlink": "https://example.com/doc",
+      "attachment": "附件.pdf",
+      "expand": {
+        "root": true,
+        "feat": true,
+        "leaf-a": true,
+        "leaf-b": true,
+        "collapsed": false,
+        "hidden": true
+      }
+    },
+    {
+      "layout": "organizationStructure",
+      "ok": true,
+      "nodes": 5,
+      "groups": 5,
+      "note": "备注内容",
+      "comments": 1,
+      "hyperlink": "https://example.com/doc",
+      "attachment": "附件.pdf",
+      "expand": {
+        "root": true,
+        "feat": true,
+        "leaf-a": true,
+        "leaf-b": true,
+        "collapsed": false,
+        "hidden": true
+      }
+    },
+    {
+      "layout": "catalogOrganization",
+      "ok": true,
+      "nodes": 5,
+      "groups": 5,
+      "note": "备注内容",
+      "comments": 1,
+      "hyperlink": "https://example.com/doc",
+      "attachment": "附件.pdf",
+      "expand": {
+        "root": true,
+        "feat": true,
+        "leaf-a": true,
+        "leaf-b": true,
+        "collapsed": false,
+        "hidden": true
+      }
+    },
+    {
+      "layout": "timeline",
+      "ok": true,
+      "nodes": 5,
+      "groups": 5,
+      "note": "备注内容",
+      "comments": 1,
+      "hyperlink": "https://example.com/doc",
+      "attachment": "附件.pdf",
+      "expand": {
+        "root": true,
+        "feat": true,
+        "leaf-a": true,
+        "leaf-b": true,
+        "collapsed": false,
+        "hidden": true
+      }
+    },
+    {
+      "layout": "timeline2",
+      "ok": true,
+      "nodes": 5,
+      "groups": 5,
+      "note": "备注内容",
+      "comments": 1,
+      "hyperlink": "https://example.com/doc",
+      "attachment": "附件.pdf",
+      "expand": {
+        "root": true,
+        "feat": true,
+        "leaf-a": true,
+        "leaf-b": true,
+        "collapsed": false,
+        "hidden": true
+      }
+    },
+    {
+      "layout": "verticalTimeline",
+      "ok": true,
+      "nodes": 5,
+      "groups": 5,
+      "note": "备注内容",
+      "comments": 1,
+      "hyperlink": "https://example.com/doc",
+      "attachment": "附件.pdf",
+      "expand": {
+        "root": true,
+        "feat": true,
+        "leaf-a": true,
+        "leaf-b": true,
+        "collapsed": false,
+        "hidden": true
+      }
+    },
+    {
+      "layout": "fishbone",
+      "ok": true,
+      "nodes": 5,
+      "groups": 5,
+      "note": "备注内容",
+      "comments": 1,
+      "hyperlink": "https://example.com/doc",
+      "attachment": "附件.pdf",
+      "expand": {
+        "root": true,
+        "feat": true,
+        "leaf-a": true,
+        "leaf-b": true,
+        "collapsed": false,
+        "hidden": true
+      }
+    }
+  ],
+  "featuresOff": {
+    "flags": "off",
+    "errors": [],
+    "minimap": {
+      "hasSvg": true,
+      "width": 457
+    },
+    "associative": {
+      "ok": true,
+      "targets": [
+        "leaf-b"
+      ]
+    },
+    "search": {
+      "ok": true,
+      "parentExpanded": true,
+      "preferenceEvent": true,
+      "expandChanged": true
+    },
+    "svg": {
+      "ok": true,
+      "bytes": 21118
+    },
+    "png": {
+      "ok": true,
+      "detail": 52174
+    },
+    "pdf": {
+      "ok": true,
+      "bytes": 30437
+    },
+    "xmind": {
+      "ok": true,
+      "bytes": 10816
+    },
+    "undo": {
+      "before": "可搜索叶子甲",
+      "afterBack": "可搜索叶子甲",
+      "afterForward": "撤销重做探测",
+      "backRestored": true
+    }
+  },
+  "featuresOn": {
+    "flags": "p1ab",
+    "errors": [],
+    "minimap": {
+      "hasSvg": true,
+      "width": 457
+    },
+    "associative": {
+      "ok": true,
+      "targets": [
+        "leaf-b"
+      ]
+    },
+    "search": {
+      "ok": true,
+      "parentExpanded": true,
+      "preferenceEvent": true,
+      "expandChanged": true
+    },
+    "svg": {
+      "ok": true,
+      "bytes": 21118
+    },
+    "png": {
+      "ok": true,
+      "detail": 52174
+    },
+    "pdf": {
+      "ok": true,
+      "bytes": 30437
+    },
+    "xmind": {
+      "ok": true,
+      "bytes": 10816
+    },
+    "undo": {
+      "before": "可搜索叶子甲",
+      "afterBack": "可搜索叶子甲",
+      "afterForward": "撤销重做探测",
+      "backRestored": true
+    }
+  },
+  "harnessErrors": []
+}

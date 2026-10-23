@@ -29,6 +29,10 @@ import {
   inspectLayoutRenderer
 } from '../utils/collabLayoutCleanup'
 import collabNodeFeatures from '../utils/collabNodeFeatures'
+import p1PerfPlanModule from '../utils/p1PerfPlan'
+const p1PerfPlan = p1PerfPlanModule.planRemoteNodePaint
+  ? p1PerfPlanModule
+  : p1PerfPlanModule.default
 import collabDelete from '../utils/collabDelete'
 import collabFullTree from '../utils/collabFullTree'
 import collabSpecialObjects from '../utils/collabSpecialObjects'
@@ -6108,21 +6112,31 @@ class Cooperate {
         })
       }
       const recreate = collabNodeFeatures.recreateTypesFromPatch(stylePayload)
+      let sizeChanged = false
       if (typeof node.reRender === 'function') {
-        node.reRender(recreate.length ? recreate : undefined)
+        sizeChanged = !!node.reRender(recreate.length ? recreate : undefined)
       } else if (typeof renderer.reRenderNodeCheckChange === 'function') {
         renderer.reRenderNodeCheckChange(node, false)
+        sizeChanged = true
       }
-      if (node.parent && typeof node.parent.renderLine === 'function') {
-        node.parent.renderLine(true)
-      } else if (typeof node.renderLine === 'function') {
-        node.renderLine(true)
-      }
+      const flags = (this.mindMap && this.mindMap.opt && this.mindMap.opt.performanceFlags) || {}
+      const plan = p1PerfPlan.planRemoteNodePaint(stylePayload, {
+        sizeChanged,
+        inheritAncestorLineStyle: !!(
+          this.mindMap &&
+          this.mindMap.opt &&
+          this.mindMap.opt.enableInheritAncestorLineStyle
+        ),
+        scopedLine: !!flags.scopedRemoteLineRender,
+        scopedGeometry: !!flags.scopedRemoteGeometry,
+        needsGeometryRefresh: collabNodeFeatures.needsGeometryRefresh(stylePayload)
+      })
+      p1PerfPlan.applyRemoteLineRefresh(node, plan.lineRefresh)
       if (
+        plan.scheduleLayout &&
         this.mindMap &&
         typeof this.mindMap.render === 'function' &&
-        !this.httpRefreshing &&
-        collabNodeFeatures.needsGeometryRefresh(stylePayload)
+        !this.httpRefreshing
       ) {
         this.scheduleRemoteGeometryRender(node.getData && node.getData('uid'))
       }
@@ -9763,7 +9777,7 @@ class Cooperate {
       try {
         // Hydrate the data path: collapsed ancestors have no rendered instance.
         await this.ensureHttpNodePath(uid)
-        this.mindMap.emit('personal_expand_change')
+        this.mindMap.emit('personal_expand_change', { source: 'reveal' })
         await new Promise(resolve => this.mindMap.render(resolve))
       } finally {
         this.httpHydrating = false

@@ -1,0 +1,16 @@
+{
+  "kind": "real-e2e",
+  "room": "c2-browser-5000-1788761408598",
+  "before": {
+    "nodes": 2,
+    "rootKids": 1,
+    "rootText": "<p>Root</p>"
+  },
+  "expanded": {
+    "ok": true,
+    "ms": 2511.0999999940395,
+    "nodes": 10,
+    "n0expand": true,
+    "n0children": 8
+  }
+}

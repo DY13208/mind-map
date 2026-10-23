@@ -1,0 +1,214 @@
+{
+  "startedAt": "2026-10-23T04:06:04.898Z",
+  "sizes": [
+    {
+      "n": 1000,
+      "flags": {},
+      "initMs": 2914.6,
+      "initBBox": 58991,
+      "initLayouts": 0,
+      "editWall": 40.9,
+      "editLayouts": 0,
+      "editBBox": 46,
+      "dom": {
+        "svgElements": 219,
+        "nodeGroupsAttached": 24,
+        "pathsAttached": 67,
+        "modelNodes": 1000
+      }
+    },
+    {
+      "n": 1000,
+      "flags": {
+        "canvasTextMeasure": true,
+        "scopedRemoteLineRender": true,
+        "scopedRemoteGeometry": true
+      },
+      "initMs": 782.8,
+      "initBBox": 7455,
+      "initLayouts": 0,
+      "editWall": 96.9,
+      "editLayouts": 0,
+      "editBBox": 6,
+      "dom": {
+        "svgElements": 219,
+        "nodeGroupsAttached": 24,
+        "pathsAttached": 67,
+        "modelNodes": 1000
+      }
+    },
+    {
+      "n": 3000,
+      "flags": {},
+      "initMs": 9375,
+      "initBBox": 184489,
+      "initLayouts": 0,
+      "editWall": 75.3,
+      "editLayouts": 0,
+      "editBBox": 46,
+      "dom": {
+        "svgElements": 45,
+        "nodeGroupsAttached": 2,
+        "pathsAttached": 27,
+        "modelNodes": 3000
+      }
+    },
+    {
+      "n": 3000,
+      "flags": {
+        "canvasTextMeasure": true,
+        "scopedRemoteLineRender": true,
+        "scopedRemoteGeometry": true
+      },
+      "initMs": 1939.9,
+      "initBBox": 21037,
+      "initLayouts": 0,
+      "editWall": 164.2,
+      "editLayouts": 0,
+      "editBBox": 6,
+      "dom": {
+        "svgElements": 45,
+        "nodeGroupsAttached": 2,
+        "pathsAttached": 27,
+        "modelNodes": 3000
+      }
+    },
+    {
+      "n": 6000,
+      "flags": {},
+      "initMs": 27795.6,
+      "initBBox": 373438,
+      "initLayouts": 0,
+      "editWall": 333.2,
+      "editLayouts": 0,
+      "editBBox": 46,
+      "dom": {
+        "svgElements": 62,
+        "nodeGroupsAttached": 5,
+        "pathsAttached": 23,
+        "modelNodes": 6000
+      }
+    },
+    {
+      "n": 6000,
+      "flags": {
+        "canvasTextMeasure": true,
+        "scopedRemoteLineRender": true,
+        "scopedRemoteGeometry": true
+      },
+      "initMs": 7046.5,
+      "initBBox": 42094,
+      "initLayouts": 0,
+      "editWall": 269.2,
+      "editLayouts": 0,
+      "editBBox": 6,
+      "dom": {
+        "svgElements": 62,
+        "nodeGroupsAttached": 5,
+        "pathsAttached": 23,
+        "modelNodes": 6000
+      }
+    },
+    {
+      "n": 10000,
+      "flags": {},
+      "initMs": 64248.4,
+      "initBBox": 625221,
+      "initLayouts": 0,
+      "editWall": 468.1,
+      "editLayouts": 0,
+      "editBBox": 46,
+      "dom": {
+        "svgElements": 92,
+        "nodeGroupsAttached": 6,
+        "pathsAttached": 46,
+        "modelNodes": 10000
+      }
+    },
+    {
+      "n": 10000,
+      "flags": {
+        "canvasTextMeasure": true,
+        "scopedRemoteLineRender": true,
+        "scopedRemoteGeometry": true
+      },
+      "initMs": 10285.7,
+      "initBBox": 70113,
+      "initLayouts": 0,
+      "editWall": 510.9,
+      "editLayouts": 0,
+      "editBBox": 6,
+      "dom": {
+        "svgElements": 92,
+        "nodeGroupsAttached": 6,
+        "pathsAttached": 46,
+        "modelNodes": 10000
+      }
+    }
+  ],
+  "probes": {
+    "inherit-off": {
+      "flags": {},
+      "colors": [
+        "#cc2244",
+        "#cc2244"
+      ],
+      "inherited": "#cc2244"
+    },
+    "inherit-on": {
+      "flags": {
+        "scopedRemoteLineRender": true
+      },
+      "colors": [
+        "#cc2244",
+        "#cc2244"
+      ],
+      "inherited": "#cc2244"
+    },
+    "style-6000-off": {
+      "n": 6000,
+      "flags": {},
+      "syncMs": 33.4,
+      "beforePaths": 23,
+      "afterPaths": 6005,
+      "afterGroups": 5,
+      "scheduledLayouts": 0,
+      "extraLayouts": 0
+    },
+    "style-6000-on": {
+      "n": 6000,
+      "flags": {
+        "scopedRemoteLineRender": true
+      },
+      "syncMs": 2,
+      "beforePaths": 23,
+      "afterPaths": 23,
+      "afterGroups": 5,
+      "scheduledLayouts": 0,
+      "extraLayouts": 0
+    },
+    "geom-1000-off": {
+      "n": 1000,
+      "flags": {},
+      "sameSizeScheduled": 1,
+      "sizeScheduled": 1
+    },
+    "geom-1000-on": {
+      "n": 1000,
+      "flags": {
+        "scopedRemoteGeometry": true
+      },
+      "sameSizeScheduled": 0,
+      "sizeScheduled": 1
+    }
+  },
+  "visual": {
+    "nodes": 7,
+    "diffs": [],
+    "exportLenOff": 10241,
+    "exportLenOn": 10241,
+    "exportEqual": true
+  },
+  "errors": [],
+  "harnessErrors": []
+}

@@ -270,7 +270,7 @@ export default {
     remove: 'Remove link',
     invalidLink: 'Enter a valid HTTP or HTTPS URL',
     localFileAsAttachment: 'Local files cannot be hyperlinks. Upload them as attachments instead.',
-    localFileRedirect: '“{name}” is a local file. Opening the attachment picker instead.'
+    localFileRedirect: '“{name}” is a local file. Opening the attachment picker instead.',
     requiredLink: 'Enter a link address'
   },
   nodeIcon: {

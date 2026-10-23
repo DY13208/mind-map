@@ -260,6 +260,13 @@ export const getDataAsync = async () => {
   }
 }
 
+export const remainingCollabDraftInterval = (room, now = Date.now()) => {
+  const key = draftKey(room)
+  const last = collabDraftAt.get(key) || 0
+  const left = COLLAB_DRAFT_MIN_INTERVAL_MS - (now - last)
+  return left > 0 ? left : 0
+}
+
 export const storeData = (data, options = {}) => {
   try {
     const room = options.room == null ? currentRoom() : options.room

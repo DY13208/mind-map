@@ -126,8 +126,10 @@ import {
   getConfig,
   storeData,
   getPendingRoomDraft,
-  clearPendingRoomDraft
+  clearPendingRoomDraft,
+  remainingCollabDraftInterval
 } from '@/api'
+import { shouldDeferDraftTreeCopy } from '@/utils/draftFlushPlan'
 import {
   shouldRestoreDraft,
   draftRestoredTip,
@@ -1130,6 +1132,21 @@ export default {
 
     flushStoreData(force = false) {
       if (this._editorDisposed) return
+      const flags = this.mindMap && this.mindMap.opt && this.mindMap.opt.performanceFlags
+      const remainingMs = remainingCollabDraftInterval(this._saveRoomKey)
+      if (
+        shouldDeferDraftTreeCopy({
+          force,
+          flagEnabled: !!(flags && flags.deferDraftCopy),
+          hasPendingTree: !!this.pendingStoreData,
+          remainingMs
+        })
+      ) {
+        clearTimeout(this.storeDataTimer)
+        this.storeDataTimer = setTimeout(() => this.flushStoreData(), remainingMs)
+        this._saveTimerV2 = true
+        return
+      }
       const pending = {}
       if (this.pendingStoreData) {
         pending.root = this._pendingSaveData || (this.mindMap && this.mindMap.command.getCopyData())
@@ -1218,7 +1235,14 @@ export default {
         view = null
       }
       this.prepareInitialCanvasBackground()
-      this.mindMap = new MindMap({
+        const queryFlags = String((this.$route && this.$route.query && this.$route.query.perfFlags) || '')
+        const performanceFlags = {}
+        queryFlags.split(',').forEach(token => {
+          const key = String(token || '').trim()
+          if (key) performanceFlags[key] = true
+        })
+        this.mindMap = new MindMap({
+        performanceFlags,
         historyCopyRoomKey: roomFromLocation(this.$route) || '',
         el: this.$refs.mindMapContainer,
         data: root,
