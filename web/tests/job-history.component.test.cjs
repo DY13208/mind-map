@@ -153,6 +153,7 @@ const { code } = babel.transformSync(parsed.script.content, {
 const mod = { exports: {} }
 new Function('require', 'module', 'exports', code)(name => {
   if (name === 'vuex') return { mapState: () => ({}) }
+  if (name === '@/utils/knowledgeFiles') return { appendKnowledgeFullText: async prompt => prompt }
   if (name === 'element-ui') return { Notification: () => {} }
   if (name === 'markdown-it') {
     return class MarkdownIt {

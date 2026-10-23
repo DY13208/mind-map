@@ -54,6 +54,7 @@ const COPY_DATA_KEYS = [
   'paddingY',
   'expand',
   'attachmentUrl',
+  'knowledgeFiles',
   'attachmentName',
   'attachmentId',
   'attachmentMimeType',

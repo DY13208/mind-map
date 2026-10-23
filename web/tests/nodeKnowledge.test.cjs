@@ -18,6 +18,16 @@ const {
   safeImageUrl
 } = moduleRef.exports
 
+const knowledgeFiles = collectNodeKnowledge({ data: { knowledgeFiles: [
+  { id: 'kb-a', name: '说明.txt', parseVersion: 3, status: 'ready', extractedText: '第一份文件的解析正文' },
+  { id: 'kb-b', name: '流程.pdf', status: 'ready', extractedText: '第二份文件的解析正文' }
+] } })
+assert.equal(knowledgeFiles.attachmentCount, 2)
+assert.equal(knowledgeFiles.sources.filter(source => source.type === 'knowledge-file').length, 2)
+assert.ok(knowledgeFiles.text.includes('第一份文件的解析正文'))
+assert.ok(knowledgeFiles.text.includes('第二份文件的解析正文'))
+assert.ok(knowledgeFiles.text.includes('file_id=kb-a'))
+
 const hugeDataUrl = `data:image/png;base64,${'A'.repeat(1500001)}`
 const knowledge = collectNodeKnowledge({
   data: {

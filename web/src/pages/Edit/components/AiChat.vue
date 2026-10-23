@@ -62,10 +62,12 @@ import Sidebar from './Sidebar.vue'
 import { mapState } from 'vuex'
 import { createUid } from 'simple-mind-map/src/utils'
 import MarkdownIt from 'markdown-it'
+import { appendKnowledgeFullText } from '@/utils/knowledgeFiles'
 
 let md = null
 
 export default {
+  props: { mindMap: { type: Object, default: null } },
   components: {
     Sidebar
   },
@@ -73,7 +75,8 @@ export default {
     return {
       text: '',
       chatList: [],
-      isCreating: false
+      isCreating: false,
+      knowledgeRequest: 0
     }
   },
   computed: {
@@ -92,24 +95,35 @@ export default {
     }
   },
   created() {},
-  beforeDestroy() {},
+  beforeDestroy() { this.knowledgeRequest++ },
   methods: {
     onKeydown(e) {
       if (e.keyCode === 13) {
         if (!e.shiftKey) {
           e.preventDefault()
           this.send()
-        } else {
         }
       }
     },
 
-    send() {
+    async send() {
       if (this.isCreating) return
       const text = this.text.trim()
       if (!text) {
         return
       }
+      this.isCreating = true
+      const request = ++this.knowledgeRequest
+      const room = this.$route && this.$route.query && this.$route.query.room
+      const node = this.mindMap && this.mindMap.renderer && (this.mindMap.renderer.activeNodeList || [])[0]
+      let textWithKnowledge = text
+      try { textWithKnowledge = await appendKnowledgeFullText(text, node) }
+      catch (error) {
+        if (request === this.knowledgeRequest) { this.isCreating = false; this.$message.error(error.message) }
+        return
+      }
+      if (request !== this.knowledgeRequest) return
+      if (room !== (this.$route && this.$route.query && this.$route.query.room)) { this.isCreating = false; return }
       this.text = ''
       const historyUserMsgList = this.chatList
         .filter(item => {
@@ -129,7 +143,7 @@ export default {
         content: ''
       })
       this.isCreating = true
-      const textList = [...historyUserMsgList, text]
+      const textList = [...historyUserMsgList, textWithKnowledge]
       this.$bus.$emit(
         'ai_chat',
         textList,
@@ -151,6 +165,7 @@ export default {
     },
 
     stop() {
+      this.knowledgeRequest++
       this.$bus.$emit('ai_chat_stop')
       this.isCreating = false
     },

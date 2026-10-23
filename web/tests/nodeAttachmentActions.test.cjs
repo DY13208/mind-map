@@ -117,6 +117,7 @@ function makeAttachmentVm(component, api, nodeList) {
     execCommand(...args) {
       commands.push(args)
       const [, target, url, name, meta] = args
+      if (args[0] === 'SET_NODE_DATA') { Object.assign(target.nodeData.data, url); return }
       Object.assign(target.nodeData.data, {
         attachmentUrl: url,
         attachmentName: name,
@@ -835,7 +836,62 @@ async function run() {
   assert.equal(ignoreReadonlyNode.getData('attachmentErrorIgnored'), undefined)
   assert.ok(ignoreReadonlyVm.messages.entries.some(entry => entry[0] === 'warning'))
 
-  console.log('Node attachment delete/replace concurrency tests passed')
+  // Multiple KB references preserve the existing attachment and parsed excerpts.
+  let referenceReads = 0
+  let referenceResult = async file => ({ ...file, extractedText: '已解析的知识库内容' })
+  const knowledgeComponent = loadVue(
+    path.join(__dirname, '../src/pages/Edit/components/NodeAttachment.vue'),
+    { '@/utils/nodeAttachmentApi': api, '@/utils/knowledgeFiles': {
+      MAX_KNOWLEDGE_FILES: 20,
+      readKnowledgeFileReference: file => { referenceReads++; return referenceResult(file) }
+    } }
+  )
+  const knowledgeNode = node('kb-node', { attachmentId: 'original', attachmentName: 'original.txt' })
+  const knowledgeVm = makeAttachmentVm(knowledgeComponent, api, [knowledgeNode])
+  knowledgeVm.onSelectKnowledgeFile([knowledgeNode])
+  assert.equal(knowledgeVm.knowledgeVisible, true)
+  await knowledgeVm.onKnowledgeFilePicked([{ id: 'kb-file', name: '原文.txt' }, { id: 'pdf', name: '说明.pdf' }])
+  assert.equal(knowledgeNode.getData('knowledgeFiles').length, 2)
+  assert.equal(knowledgeNode.getData('knowledgeFiles')[1].extractedText, '已解析的知识库内容')
+  assert.equal(knowledgeNode.getData('attachmentId'), 'original')
+  assert.equal(knowledgeVm.knowledgeVisible, false)
+  assert.equal(knowledgeVm.knowledgeBusy, false)
+  knowledgeVm.mindMap.opt = { readonly: true }
+  knowledgeVm.onSelectKnowledgeFile([knowledgeNode])
+  assert.equal(knowledgeVm.knowledgeVisible, false)
+  knowledgeVm.mindMap.opt.readonly = false
+  knowledgeVm.onSelectKnowledgeFile([knowledgeNode])
+  const readsBeforeLimit = referenceReads
+  await knowledgeVm.onKnowledgeFilePicked(Array.from({ length: 21 }, (_, id) => ({ id })))
+  assert.equal(referenceReads, readsBeforeLimit, 'too many files rejected before fetching')
+  const delayedRaw = deferred()
+  referenceResult = () => delayedRaw.promise
+  const previousRefs = knowledgeNode.getData('knowledgeFiles')
+  const pendingKnowledge = knowledgeVm.onKnowledgeFilePicked([{ id: 'new-file', name: '原文.txt' }])
+  knowledgeVm.$route.query.room = 'different-room'
+  delayedRaw.resolve({ id: 'new-file', extractedText: 'stale' })
+  await pendingKnowledge
+  assert.equal(knowledgeNode.getData('knowledgeFiles'), previousRefs, 'room changes during reading must not mount knowledge files')
+  assert.equal(knowledgeVm.knowledgeBusy, false)
+
+  const picker = loadVue(path.join(__dirname, '../src/pages/Edit/components/KnowledgeFilePicker.vue'), {
+    '@/utils/knowledgeFiles': { MAX_KNOWLEDGE_FILES: 20 },
+    '@/features/knowledge-base/services/kbApi': {
+      listFolders: async ({ parentId }) => ({ items: parentId ? [] : [{ id: 'folder-a', name: '制度' }] }),
+      listFiles: async ({ folderId }) => ({ items: folderId ? [{ id: 'child', name: '制度.pdf', folderId }] : [{ id: 'root', name: '说明.txt' }, { id: 'child', folderId: 'folder-a' }] })
+    }
+  })
+  const pickerVm = { ...picker.data(), ...picker.methods, busy: false, readonly: false,
+    $set(obj, key, value) { obj[key] = value }, $delete(obj, key) { delete obj[key] } }
+  Object.defineProperty(pickerVm, 'selectedFiles', { get() { return Object.values(this.selected) } })
+  const roots = await pickerVm.fetchChildren('')
+  assert.deepEqual(roots.map(item => item.kind), ['folder', 'file'])
+  const children = await pickerVm.fetchChildren('folder-a')
+  assert.equal(children[0].id, 'child')
+  pickerVm.checkFile(roots[1], true); pickerVm.checkFile(children[0], true)
+  assert.equal(pickerVm.selectedFiles.length, 2, 'selection persists across folders')
+  assert.equal(pickerVm.selectedFiles[0].id, 'root')
+  console.log('Node attachment delete/replace and knowledge file concurrency tests passed')
 }
 
 run().catch(error => {

@@ -130,6 +130,13 @@ export function collectNodeKnowledge(nodes, options = {}) {
 
   list.filter(Boolean).forEach(node => {
     const data = dataOf(node)
+    ;(Array.isArray(data.knowledgeFiles) ? data.knowledgeFiles : []).forEach(file => {
+      const name = stripHtml(file.name) || '知识库文件'
+      const text = stripHtml(file.extractedText)
+      attachmentCount++
+      truncated = appendWithinBudget(lines, `知识库文件（${name}，file_id=${file.id}，解析版本=${file.parseVersion || '未知'}）：${text ? truncate(text, config.maxAttachmentTextChars) : '暂无解析内容，请通过文件知识库读取'}`, budget) || truncated
+      pushSource(sources, { type: 'knowledge-file', name, status: text ? 'ready' : file.status, extractedText: text }, config)
+    })
 
     const note = stripHtml(data.note)
     if (note) {

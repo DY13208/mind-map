@@ -155,6 +155,7 @@ const NULLABLE_PATCH_KEYS = [
   'associativeLineStyle',
   'formula',
   'attachmentUrl',
+  'knowledgeFiles',
   'attachmentName',
   'attachmentId',
   'attachmentMimeType',
