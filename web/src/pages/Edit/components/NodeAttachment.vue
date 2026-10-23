@@ -151,6 +151,9 @@ export default {
       this.knowledgeVisible = false
       this.knowledgeTargets = []
       Object.keys(this.inflight).forEach(uid => this.abortInflight(uid))
+    },
+    mindMap() {
+      this.bindMindMapLocalFileEvents()
     }
   },
   created() {
@@ -158,18 +161,22 @@ export default {
     this.$bus.$on('selectKnowledgeFile', this.onSelectKnowledgeFile)
     this.$bus.$on('viewKnowledgeFiles', this.onViewKnowledgeFiles)
     this.$bus.$on('manageNodeAttachment', this.onManageAttachment)
+    this.$bus.$on('attachLocalFiles', this.onAttachLocalFiles)
   },
   mounted() {
     this.hydrateExistingAttachments()
+    this.bindMindMapLocalFileEvents()
   },
   beforeDestroy() {
     this.destroyed = true
     this.navigationEpoch += 1
     this.pendingNodes = []
+    this.unbindMindMapLocalFileEvents()
     this.$bus.$off('selectAttachment', this.onSelectAttachment)
     this.$bus.$off('selectKnowledgeFile', this.onSelectKnowledgeFile)
     this.$bus.$off('viewKnowledgeFiles', this.onViewKnowledgeFiles)
     this.$bus.$off('manageNodeAttachment', this.onManageAttachment)
+    this.$bus.$off('attachLocalFiles', this.onAttachLocalFiles)
     Object.keys(this.inflight).forEach(uid => this.abortInflight(uid))
   },
   methods: {
@@ -668,6 +675,45 @@ export default {
           }
         })
     },
+    bindMindMapLocalFileEvents() {
+      this.unbindMindMapLocalFileEvents()
+      if (!this.mindMap || typeof this.mindMap.on !== 'function') return
+      this._onAttachLocalFiles = payload => this.onAttachLocalFiles(payload)
+      this._onLocalFileHyperlinkBlocked = payload =>
+        this.onLocalFileHyperlinkBlocked(payload)
+      this.mindMap.on('attach_local_files', this._onAttachLocalFiles)
+      this.mindMap.on('local_file_hyperlink_blocked', this._onLocalFileHyperlinkBlocked)
+    },
+    unbindMindMapLocalFileEvents() {
+      if (!this.mindMap || typeof this.mindMap.off !== 'function') return
+      if (this._onAttachLocalFiles) {
+        this.mindMap.off('attach_local_files', this._onAttachLocalFiles)
+        this._onAttachLocalFiles = null
+      }
+      if (this._onLocalFileHyperlinkBlocked) {
+        this.mindMap.off(
+          'local_file_hyperlink_blocked',
+          this._onLocalFileHyperlinkBlocked
+        )
+        this._onLocalFileHyperlinkBlocked = null
+      }
+    },
+    onLocalFileHyperlinkBlocked(payload = {}) {
+      const node = payload.node
+      const name = payload.fileName || '本地文件'
+      this.$message.warning(
+        `「${name}」是本地文件，不能添加为超链接。请上传为附件后即可在节点上打开。`
+      )
+      if (node) this.onSelectAttachment([node])
+      else this.$bus.$emit('selectAttachment', this.activeNodesFromMindMap())
+    },
+    activeNodesFromMindMap() {
+      const list =
+        this.mindMap &&
+        this.mindMap.renderer &&
+        this.mindMap.renderer.activeNodeList
+      return Array.isArray(list) ? list.slice() : []
+    },
     onSelectAttachment(nodes) {
       const list = Array.isArray(nodes) ? nodes.filter(Boolean) : []
       if (!list.length) {
@@ -685,6 +731,43 @@ export default {
         .map(node => this.captureTarget(node, roomKey))
         .filter(Boolean)
       this.$refs.fileInput && this.$refs.fileInput.click()
+    },
+    // 粘贴/拖拽带来的真实 File：直接上传，不弹系统选择器
+    async onAttachLocalFiles(payload = {}) {
+      const files = Array.isArray(payload.files)
+        ? payload.files.filter(Boolean)
+        : payload.file
+          ? [payload.file]
+          : []
+      const nodes = Array.isArray(payload.nodes)
+        ? payload.nodes.filter(Boolean)
+        : this.activeNodesFromMindMap()
+      if (!files.length) return
+      if (!nodes.length) {
+        this.$message.warning('请先选中节点再粘贴/拖入本地文件')
+        return
+      }
+      const roomKey = roomFromLocation(this.$route)
+      if (!roomKey) {
+        this.$message.warning('请先进入协作房间后再上传附件')
+        return
+      }
+      this.pendingNodes = nodes
+        .map(node => this.captureTarget(node, roomKey))
+        .filter(Boolean)
+      if (!this.pendingNodes.length) {
+        this.$message.warning('请先选中节点再粘贴/拖入本地文件')
+        return
+      }
+      await this.uploadPickedFile(files[0])
+      if (files.length > 1) {
+        this.$message.info(`已上传「${files[0].name}」；一次仅挂载一个附件，其余文件请再次粘贴`)
+      }
+    },
+    async uploadPickedFile(file) {
+      if (!file) return
+      const fakeEvent = { target: { files: [file], value: '' } }
+      await this.onFilePicked(fakeEvent)
     },
     // 「忽略错误」/「恢复错误提示」：通过 SET_NODE_ATTACHMENT 写入节点数据，可撤销并同步给协作者。
     setAttachmentErrorIgnored(target, ignored) {

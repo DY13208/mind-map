@@ -1,5 +1,5 @@
 <template>
-  <div class="mapFileTree" :class="{ isDark: isDark }">
+  <div class="mapFileTree" :class="{ isDark: isDark, isTouchPanel: isTouchEditor }">
     <div class="treeHead">
       <span class="headLabel">脑图</span>
       <button v-if="isTouchEditor" type="button" aria-label="关闭脑图目录" @click="$emit('close')"><i class="el-icon-close" /></button>
@@ -257,6 +257,43 @@ export default {
     --tree-line: rgba(255, 255, 255, 0.12);
     --tree-mark: rgba(255, 255, 255, 0.4);
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  }
+
+  /* iPad / 触控：嵌在 drawer 里，去掉内层卡片，避免左侧白条+双层圆角 */
+  &.isTouchPanel {
+    width: 100%;
+    max-width: none;
+    height: 100%;
+    max-height: none;
+    min-height: 0;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    background: transparent;
+    padding: 12px;
+
+    .treeHead {
+      button {
+        width: 44px;
+        height: 44px;
+        margin-left: auto;
+        border: 0;
+        border-radius: 50%;
+        background: transparent;
+        color: inherit;
+        font-size: 18px;
+      }
+    }
+
+    .treeBody {
+      flex: 1;
+      min-height: 0;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .treeRow {
+      min-height: 44px;
+    }
   }
 }
 

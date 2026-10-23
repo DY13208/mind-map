@@ -8,21 +8,23 @@
     @mousedown.stop
     @click.stop
   >
-    <button type="button" class="hlTextBtn" @click="openLink">打开链接</button>
+    <button v-if="!isLocalFile" type="button" class="hlTextBtn" @click="openLink">打开链接</button>
+    <button v-else-if="!readonly" type="button" class="hlTextBtn" @click="uploadAsAttachment">上传为附件</button>
+    <span v-if="isLocalFile" class="hlLocalHint" :title="url">本地文件无法打开，请上传附件</span>
     <span class="hlDivider"></span>
-    <el-tooltip content="复制链接" placement="top" :open-delay="300">
+    <el-tooltip v-if="!isLocalFile" content="复制链接" placement="top" :open-delay="300">
       <button type="button" class="hlIconBtn" aria-label="复制链接" @click="copyLink">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
       </button>
     </el-tooltip>
     <template v-if="!readonly">
-      <el-tooltip content="编辑" placement="top" :open-delay="300">
+      <el-tooltip v-if="!isLocalFile" content="编辑" placement="top" :open-delay="300">
         <button type="button" class="hlIconBtn" aria-label="编辑链接" @click="editLink">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
         </button>
       </el-tooltip>
       <span class="hlDivider"></span>
-      <el-tooltip content="删除" placement="top" :open-delay="300">
+      <el-tooltip :content="isLocalFile ? '移除无效本地链接' : '删除'" placement="top" :open-delay="300">
         <button type="button" class="hlIconBtn" aria-label="删除链接" @click="removeLink">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
         </button>
@@ -32,8 +34,10 @@
 </template>
 
 <script>
+import { isLocalFileReference } from 'simple-mind-map/src/utils/localFileLink'
+
 const POPOVER_GAP = 6
-const POPOVER_MAX_WIDTH = 220
+const POPOVER_MAX_WIDTH = 280
 // 这些画布事件发生时（缩放、平移、拖动、模式切换）关闭操作条
 const CLOSE_EVENTS = ['scale', 'translate', 'svg_mousedown', 'node_dragging', 'mode_change', 'node_contextmenu']
 
@@ -56,6 +60,9 @@ export default {
   computed: {
     popoverStyle() {
       return { left: this.left + 'px', top: this.top + 'px' }
+    },
+    isLocalFile() {
+      return isLocalFileReference(this.url)
     }
   },
   created() {
@@ -181,9 +188,21 @@ export default {
     },
     editLink() {
       if (this.readonly || !this.node) return
+      if (this.isLocalFile) {
+        this.uploadAsAttachment()
+        return
+      }
       const node = this.node
       this.close()
       this.$bus.$emit('showNodeLink', node)
+    },
+    uploadAsAttachment() {
+      if (this.readonly || !this.node) return
+      const node = this.node
+      this.close()
+      // 先清掉无效本地链接，再打开附件选择
+      node.mindMap.execCommand('SET_NODE_HYPERLINK', node, '', '')
+      this.$bus.$emit('selectAttachment', [node])
     },
     removeLink() {
       if (this.readonly || !this.node) return
@@ -215,6 +234,15 @@ export default {
 
   &.placeBelow {
     transform: none;
+  }
+
+  .hlLocalHint {
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #b42318;
+    font-size: 12px;
   }
 
   .hlTextBtn,

@@ -1509,7 +1509,9 @@ function createServer(authorization) {
       note: z.string().describe('可选备注').optional(),
       hyperlink: z
         .string()
-        .describe('可选超链接。复制已有节点时传 query_nodes 返回的 data.hyperlink；空字符串表示不设置')
+        .describe(
+          '可选 HTTP/HTTPS 超链接。禁止 file:// 或本机盘符路径（如 D:\\a.html）；本地文件必须用 upload_attachment。空字符串表示不设置'
+        )
         .optional(),
       hyperlinkTitle: z
         .string()
@@ -1570,7 +1572,9 @@ function createServer(authorization) {
       note: z.string().describe('新备注').optional(),
       hyperlink: z
         .string()
-        .describe('超链接地址。不传则保持原链接；空字符串清除')
+        .describe(
+          'HTTP/HTTPS 超链接。不传保持原链接；空字符串清除。禁止 file:// 或本机路径，本地文件用 upload_attachment'
+        )
         .optional(),
       hyperlinkTitle: z
         .string()
@@ -1746,7 +1750,9 @@ function createServer(authorization) {
             note: z.string().describe('备注').optional(),
             hyperlink: z
               .string()
-              .describe('超链接地址。复制节点时传原 data.hyperlink；空字符串清除')
+              .describe(
+                'HTTP/HTTPS 超链接。复制时传原 data.hyperlink；空字符串清除。禁止 file:// 或本机路径，本地文件用 upload_attachment'
+              )
               .optional(),
             hyperlinkTitle: z
               .string()
