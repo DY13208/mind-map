@@ -38,7 +38,9 @@ function isBinaryFilePayload(body) {
 
 export function attachmentFingerprint(roomKey, file) {
   return [
-    'mind-att',
+    // v2 prevents completed uploads saved by older clients from being reused
+    // as if they were a fresh upload with the same local file metadata.
+    'mind-att-v2',
     String(roomKey || ''),
     String((file && file.name) || ''),
     String((file && file.size) || 0),
@@ -80,75 +82,103 @@ function uploadResumableAttachment(roomKey, body) {
   return enqueueAttachmentUpload(
     () =>
       new Promise((resolve, reject) => {
-        let attachmentId = ''
-        const upload = new Upload(file, {
-          endpoint: tusEndpoint(),
-          chunkSize: TUS_CHUNK_BYTES,
-          retryDelays: [0, 1000, 3000, 5000, 10000],
-          storeFingerprintForResuming: true,
-          removeFingerprintOnSuccess: false,
-          metadata: {
-            filename: fileName,
-            filetype: mimeType,
-            roomKey: String(roomKey || ''),
-            nodeUid: String(body.nodeUid || ''),
-            sourceKind: String(body.sourceKind || 'attachment'),
-            ...(body.forceExtract ? { forceExtract: '1' } : {})
-          },
-          fingerprint() {
-            return Promise.resolve(attachmentFingerprint(roomKey, file))
-          },
-          onBeforeRequest(req) {
-            const xhr = req && req.getUnderlyingObject && req.getUnderlyingObject()
-            if (xhr) xhr.withCredentials = true
-          },
-          onProgress(bytesUploaded, bytesTotal) {
-            if (typeof body.onUploadProgress !== 'function') return
-            const total = Number(bytesTotal) || file.size || 0
-            const loaded = Number(bytesUploaded) || 0
-            body.onUploadProgress({
-              loaded,
-              total,
-              percent: total ? Math.round((loaded / total) * 100) : 0
-            })
-          },
-          onAfterResponse(req, res) {
-            const id = headerValue(res, 'X-Mind-Attachment-Id')
-            if (id) attachmentId = id
-          },
-          onError(err) {
-            reject(err || new Error('附件上传失败'))
-          },
-          async onSuccess() {
-            try {
-              if (typeof body.onUploadProgress === 'function') {
-                body.onUploadProgress({
-                  loaded: file.size,
-                  total: file.size,
-                  percent: 100
-                })
+        let settled = false
+        let freshRetryStarted = false
+
+        const finish = (handler, value) => {
+          if (settled) return
+          settled = true
+          handler(value)
+        }
+
+        const startUpload = (isFreshRetry = false) => {
+          let attachmentId = ''
+          let upload
+          upload = new Upload(file, {
+            endpoint: tusEndpoint(),
+            chunkSize: TUS_CHUNK_BYTES,
+            retryDelays: [0, 1000, 3000, 5000, 10000],
+            storeFingerprintForResuming: true,
+            removeFingerprintOnSuccess: true,
+            metadata: {
+              filename: fileName,
+              filetype: mimeType,
+              roomKey: String(roomKey || ''),
+              nodeUid: String(body.nodeUid || ''),
+              sourceKind: String(body.sourceKind || 'attachment'),
+              ...(body.forceExtract ? { forceExtract: '1' } : {})
+            },
+            fingerprint() {
+              return Promise.resolve(attachmentFingerprint(roomKey, file))
+            },
+            onBeforeRequest(req) {
+              const xhr = req && req.getUnderlyingObject && req.getUnderlyingObject()
+              if (xhr) xhr.withCredentials = true
+            },
+            onProgress(bytesUploaded, bytesTotal) {
+              if (typeof body.onUploadProgress !== 'function') return
+              const total = Number(bytesTotal) || file.size || 0
+              const loaded = Number(bytesUploaded) || 0
+              body.onUploadProgress({
+                loaded,
+                total,
+                percent: total ? Math.round((loaded / total) * 100) : 0
+              })
+            },
+            onAfterResponse(req, res) {
+              const id = headerValue(res, 'X-Mind-Attachment-Id')
+              if (id) attachmentId = id
+            },
+            onError(err) {
+              finish(reject, err || new Error('附件上传失败'))
+            },
+            async onSuccess() {
+              try {
+                if (typeof body.onUploadProgress === 'function') {
+                  body.onUploadProgress({
+                    loaded: file.size,
+                    total: file.size,
+                    percent: 100
+                  })
+                }
+                if (attachmentId) {
+                  const data = await getNodeAttachment(roomKey, attachmentId)
+                  finish(resolve, data)
+                  return
+                }
+                const data = await fetchTusResult(upload.url)
+                finish(resolve, data)
+              } catch (err) {
+                // A completed legacy TUS URL may point to an expired or stale
+                // result sidecar. Start one new upload without consulting the
+                // old fingerprint; a second failure is returned to the caller.
+                if (
+                  !isFreshRetry &&
+                  !freshRetryStarted &&
+                  Number(err && err.statusCode) === 404
+                ) {
+                  freshRetryStarted = true
+                  startUpload(true)
+                  return
+                }
+                finish(reject, err)
               }
-              if (attachmentId) {
-                const data = await getNodeAttachment(roomKey, attachmentId)
-                resolve(data)
-                return
-              }
-              const data = await fetchTusResult(upload.url)
-              resolve(data)
-            } catch (err) {
-              reject(err)
             }
+          })
+
+          if (isFreshRetry) {
+            upload.start()
+            return
           }
-        })
-        upload
-          .findPreviousUploads()
-          .then(previous => {
+          upload.findPreviousUploads().then(previous => {
             if (previous && previous.length) {
               upload.resumeFromPreviousUpload(previous[0])
             }
             upload.start()
-          })
-          .catch(reject)
+          }).catch(err => finish(reject, err))
+        }
+
+        startUpload()
       })
   )
 }

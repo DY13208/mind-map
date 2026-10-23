@@ -19,6 +19,7 @@ const TUS_DIR = String(
 ).replace(/[/\\]+$/, '')
 
 let tusServer = null
+let tusDatastore = null
 
 function matchTus(pathname) {
   const m = String(pathname || '').match(
@@ -78,10 +79,18 @@ async function readResult(uploadId) {
   }
 }
 
+async function removeResultQuiet(uploadId) {
+  try {
+    await fs.promises.unlink(resultPath(uploadId))
+  } catch (err) {
+    // A missing or stale result sidecar must not prevent returning NOT_FOUND.
+  }
+}
+
 async function ingestFinishedUpload(req, upload) {
   const node = nodeReq(req)
   const roomKey = safeRoomKey(meta(upload, 'roomKey'))
-  const fileName = safeFileName(meta(upload, 'filename') || meta(upload, 'fileName') || 'file')
+  const fileName = meta(upload, 'filename') || meta(upload, 'fileName') || 'file'
   const mimeType = normalizeMime(
     meta(upload, 'filetype') || meta(upload, 'mimeType'),
     fileName
@@ -115,6 +124,7 @@ function getTusServer() {
     directory: TUS_DIR,
     expirationPeriodInMilliseconds: 24 * 60 * 60 * 1000
   })
+  tusDatastore = datastore
   tusServer = new Server({
     path: TUS_PATH,
     datastore,
@@ -198,6 +208,11 @@ function getTusServer() {
   return tusServer
 }
 
+function getTusDatastore() {
+  if (!tusDatastore) getTusServer()
+  return tusDatastore
+}
+
 async function handleTus(req, res, options = {}) {
   const pathname =
     options.pathname || String((req.url || '').split('?')[0] || '')
@@ -218,8 +233,33 @@ async function handleTus(req, res, options = {}) {
       return true
     }
     const db = options.db || getPool()
-    const attachment = await readResult(hit.id)
-    if (!attachment || !attachment.id) {
+    const datastore = getTusDatastore()
+    const upload = await datastore.getUpload(hit.id).catch(() => null)
+    const expiration = Number(datastore.getExpiration()) || 0
+    const creationTime = upload && upload.creation_date
+      ? new Date(upload.creation_date).getTime()
+      : NaN
+    const expired =
+      expiration > 0 &&
+      Number.isFinite(creationTime) &&
+      Date.now() > creationTime + expiration
+    if (
+      !upload ||
+      upload.size == null ||
+      Number(upload.offset) !== Number(upload.size) ||
+      expired
+    ) {
+      await removeResultQuiet(hit.id)
+      sendJson(res, 404, {
+        ok: false,
+        error: '续传记录不存在或已过期，请重新上传',
+        code: 'NOT_FOUND'
+      })
+      return true
+    }
+    const roomKey = safeRoomKey(meta(upload, 'roomKey'))
+    if (!roomKey) {
+      await removeResultQuiet(hit.id)
       sendJson(res, 404, {
         ok: false,
         error: '续传记录不存在或已过期，请重新上传',
@@ -230,9 +270,38 @@ async function handleTus(req, res, options = {}) {
     await roomAcl.assertRoomAccess(
       db,
       req,
-      safeRoomKey(attachment.roomKey),
+      roomKey,
       'view'
     )
+
+    // Older sidecars contain the full DTO. Keep accepting that shape, but use
+    // its id only; the database row is authoritative for current attachment data.
+    const result = await readResult(hit.id)
+    const attachmentId = String(
+      result && (result.id || result.attachmentId) || ''
+    ).trim()
+    const resultRoomKey = result && result.roomKey
+      ? safeRoomKey(result.roomKey)
+      : roomKey
+    if (!attachmentId || resultRoomKey !== roomKey) {
+      await removeResultQuiet(hit.id)
+      sendJson(res, 404, {
+        ok: false,
+        error: '续传记录不存在或已过期，请重新上传',
+        code: 'NOT_FOUND'
+      })
+      return true
+    }
+    const attachment = await store.getById(db, roomKey, attachmentId)
+    if (!attachment) {
+      await removeResultQuiet(hit.id)
+      sendJson(res, 404, {
+        ok: false,
+        error: '续传记录不存在或已过期，请重新上传',
+        code: 'NOT_FOUND'
+      })
+      return true
+    }
     sendJson(res, 200, { ok: true, attachment })
     return true
   }

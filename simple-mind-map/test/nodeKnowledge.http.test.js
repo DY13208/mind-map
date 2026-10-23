@@ -58,6 +58,18 @@ async function main() {
   assert.equal(htmlHeaders['X-Content-Type-Options'], 'nosniff')
   assert.equal(htmlHeaders['Content-Security-Policy'], undefined)
 
+  const sampleName = '家有良物-良策AI电商工作流方案-含客户痛点完整版.html'
+  const normalizedName = limits.safeFileName(encodeURIComponent(sampleName))
+  assert.equal(normalizedName, sampleName)
+  const sampleHeaders = limits.attachmentResponseHeaders(normalizedName)
+  assert.equal(sampleHeaders['Content-Type'], 'text/html; charset=utf-8')
+  assert.equal(sampleHeaders['Content-Disposition'], `inline; filename*=UTF-8''${encodeURIComponent(sampleName)}`)
+  assert.ok(!sampleHeaders['Content-Disposition'].includes('%25E5'), 'logical Chinese names are encoded exactly once')
+  const longHtmlName = limits.safeFileName('长'.repeat(179) + '😀.html')
+  assert.ok(longHtmlName.endsWith('.html'))
+  assert.ok(longHtmlName.length <= 180)
+  assert.doesNotThrow(() => limits.attachmentResponseHeaders(longHtmlName))
+
   // The MIME supplied at upload time is intentionally not an input to the
   // response helper. Unknown extensions are never served as an active type.
   assert.equal(limits.trustedMimeType('fake.png'), 'image/png')
@@ -101,6 +113,17 @@ async function main() {
     assert.ok(Buffer.isBuffer(response.body))
     assert.ok(response.body.equals(raw), 'content response must preserve original bytes')
     assert.deepEqual(accessCalls, [{ roomKey: 'room-demo', action: 'view' }])
+
+    store.getContentById = async () => ({ attachment: { fileName: normalizedName, mimeType: 'application/octet-stream' }, buffer: raw })
+    const htmlInline = createResponse()
+    await httpApi.handleApi({ method: 'GET', url: '/api/files/room-demo/attachments/att-1/content' }, htmlInline, { db: {} })
+    assert.equal(htmlInline.headers['Content-Type'], 'text/html; charset=utf-8')
+    assert.match(htmlInline.headers['Content-Disposition'], /^inline;/)
+    const htmlDownload = createResponse()
+    await httpApi.handleApi({ method: 'GET', url: '/api/files/room-demo/attachments/att-1/content?download=1' }, htmlDownload, { db: {} })
+    assert.equal(htmlDownload.headers['Content-Type'], 'text/html; charset=utf-8')
+    assert.match(htmlDownload.headers['Content-Disposition'], /^attachment;/)
+    assert.ok(htmlDownload.body.equals(raw))
 
     store.getContentById = async (db, room, id, options) => {
       assert.equal(options.prefixBytes, '262144')

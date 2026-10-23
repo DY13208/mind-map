@@ -15,6 +15,7 @@
 import { roomFromLocation } from '@/utils/roomLocation'
 import { attachmentUploadNotice } from '@/utils/attachmentProgressiveText'
 import KnowledgeFilePicker from './KnowledgeFilePicker.vue'
+import { normalizeAttachmentFileName } from 'simple-mind-map/src/utils/attachmentFileName'
 import { MAX_KNOWLEDGE_FILES, readKnowledgeFileReference } from '@/utils/knowledgeFiles'
 import {
   getNodeAttachment,
@@ -505,7 +506,7 @@ export default {
         const result = this.applyAttachment(
           { uid: target.uid, node },
           '',
-          attachment.fileName || file.name,
+          attachment.fileName || normalizeAttachmentFileName(file.name),
           this.metaFromAttachment(attachment, file)
         )
         if (result && result.applied) return result

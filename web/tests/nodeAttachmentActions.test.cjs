@@ -38,6 +38,9 @@ function loadVue(file, mocks = {}) {
     }
     if (name === '@/config') return { numberTypeList: {}, numberLevelList: {} }
     if (name === '@/utils/runtimeConfig') return { getRuntimeConfig: () => ({}) }
+    if (name === 'simple-mind-map/src/utils/attachmentFileName') {
+      return require(path.join(__dirname, '../../simple-mind-map/src/utils/attachmentFileName'))
+    }
     return {}
   }, mod, mod.exports)
   return mod.exports.default
@@ -179,6 +182,37 @@ async function run() {
     path.join(__dirname, '../src/pages/Edit/components/NodeAttachment.vue'),
     { '@/utils/nodeAttachmentApi': api }
   )
+
+  // When the server omits its name, normalize the selected encoded filename
+  // once in the shared helper. A canonical server name always takes priority.
+  const encodedHtmlName = '%E5%AE%B6%E6%9C%89%E8%89%AF%E7%89%A9-%E8%89%AF%E7%AD%96AI%E7%94%B5%E5%95%86%E5%B7%A5%E4%BD%9C%E6%B5%81%E6%96%B9%E6%A1%88-%E5%90%AB%E5%AE%A2%E6%88%B7%E7%97%9B%E7%82%B9%E5%AE%8C%E6%95%B4%E7%89%88.html'
+  const selectedHtmlFile = { name: encodedHtmlName, size: 10, type: 'text/html' }
+  const fallbackNameNode = node('n-filename-fallback', {})
+  const fallbackNameVm = makeAttachmentVm(component, api, [fallbackNameNode])
+  const fallbackTarget = fallbackNameVm.captureTarget(fallbackNameNode, 'room-A')
+  const fallbackToken = fallbackNameVm.beginOperation(fallbackTarget)
+  const fallbackResult = await fallbackNameVm.applyUploadedAttachment(
+    fallbackTarget,
+    fallbackToken,
+    { id: 'att-filename-fallback', status: 'ready' },
+    selectedHtmlFile
+  )
+  assert.equal(fallbackResult.applied, true)
+  assert.equal(fallbackNameNode.getData('attachmentName'), '家有良物-良策AI电商工作流方案-含客户痛点完整版.html')
+  assert.match(fallbackNameNode.getData('attachmentName'), /\.html$/)
+
+  const canonicalNameNode = node('n-filename-canonical', {})
+  const canonicalNameVm = makeAttachmentVm(component, api, [canonicalNameNode])
+  const canonicalTarget = canonicalNameVm.captureTarget(canonicalNameNode, 'room-A')
+  const canonicalToken = canonicalNameVm.beginOperation(canonicalTarget)
+  const canonicalResult = await canonicalNameVm.applyUploadedAttachment(
+    canonicalTarget,
+    canonicalToken,
+    { id: 'att-filename-canonical', fileName: 'server-canonical.html', status: 'ready' },
+    selectedHtmlFile
+  )
+  assert.equal(canonicalResult.applied, true)
+  assert.equal(canonicalNameNode.getData('attachmentName'), 'server-canonical.html')
 
   // Confirmed managed delete sends the captured ID and UID, then applies only
   // attachment fields from the server response (never a second SET command).

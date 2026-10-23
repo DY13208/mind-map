@@ -78,12 +78,16 @@ async function main() {
   assert.equal(tus.isTusPath('/api/files/room/attachments'), false)
 
   const originalCreate = store.createFromBuffer
+  const originalGetById = store.getById
   const originalAcl = roomAcl.assertRoomAccess
   const ingested = []
+  const accessEvents = []
+  let liveAttachment = null
+  let denyResultAccess = false
   store.createFromBuffer = async (db, options) => {
     ingested.push({ db, options })
     const bytes = await fs.promises.readFile(options.filePath)
-    return {
+    const saved = {
       id: 'att-resume-1',
       roomKey: options.roomKey,
       fileName: options.fileName,
@@ -93,15 +97,47 @@ async function main() {
       extractedText: bytes.toString('utf8'),
       deduped: false
     }
+    liveAttachment = {
+      ...saved,
+      fileName: 'latest-name.txt',
+      extractedText: 'latest database value'
+    }
+    return saved
   }
-  roomAcl.assertRoomAccess = async () => {}
+  store.getById = async (db, roomKey, attachmentId) => {
+    accessEvents.push('getById')
+    assert.equal(db.kind, 'test-db')
+    assert.equal(roomKey, 'room-demo')
+    assert.equal(attachmentId, 'att-resume-1')
+    return liveAttachment
+  }
+  roomAcl.assertRoomAccess = async (db, req, roomKey, access) => {
+    if (String(req.url || '').endsWith('/result')) {
+      accessEvents.push('acl')
+      assert.equal(roomKey, 'room-demo')
+      assert.equal(access, 'view')
+      if (denyResultAccess) {
+        const err = new Error('denied')
+        err.statusCode = 403
+        err.code = 'FORBIDDEN'
+        throw err
+      }
+    }
+  }
 
   const server = http.createServer(async (req, res) => {
     req.authUser = { id: 'tester' }
-    const handled = await tus.handleTus(req, res, { db: { kind: 'test-db' } })
-    if (!handled && !res.headersSent) {
-      res.writeHead(404)
-      res.end('no')
+    try {
+      const handled = await tus.handleTus(req, res, { db: { kind: 'test-db' } })
+      if (!handled && !res.headersSent) {
+        res.writeHead(404)
+        res.end('no')
+      }
+    } catch (err) {
+      if (!res.headersSent) {
+        res.writeHead(err.statusCode || 500, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: err.message, code: err.code }))
+      }
     }
   })
 
@@ -119,13 +155,14 @@ async function main() {
     assert.equal(missing.json().code, 'NOT_FOUND')
 
     const payload = Buffer.from('hello-resume')
+    const rawFileName = `${'说明'.repeat(100)}.txt`
     const created = await request(port, '/api/attachments/resumable', {
       method: 'POST',
       headers: {
         'Tus-Resumable': '1.0.0',
         'Upload-Length': String(payload.length),
         'Upload-Metadata': encodeMetadata({
-          filename: '说明.txt',
+          filename: rawFileName,
           filetype: 'text/plain',
           roomKey: 'room-demo'
         })
@@ -158,6 +195,22 @@ async function main() {
     assert.equal(head.headers['upload-offset'], '5')
     assert.equal(head.headers['upload-length'], String(payload.length))
 
+    // A result sidecar cannot make an incomplete upload look successful.
+    await fs.promises.writeFile(
+      tus.resultPath(uploadId),
+      JSON.stringify({ id: 'att-resume-1', roomKey: 'room-demo' }),
+      'utf8'
+    )
+    accessEvents.length = 0
+    const incompleteResult = await request(
+      port,
+      `/api/attachments/resumable/${uploadId}/result`
+    )
+    assert.equal(incompleteResult.status, 404)
+    assert.equal(incompleteResult.json().code, 'NOT_FOUND')
+    assert.deepEqual(accessEvents, [])
+    assert.equal(fs.existsSync(tus.resultPath(uploadId)), false)
+
     const finished = await request(port, location, {
       method: 'PATCH',
       headers: {
@@ -174,14 +227,80 @@ async function main() {
     assert.equal(ingested[0].db.kind, 'test-db')
     assert.equal(ingested[0].options.roomKey, 'room-demo')
     assert.equal(ingested[0].options.cleanupFile, false)
-    assert.equal(ingested[0].options.fileName, '说明.txt')
+    assert.equal(ingested[0].options.fileName, rawFileName)
     const stored = await fs.promises.readFile(ingested[0].options.filePath)
     assert.ok(stored.equals(payload))
 
+    accessEvents.length = 0
     const result = await request(port, `/api/attachments/resumable/${uploadId}/result`)
     assert.equal(result.status, 200)
     assert.equal(result.json().attachment.id, 'att-resume-1')
-    assert.equal(result.json().attachment.extractedText, 'hello-resume')
+    assert.equal(result.json().attachment.fileName, 'latest-name.txt')
+    assert.equal(result.json().attachment.extractedText, 'latest database value')
+    assert.deepEqual(accessEvents, ['acl', 'getById'])
+
+    // Preserve the old full-DTO sidecar format while resolving its ID live.
+    const legacySidecar = JSON.parse(
+      await fs.promises.readFile(tus.resultPath(uploadId), 'utf8')
+    )
+    assert.equal(legacySidecar.fileName, rawFileName)
+
+    denyResultAccess = true
+    accessEvents.length = 0
+    const deniedResult = await request(
+      port,
+      `/api/attachments/resumable/${uploadId}/result`
+    )
+    assert.equal(deniedResult.status, 403)
+    assert.deepEqual(accessEvents, ['acl'])
+    denyResultAccess = false
+
+    liveAttachment = null
+    accessEvents.length = 0
+    const deletedAttachmentResult = await request(
+      port,
+      `/api/attachments/resumable/${uploadId}/result`
+    )
+    assert.equal(deletedAttachmentResult.status, 404)
+    assert.equal(deletedAttachmentResult.json().code, 'NOT_FOUND')
+    assert.deepEqual(accessEvents, ['acl', 'getById'])
+    assert.equal(fs.existsSync(tus.resultPath(uploadId)), false)
+
+    // Expired TUS uploads also invalidate and remove any legacy sidecar.
+    const expiredId = 'expired-upload'
+    await fs.promises.writeFile(
+      tus.resultPath(expiredId),
+      JSON.stringify({ id: 'att-resume-1', roomKey: 'room-demo' }),
+      'utf8'
+    )
+    const datastore = tus.getTusServer().datastore
+    const originalDatastoreGetUpload = datastore.getUpload
+    datastore.getUpload = async function (id) {
+      if (id === expiredId) {
+        return {
+          id,
+          size: 1,
+          offset: 1,
+          creation_date: new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString(),
+          metadata: { roomKey: 'room-demo' }
+        }
+      }
+      return originalDatastoreGetUpload.call(this, id)
+    }
+    accessEvents.length = 0
+    let expiredResult
+    try {
+      expiredResult = await request(
+        port,
+        `/api/attachments/resumable/${expiredId}/result`
+      )
+    } finally {
+      datastore.getUpload = originalDatastoreGetUpload
+    }
+    assert.equal(expiredResult.status, 404)
+    assert.equal(expiredResult.json().code, 'NOT_FOUND')
+    assert.deepEqual(accessEvents, [])
+    assert.equal(fs.existsSync(tus.resultPath(expiredId)), false)
 
     const resumedHead = await request(port, location, {
       method: 'HEAD',
@@ -204,6 +323,7 @@ async function main() {
     assert.equal(rejected.status, 400)
   } finally {
     store.createFromBuffer = originalCreate
+    store.getById = originalGetById
     roomAcl.assertRoomAccess = originalAcl
     await close(server)
     await fs.promises.rm(tusDir, { recursive: true, force: true })
