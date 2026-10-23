@@ -1564,6 +1564,23 @@ class Render {
     return true
   }
 
+  // Tab 和 Enter 共用子节点写入逻辑；index 未指定时追加到末尾。
+  insertChildNodeData(parent, newNode, index) {
+    if (!parent.nodeData.children) parent.nodeData.children = []
+    const children = parent.nodeData.children
+    if (index === undefined) children.push(newNode)
+    else children.splice(index, 0, newNode)
+    this.mindMap.command.recordContentChange?.({
+      added: [newNode],
+      countable: this.mindMap.command.isCountableNode(parent)
+    })
+    const prev = Number(parent.getData && parent.getData('childCount')) || 0
+    parent.setData({
+      expand: true,
+      childCount: Math.max(children.length, prev + 1)
+    })
+  }
+
   //  插入同级节点
   insertNode(
     openEdit = true,
@@ -1575,13 +1592,17 @@ class Render {
     if (this.activeNodeList.length <= 0 && appointNodes.length <= 0) {
       return
     }
-    const list = appointNodes.length > 0 ? appointNodes : this.activeNodeList
+    // 协同刷新和懒加载可能替换节点实例，按稳定 UID 定位当前节点。
+    const list = (appointNodes.length > 0 ? appointNodes : this.activeNodeList)
+      .map(node => node && this.findNodeByUid(getNodeUid(node)))
+      .filter(Boolean)
+    if (!list.length) return
     const parents = list.map(node => node && node.parent).filter(Boolean)
     if (
       this.runAfterHydrate(
         parents,
         () =>
-          this.insertNode(openEdit, appointNodes, appointData, appointChildren),
+          this.insertNode(openEdit, list, appointData, appointChildren),
         'INSERT_NODE'
       )
     ) {
@@ -1621,6 +1642,8 @@ class Render {
         : defaultInsertBelowSecondLevelNodeText
       // 计算插入位置
       const index = getNodeDataIndex(node)
+      // 定位失败不能把 -1 + 1 当作 0，否则新节点会被插到最上方。
+      if (index < 0) return
       // 如果指定的数据就是富文本格式，那么不需要重新创建
       if (alreadyIsRichText && params.resetRichText) {
         delete params.resetRichText
@@ -1636,8 +1659,7 @@ class Render {
         children: [...createUidForAppointNodes(appointChildren, createNewId)]
       }
       createNewId = true
-      parent.nodeData.children.splice(index + 1, 0, newNodeData)
-      this.mindMap.command.recordContentChange?.({ added: [newNodeData], countable: this.mindMap.command.isCountableNode(parent) })
+      this.insertChildNodeData(parent, newNodeData, index + 1)
     })
     // 如果同时对多个节点插入子节点，需要清除原来激活的节点
     if (focusNewNode) {
@@ -1760,14 +1782,7 @@ class Render {
         children: [...createUidForAppointNodes(appointChildren, createNewId)]
       }
       createNewId = true
-      node.nodeData.children.push(newNode)
-      this.mindMap.command.recordContentChange?.({ added: [newNode], countable: this.mindMap.command.isCountableNode(node) })
-      const live = node.nodeData.children.length
-      const prev = Number(node.getData && node.getData('childCount')) || 0
-      node.setData({
-        expand: true,
-        childCount: Math.max(live, prev + 1)
-      })
+      this.insertChildNodeData(node, newNode)
       if (node.isGeneralization && node.generalizationBelongNode) {
         node.generalizationBelongNode.createGeneralizationNode()
       }
