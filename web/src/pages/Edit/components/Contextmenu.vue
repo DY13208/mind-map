@@ -4,12 +4,17 @@
     v-if="isShow"
     ref="contextmenuRef"
     :style="{ left: left + 'px', top: top + 'px' }"
-    :class="{ isDark: isDark, nodeMenu: type === 'node' }"
+    :class="{
+      isDark: isDark,
+      nodeMenu: type === 'node',
+      stackedOpen: useStackedSubmenu && !!activeSubmenu
+    }"
     @mouseenter="cancelSubmenuClose"
   >
     <div
       class="listBox menuScroll"
       ref="menuListRef"
+      v-show="!(useStackedSubmenu && activeSubmenu)"
       :class="{ isDark: isDark }"
       :style="menuMaxHeight ? { maxHeight: menuMaxHeight + 'px' } : null"
     >
@@ -62,8 +67,10 @@
       <div class="splitLine"></div>
       <div
         class="item"
-        @mouseenter="openSubmenu('structure', $event)"
-        v-on:click="openSubmenu('structure', $event)"
+        data-testid="submenu-structure"
+        :class="{ active: activeSubmenu === 'structure' }"
+        @mouseenter="onSubmenuTriggerEnter('structure', $event)"
+        @click.stop.prevent="onSubmenuTriggerClick('structure', $event)"
         @mouseleave="scheduleSubmenuClose"
       >
         <MenuIcon name="network" />
@@ -72,8 +79,10 @@
       </div>
       <div
         class="item"
-        @mouseenter="openSubmenu('content', $event)"
-        v-on:click="openSubmenu('content', $event)"
+        data-testid="submenu-content"
+        :class="{ active: activeSubmenu === 'content' }"
+        @mouseenter="onSubmenuTriggerEnter('content', $event)"
+        @click.stop.prevent="onSubmenuTriggerClick('content', $event)"
         @mouseleave="scheduleSubmenuClose"
       >
         <MenuIcon name="pencil" />
@@ -82,8 +91,10 @@
       </div>
       <div
         class="item"
-        @mouseenter="openSubmenu('style', $event)"
-        v-on:click="openSubmenu('style', $event)"
+        data-testid="submenu-style"
+        :class="{ active: activeSubmenu === 'style' }"
+        @mouseenter="onSubmenuTriggerEnter('style', $event)"
+        @click.stop.prevent="onSubmenuTriggerClick('style', $event)"
         @mouseleave="scheduleSubmenuClose"
       >
         <MenuIcon name="palette" />
@@ -92,8 +103,10 @@
       </div>
       <div
         class="item"
-        @mouseenter="openSubmenu('more', $event)"
-        v-on:click="openSubmenu('more', $event)"
+        data-testid="submenu-more"
+        :class="{ active: activeSubmenu === 'more' }"
+        @mouseenter="onSubmenuTriggerEnter('more', $event)"
+        @click.stop.prevent="onSubmenuTriggerClick('more', $event)"
         @mouseleave="scheduleSubmenuClose"
       >
         <MenuIcon name="ellipsis" />
@@ -129,8 +142,9 @@
       </div>
       <div
         class="item"
-        @mouseenter="openSubmenu('expand', $event)"
-        v-on:click="openSubmenu('expand', $event)"
+        :class="{ active: activeSubmenu === 'expand' }"
+        @mouseenter="onSubmenuTriggerEnter('expand', $event)"
+        @click.stop.prevent="onSubmenuTriggerClick('expand', $event)"
         @mouseleave="scheduleSubmenuClose"
       >
         <MenuIcon name="expand" />
@@ -154,8 +168,9 @@
       </div>
       <div
         class="item"
-        @mouseenter="openSubmenu('clipboard', $event)"
-        v-on:click="openSubmenu('clipboard', $event)"
+        :class="{ active: activeSubmenu === 'clipboard' }"
+        @mouseenter="onSubmenuTriggerEnter('clipboard', $event)"
+        @click.stop.prevent="onSubmenuTriggerClick('clipboard', $event)"
         @mouseleave="scheduleSubmenuClose"
       >
         <MenuIcon name="clipboard" />
@@ -164,18 +179,36 @@
       </div>
     </template>
     </div>
-    <div v-if="activeSubmenu"
+    <div
+      v-if="activeSubmenu"
       ref="submenuRef"
       class="submenu listBox"
-      :class="{ isDark: isDark }"
-      :style="{
-        left: submenuLeft + 'px',
-        top: submenuTop + 'px',
-        maxHeight: submenuMaxHeight ? submenuMaxHeight + 'px' : null
+      :class="{
+        isDark: isDark,
+        stacked: useStackedSubmenu,
+        gated: submenuClickGate
       }"
+      :style="
+        useStackedSubmenu
+          ? menuMaxHeight
+            ? { maxHeight: menuMaxHeight + 'px' }
+            : null
+          : {
+              left: submenuLeft + 'px',
+              top: submenuTop + 'px',
+              maxHeight: submenuMaxHeight ? submenuMaxHeight + 'px' : null
+            }
+      "
       @mouseenter="cancelSubmenuClose"
       @mouseleave="scheduleSubmenuClose"
     >
+      <template v-if="useStackedSubmenu">
+        <div class="item submenuBack" data-testid="submenu-back" @click.stop="closeSubmenu">
+          <MenuIcon name="chevronLeft" />
+          <span class="name">{{ activeSubmenuTitle }}</span>
+        </div>
+        <div class="splitLine"></div>
+      </template>
       <template v-if="activeSubmenu === 'structure'">
         <div
           class="item"
@@ -264,7 +297,7 @@
           <MenuIcon name="note" />
           <span class="name">{{ $t('toolbar.note') }}</span>
         </div>
-        <div class="item" data-testid="node-comment" @click="openComment">
+        <div class="item" data-testid="node-comment" @click.stop="openComment">
           <MenuIcon name="comment" />
           <span class="name">评论</span>
           <span v-if="nodeCommentCount" class="desc">{{ nodeCommentCount }}</span>
@@ -294,6 +327,14 @@
         <div class="item" data-testid="mapref" @click="openMapRef">
           <MenuIcon name="network" />
           <span class="name">{{ $t('contextmenu.mapRef') }}</span>
+        </div>
+        <div
+          class="item"
+          @click="openMapRefInSource"
+          v-if="hasMapRef"
+        >
+          <MenuIcon name="external" />
+          <span class="name">{{ $t('contextmenu.openMapRefSource') }}</span>
         </div>
         <div class="item" @click="clearMapRef" v-if="hasMapRef">
           <MenuIcon name="unlink" />
@@ -400,7 +441,7 @@
 <script>
 import { mapState, mapMutations } from 'vuex'
 import MenuIcon from './ContextmenuIcon.vue'
-import { getTextFromHtml, imgToDataUrl } from 'simple-mind-map/src/utils'
+import { getTextFromHtml, imgToDataUrl, isMobile } from 'simple-mind-map/src/utils'
 import { transformToMarkdown } from 'simple-mind-map/src/parse/toMarkdown'
 import { transformToTxt } from 'simple-mind-map/src/parse/toTxt'
 import { setDataToClipboard, setImgToClipboard, copy } from '@/utils'
@@ -413,7 +454,8 @@ import {
   readFrameWidth,
   collectObstacles,
   placeMenu,
-  placeSubmenu
+  placeSubmenu,
+  preferStackedSubmenu
 } from '@/utils/menuPlacement'
 
 // 右键菜单
@@ -457,7 +499,9 @@ export default {
       submenuLeft: 0,
       submenuTop: 0,
       submenuMaxHeight: 0,
-      menuMaxHeight: 0
+      menuMaxHeight: 0,
+      useStackedSubmenu: false,
+      submenuClickGate: false
     }
   },
   computed: {
@@ -468,6 +512,17 @@ export default {
       openNodeRichText: state => state.localConfig.openNodeRichText,
       roomCanShare: state => state.roomCanShare
     }),
+    activeSubmenuTitle() {
+      const titles = {
+        structure: '节点结构',
+        content: '编辑与内容',
+        style: '样式与格式',
+        more: '更多操作',
+        expand: this.$t('contextmenu.expandTo'),
+        clipboard: this.$t('contextmenu.copyToClipboard')
+      }
+      return titles[this.activeSubmenu] || '返回'
+    },
     expandList() {
       return [
         this.$t('contextmenu.level1'),
@@ -639,6 +694,7 @@ export default {
 
     // 评论：只读用户也可以打开查看
     openComment() {
+      if (this.submenuClickGate) return
       if (!this.node) return
       const node = this.node
       this.hide()
@@ -646,6 +702,7 @@ export default {
     },
 
     useNodeTool(name) {
+      if (this.submenuClickGate) return
       if (!this.node) return
       if (!this.editable) {
         if (this.$message) this.$message.warning('当前为只读权限，无法修改导图')
@@ -782,7 +839,10 @@ export default {
     getShowPosition(x, y) {
       const container = this.$refs.contextmenuRef
       const rect = container.getBoundingClientRect()
-      const list = this.$refs.menuListRef
+      const list =
+        this.useStackedSubmenu && this.activeSubmenu
+          ? this.$refs.submenuRef
+          : this.$refs.menuListRef
       const height = Math.max(rect.height || 0, (list && list.scrollHeight) || 0)
       const { safeArea, obstacles } = this.getPlacementContext()
       const placed = placeMenu(
@@ -851,6 +911,7 @@ export default {
     // 节点右键显示
     show(e, node) {
       this.type = 'node'
+      this.refreshStackedSubmenuMode()
       this.isShow = true
       this.node = node
       this.hasExplicitNodeContext = true
@@ -874,6 +935,7 @@ export default {
         list.find(item => item && !item.isRoot && !item.isGeneralization) ||
         list[0]
       this.type = 'node'
+      this.refreshStackedSubmenuMode()
       this.isShow = true
       this.node = anchor
       this.hasExplicitNodeContext = false
@@ -957,6 +1019,19 @@ export default {
       this.$bus.$emit('showMapRef', node)
     },
 
+    openMapRefInSource() {
+      const node = this.node
+      if (!node || typeof node.getData !== 'function') return
+      const ref = node.getData('mapRef')
+      this.hide()
+      // 强制按导航模式打开原图（忽略镜像点击分流）
+      const normalized = ref && typeof ref === 'object' ? { ...ref } : ref
+      if (normalized && typeof normalized === 'object') {
+        delete normalized.syncMode
+      }
+      this.$bus.$emit('openMapRefEdit', normalized)
+    },
+
     async clearMapRef() {
       if (!(await this.canExecuteCommand('REMOVE_MAP_REF'))) return
       if (this.node && typeof this.node.setMapRef === 'function') {
@@ -964,6 +1039,7 @@ export default {
       }
       this.hide()
       this.$message.success(this.$t('mapRef.removed'))
+      this.$bus.$emit('mapRefMirrorChanged')
     },
 
     async editHyperlink() {
@@ -1045,6 +1121,7 @@ export default {
     show2(e) {
       this.hide()
       this.type = 'svg'
+      this.refreshStackedSubmenuMode()
       this.isShow = true
       this.$nextTick(() => this.applyShowPosition(e.clientX, e.clientY))
     },
@@ -1063,9 +1140,50 @@ export default {
       this.activeSubmenu = ''
       this.menuMaxHeight = 0
       this.submenuMaxHeight = 0
+      this.useStackedSubmenu = false
+      this.submenuClickGate = false
       this._menuAnchor = null
       this._submenuItemEl = null
+      if (this._submenuGateTimer) {
+        clearTimeout(this._submenuGateTimer)
+        this._submenuGateTimer = null
+      }
+      if (this._openSubmenuTimer) {
+        clearTimeout(this._openSubmenuTimer)
+        this._openSubmenuTimer = null
+      }
       this.disconnectMenuObserver()
+    },
+
+    refreshStackedSubmenuMode() {
+      const win = typeof window !== 'undefined' ? window : null
+      let coarsePointer = false
+      try {
+        coarsePointer = !!(
+          win &&
+          win.matchMedia &&
+          win.matchMedia('(pointer: coarse)').matches
+        )
+      } catch (e) {
+        coarsePointer = false
+      }
+      this.useStackedSubmenu = preferStackedSubmenu(getViewport(win), {
+        isMobile: isMobile(),
+        coarsePointer
+      })
+    },
+
+    armSubmenuClickGate(ms = 400) {
+      this.submenuClickGate = true
+      if (typeof clearTimeout === 'function') clearTimeout(this._submenuGateTimer)
+      if (typeof setTimeout !== 'function') {
+        this.submenuClickGate = false
+        return
+      }
+      this._submenuGateTimer = setTimeout(() => {
+        this._submenuGateTimer = null
+        this.submenuClickGate = false
+      }, ms)
     },
 
     bindMenuShortcuts() {
@@ -1098,21 +1216,59 @@ export default {
       else this.exec(action)
     },
 
+    // 触控下 mouseenter 会在 click 前打开子面板，同一手指会点到「评论」等新行
+    onSubmenuTriggerEnter(name, event) {
+      if (this.useStackedSubmenu) return
+      this.openSubmenu(name, event)
+    },
+
+    onSubmenuTriggerClick(name, event) {
+      this.refreshStackedSubmenuMode()
+      this.openSubmenu(name, event)
+    },
+
     openSubmenu(name, event) {
       this.cancelSubmenuClose()
-      const itemEl = event.currentTarget
+      this.refreshStackedSubmenuMode()
+      const itemEl = event && event.currentTarget
       const changed = this.activeSubmenu !== name || this._submenuItemEl !== itemEl
       this._submenuItemEl = itemEl
+      if (this.useStackedSubmenu) {
+        // 等本次 tap 结束再换面板，并短暂屏蔽子项，避免误进评论
+        if (this._openSubmenuTimer) clearTimeout(this._openSubmenuTimer)
+        this.armSubmenuClickGate(450)
+        this._openSubmenuTimer = setTimeout(() => {
+          this._openSubmenuTimer = null
+          this.activeSubmenu = name
+          this.submenuMaxHeight = 0
+          this.$nextTick(() => this.repositionMenu())
+        }, 50)
+        return
+      }
+      this.activeSubmenu = name
       if (changed) {
         // 先用估算尺寸放置，渲染后再按真实尺寸校正
         this.placeSubmenuAt({ width: 280, height: 360 })
         this.submenuMaxHeight = 0
       }
-      this.activeSubmenu = name
       this.$nextTick(() => this.repositionSubmenu())
     },
 
+    closeSubmenu() {
+      this.cancelSubmenuClose()
+      if (this._openSubmenuTimer) {
+        clearTimeout(this._openSubmenuTimer)
+        this._openSubmenuTimer = null
+      }
+      this.activeSubmenu = ''
+      this._submenuItemEl = null
+      this.submenuMaxHeight = 0
+      this.submenuClickGate = false
+      this.$nextTick(() => this.repositionMenu())
+    },
+
     placeSubmenuAt(size) {
+      if (this.useStackedSubmenu) return null
       const itemEl = this._submenuItemEl
       if (!itemEl || !itemEl.getBoundingClientRect) return null
       const list = this.$refs.menuListRef || this.$refs.contextmenuRef
@@ -1126,6 +1282,7 @@ export default {
     },
 
     repositionSubmenu() {
+      if (this.useStackedSubmenu) return
       const el = this.$refs.submenuRef
       if (!this.isShow || !this.activeSubmenu || !el) return
       const rect = el.getBoundingClientRect()
@@ -1135,6 +1292,8 @@ export default {
     },
 
     scheduleSubmenuClose() {
+      // 触控/窄屏钻取面板不靠 hover 关闭；避免 touch 合成 mouseleave 立刻收起
+      if (this.useStackedSubmenu) return
       if (typeof clearTimeout === 'function') clearTimeout(this._submenuTimer)
       if (typeof setTimeout !== 'function') {
         this.activeSubmenu = ''
@@ -1151,15 +1310,71 @@ export default {
 
     onOutsidePointer(event) {
       if (!this.isShow) return
-      if (this.$el && this.$el.contains(event.target)) return
+      const target = event.target
+      // 点在菜单 DOM 内：绝不能 stopPropagation，否则整行点不中
+      if (this.$el && this.$el.contains && this.$el.contains(target)) return
       const submenu = this.$refs.submenuRef
-      if (submenu && submenu.contains && submenu.contains(event.target)) return
+      if (submenu && submenu.contains && submenu.contains(target)) return
+      // 点穿：坐标在菜单上但 target 是画布 —— 只挡画布，并补一次菜单行点击
+      if (this.isPointerOverMenu(event)) {
+        if (event.stopPropagation) event.stopPropagation()
+        if (event.preventDefault) event.preventDefault()
+        this.retargetMenuPointer(event)
+        return
+      }
       this.hide()
+    },
+
+    isPointerOverMenu(event) {
+      const roots = [this.$el, this.$refs.submenuRef].filter(Boolean)
+      const x = event.clientX
+      const y = event.clientY
+      if (typeof x !== 'number' || typeof y !== 'number') return false
+      for (let i = 0; i < roots.length; i++) {
+        const el = roots[i]
+        if (!el.getBoundingClientRect) continue
+        const rect = el.getBoundingClientRect()
+        if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+          return true
+        }
+      }
+      return false
+    },
+
+    retargetMenuPointer(event) {
+      if (typeof document === 'undefined' || !document.elementFromPoint) return
+      if (typeof event.clientX !== 'number' || typeof event.clientY !== 'number') return
+      // 临时放开命中层，找出真实菜单行
+      const gated = this.$refs.submenuRef
+      const wasGated = gated && gated.classList && gated.classList.contains('gated')
+      if (wasGated) gated.classList.remove('gated')
+      let el = null
+      try {
+        el = document.elementFromPoint(event.clientX, event.clientY)
+      } finally {
+        if (wasGated) gated.classList.add('gated')
+      }
+      while (el && el !== this.$el) {
+        if (el.classList && el.classList.contains('item') && !el.classList.contains('disabled')) {
+          const testId = el.getAttribute && el.getAttribute('data-testid')
+          if (testId === 'submenu-structure') this.onSubmenuTriggerClick('structure', { currentTarget: el })
+          else if (testId === 'submenu-content') this.onSubmenuTriggerClick('content', { currentTarget: el })
+          else if (testId === 'submenu-style') this.onSubmenuTriggerClick('style', { currentTarget: el })
+          else if (testId === 'submenu-more') this.onSubmenuTriggerClick('more', { currentTarget: el })
+          else if (typeof el.click === 'function') el.click()
+          return
+        }
+        el = el.parentElement
+      }
     },
 
     onMenuKeydown(event) {
       if (!this.isShow || event.key !== 'Escape') return
       if (event.stopPropagation) event.stopPropagation()
+      if (this.activeSubmenu) {
+        this.closeSubmenu()
+        return
+      }
       this.hide()
     },
 
@@ -1203,6 +1418,7 @@ export default {
     },
 
     async exec(key, disabled, ...args) {
+      if (this.submenuClickGate) return
       if (disabled || !(await this.canExecuteCommand(key))) {
         return
       }
@@ -1424,6 +1640,33 @@ export default {
 .submenu {
   position: fixed;
   z-index: 3001;
+
+  &.stacked {
+    position: relative;
+    left: auto;
+    top: auto;
+    z-index: auto;
+  }
+
+  // 钻取刚打开时屏蔽子项，避免同一手指误点「评论」
+  &.gated {
+    pointer-events: none;
+  }
+}
+
+.submenuBack {
+  font-weight: 600;
+
+  /deep/ .menuIcon {
+    color: #246bff;
+  }
+}
+
+.contextmenuContainer.stackedOpen {
+  .submenu.stacked {
+    width: 280px;
+    max-width: calc(100vw - 24px);
+  }
 }
 
 .contextmenuContainer.isDark,
@@ -1434,7 +1677,8 @@ export default {
     background: rgba(255, 255, 255, 0.08);
   }
 
-  .item:hover {
+  .item:hover,
+  .item.active {
     background: rgba(255, 255, 255, 0.06);
   }
 
@@ -1457,6 +1701,7 @@ export default {
 }
 
 .item {
+  position: relative;
   height: 36px;
   padding: 0 8px;
   border-radius: 8px;
@@ -1464,10 +1709,26 @@ export default {
   display: flex;
   align-items: center;
   gap: 8px;
+  // 极低透明度底色：保证 flex 空白区也有命中面（纯 transparent 在部分 WebView 会点穿）
+  background-color: rgba(255, 255, 255, 0.01);
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+
+  // 整行命中层：盖住图标透明区与字右侧空白，点击一定落到本行
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    border-radius: inherit;
+  }
 
   /deep/ .menuIcon {
     flex: none;
     color: #667085;
+    pointer-events: none;
+    position: relative;
+    z-index: 0;
   }
 
   .name {
@@ -1476,15 +1737,20 @@ export default {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    position: relative;
+    z-index: 0;
   }
 
   .desc {
     flex: none;
     color: #98a2b3;
     font-size: 12px;
+    position: relative;
+    z-index: 0;
   }
 
-  &:hover {
+  &:hover,
+  &.active {
     background: #f3f4f6;
   }
 

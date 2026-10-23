@@ -10,6 +10,7 @@
     stroke-linecap="round"
     stroke-linejoin="round"
     aria-hidden="true"
+    style="pointer-events: none"
   >
     <path :d="paths[name]" />
   </svg>
@@ -30,6 +31,7 @@ const paths = {
     'M12 3a9 9 0 1 0 0 18h1a2 2 0 0 0 0-4h-1a2 2 0 0 1 0-4h6a3 3 0 0 0 3-3 9 9 0 0 0-9-7zM7 9h.01M11 6h.01M16 7h.01M6 14h.01',
   ellipsis: 'M5 12h.01M12 12h.01M19 12h.01',
   chevron: 'm9 6 6 6-6 6',
+  chevronLeft: 'm15 6-6 6 6 6',
   copy: 'M8 8h13v13H8zM16 8V3H3v13h5',
   scissors: 'M9 6a3 3 0 1 0-6 0 3 3 0 1 0 6 0M9 18a3 3 0 1 0-6 0 3 3 0 1 0 6 0M8 8l13 13M8 16 21 3',
   paste: 'M9 4H5v16h5M9 3h6v4H9zM15 4h4v5M13 12h8v9h-8z',
@@ -56,7 +58,8 @@ const paths = {
   formula: 'M6 5h6M9 5c2 5-2 9 2 14M14 10h6M14 16h6M16 8l4 10',
   frame: 'M4 4h16v16H4zM8 4v16M4 8h16',
   curve: 'M4 16c4-10 12-10 16 0M4 16h.01M20 16h.01',
-  spark: 'M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2 2M16 16l2 2M18 6l-2 2M8 16l-2 2'
+  spark: 'M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2 2M16 16l2 2M18 6l-2 2M8 16l-2 2',
+  external: 'M14 3h7v7M21 3l-9 9M10 5H5v14h14v-5'
 }
 export default { props: { name: String }, data: () => ({ paths }) }
 </script>

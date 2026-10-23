@@ -166,6 +166,7 @@ export default {
     linkToNode: '鏈接到指定節點',
     removeNodeLink: '刪除節點鏈接',
     mapRef: '插入子腦圖',
+    openMapRefSource: '在原圖中打開',
     removeMapRef: '移除子腦圖'
   },
   count: {
@@ -263,7 +264,9 @@ export default {
     openHint: '連結將在新分頁開啟，目前腦圖會保留',
     remove: '移除連結',
     invalidLink: '請輸入有效網址，僅支援 HTTP 或 HTTPS',
-    requiredLink: '請先輸入連結網址'
+    requiredLink: '請先輸入連結網址',
+    localFileAsAttachment: '本機檔案不能新增為超連結，請改為上傳附件',
+    localFileRedirect: '「{name}」是本機檔案，已改為上傳附件'
   },
   nodeIcon: {
     title: '圖示'
@@ -638,8 +641,13 @@ export default {
     noPermission: '沒有訪問該導圖的權限',
     saved: '已插入子腦圖',
     savedTip: '已插入子腦圖：節點應變為灰底卡片+紫色圖標，雙擊打開編輯（F2 可改名）',
+    mirrorSavedTip:
+      '已定位到節點並同步子樹：可在本圖展開編輯，修改會與原圖雙向同步',
+    mirrorLoading: '正在拉取目標節點子樹…',
+    mirrorTruncated:
+      '目標子樹過大，已同步前 {n} 個節點（深度最多 12 層）；其餘未同步',
     applyFailed: '插入失敗，請重新選中節點後再試',
-    removed: '已移除子腦圖',
+    removed: '已移除子腦圖引用（本地子節點已保留，不再跨圖同步）',
     openFailed: '無法打開引用的導圖',
     currentMap: '不能引用當前導圖',
     previewTitle: '子腦圖預覽',

@@ -7,6 +7,10 @@ export function normalizeMapRef(value) {
   return mapRefUtil.normalizeMapRef(value)
 }
 
+export function isMirrorMapRef(value) {
+  return mapRefUtil.isMirrorMapRef(value)
+}
+
 export function captureMapView(mindMap) {
   if (!mindMap || !mindMap.view) return null
   const selectedUids = (
