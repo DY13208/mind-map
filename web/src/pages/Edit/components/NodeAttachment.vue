@@ -1,4 +1,6 @@
 <template>
+  <div>
+  <KnowledgeFilePicker :visible="knowledgeVisible" :busy="knowledgeBusy" :readonly="knowledgeReadonly" :attached-files="knowledgeFiles" :save-error="knowledgeError" @close="closeKnowledgePicker" @choose="onKnowledgeFilePicked" />
   <input
     ref="fileInput"
     class="node-attachment-input"
@@ -6,11 +8,14 @@
     accept=".txt,.md,.markdown,.csv,.log,.json,.html,.htm,.pdf,.doc,.docx,.xls,.xlsx,.xlsm,.ods,.pptx,.png,.jpg,.jpeg,.webp,.gif,text/plain,text/markdown,text/csv,text/html,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroenabled.12,application/vnd.oasis.opendocument.spreadsheet,application/vnd.openxmlformats-officedocument.presentationml.presentation,image/png,image/jpeg,image/webp,image/gif"
     @change="onFilePicked"
   />
+  </div>
 </template>
 
 <script>
 import { roomFromLocation } from '@/utils/roomLocation'
 import { attachmentUploadNotice } from '@/utils/attachmentProgressiveText'
+import KnowledgeFilePicker from './KnowledgeFilePicker.vue'
+import { MAX_KNOWLEDGE_FILES, readKnowledgeFileReference } from '@/utils/knowledgeFiles'
 import {
   getNodeAttachment,
   getRoomRevision,
@@ -115,6 +120,7 @@ function waitForAttachmentWriteRetry(attempt) {
 
 export default {
   name: 'NodeAttachment',
+  components: { KnowledgeFilePicker },
   props: {
     mindMap: {
       type: Object,
@@ -124,6 +130,12 @@ export default {
   data() {
     return {
       pendingNodes: [],
+      knowledgeVisible: false,
+      knowledgeBusy: false,
+      knowledgeTargets: [],
+      knowledgeFiles: [],
+      knowledgeReadonly: false,
+      knowledgeError: '',
       inflight: {},
       operationEpochs: {},
       operationSequence: 0,
@@ -135,11 +147,15 @@ export default {
     $route() {
       this.navigationEpoch += 1
       this.pendingNodes = []
+      this.knowledgeVisible = false
+      this.knowledgeTargets = []
       Object.keys(this.inflight).forEach(uid => this.abortInflight(uid))
     }
   },
   created() {
     this.$bus.$on('selectAttachment', this.onSelectAttachment)
+    this.$bus.$on('selectKnowledgeFile', this.onSelectKnowledgeFile)
+    this.$bus.$on('viewKnowledgeFiles', this.onViewKnowledgeFiles)
     this.$bus.$on('manageNodeAttachment', this.onManageAttachment)
   },
   mounted() {
@@ -150,10 +166,68 @@ export default {
     this.navigationEpoch += 1
     this.pendingNodes = []
     this.$bus.$off('selectAttachment', this.onSelectAttachment)
+    this.$bus.$off('selectKnowledgeFile', this.onSelectKnowledgeFile)
+    this.$bus.$off('viewKnowledgeFiles', this.onViewKnowledgeFiles)
     this.$bus.$off('manageNodeAttachment', this.onManageAttachment)
     Object.keys(this.inflight).forEach(uid => this.abortInflight(uid))
   },
   methods: {
+    onViewKnowledgeFiles(node) { this.openKnowledgePicker([node], true) },
+    onSelectKnowledgeFile(nodes) {
+      this.openKnowledgePicker(nodes, false)
+    },
+    openKnowledgePicker(nodes, allowReadonly) {
+      if (this.knowledgeBusy) return
+      if (!this.mindMap || (!allowReadonly && this.mindMap.opt && this.mindMap.opt.readonly)) {
+        this.$message.warning('当前为只读权限，无法挂载文件')
+        return
+      }
+      const roomKey = roomFromLocation(this.$route)
+      if (!roomKey) { this.$message.warning('请先打开已保存的脑图'); return }
+      this.knowledgeTargets = (Array.isArray(nodes) ? nodes : []).filter(Boolean).map(node => this.captureTarget(node, roomKey)).filter(Boolean)
+      if (!this.knowledgeTargets.length) { this.$message.warning('请先选中节点'); return }
+      this.knowledgeTargets.forEach(target => { target.knowledgeSignature = JSON.stringify(target.node.getData('knowledgeFiles') || []) })
+      this.knowledgeFiles = this.knowledgeTargets[0].node.getData('knowledgeFiles') || []
+      this.knowledgeReadonly = !!(this.mindMap.opt && this.mindMap.opt.readonly)
+      this.knowledgeError = ''
+      this.knowledgeVisible = true
+    },
+    closeKnowledgePicker() {
+      if (this.knowledgeBusy) return
+      this.knowledgeVisible = false
+      this.knowledgeTargets = []
+    },
+    async onKnowledgeFilePicked(files) {
+      if (this.knowledgeBusy || !Array.isArray(files) || this.knowledgeReadonly) return
+      const uniqueFiles = Array.from(new Map(files.map(file => [file.id, file])).values())
+      if (uniqueFiles.length > MAX_KNOWLEDGE_FILES) { this.$message.warning(`最多选择 ${MAX_KNOWLEDGE_FILES} 个文件`); return }
+      const targets = this.knowledgeTargets.slice()
+      if (!targets.length || !targets.every(target => this.targetIsCurrent(target))) {
+        this.$message.warning('目标节点或附件已发生变化，请重新选择节点')
+        return
+      }
+      this.knowledgeBusy = true
+      this.knowledgeError = ''
+      try {
+        const references = []
+        for (const file of uniqueFiles) references.push(await readKnowledgeFileReference(file))
+        if (!targets.every(target => this.targetIsCurrent(target))) throw new Error('目标节点或房间已发生变化，请重新操作')
+        if (this.mindMap.opt && this.mindMap.opt.readonly) throw new Error('当前为只读权限，无法挂载文件')
+        if (!targets.every(target => JSON.stringify(this.liveNode(target.uid).getData('knowledgeFiles') || []) === target.knowledgeSignature)) throw new Error('知识库挂载已被其他操作修改，请重新打开')
+        for (const target of targets) {
+          const node = this.liveNode(target.uid)
+          this.mindMap.execCommand('SET_NODE_DATA', node, { knowledgeFiles: references })
+          if (JSON.stringify(node.getData('knowledgeFiles')) !== JSON.stringify(references)) throw new Error('节点挂载未生效，请重试')
+          const renderer = this.mindMap.renderer
+          if (renderer && typeof renderer.reRenderNodeCheckChange === 'function') renderer.reRenderNodeCheckChange(node)
+        }
+        this.knowledgeVisible = false
+        this.knowledgeTargets = []
+        this.$message.success(references.length ? `已挂载 ${references.length} 个知识库文件，可查看解析信息` : '已清除知识库文件挂载')
+      } catch (error) {
+        if (!this.destroyed) this.knowledgeError = error.message || '读取知识库解析信息失败，请重试'
+      } finally { this.knowledgeBusy = false }
+    },
     abortInflight(uid, expectedAttachmentId = '') {
       const job = this.inflight[uid]
       if (
@@ -734,12 +808,12 @@ export default {
         this.$message.error((err && err.message) || '删除附件失败')
       }
     },
-    async onFilePicked(event) {
+    async onFilePicked(event, capturedTargets) {
       const file =
         event && event.target && event.target.files && event.target.files[0]
       if (event && event.target) event.target.value = ''
-      const pendingNodes = this.pendingNodes.slice()
-      this.pendingNodes = []
+      const pendingNodes = capturedTargets || this.pendingNodes.slice()
+      if (!capturedTargets) this.pendingNodes = []
       if (!file || !pendingNodes.length) return
       if (file.size > maxAttachmentBytes()) {
         this.$message.error(

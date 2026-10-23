@@ -18,6 +18,7 @@ function hasAttachmentFile(data) {
 
 function hasAttachmentIcon(data) {
   if (!data) return false
+  if (Array.isArray(data.knowledgeFiles) && data.knowledgeFiles.length) return true
   if (hasAttachmentFile(data) || data.attachmentName) {
     const status = attachmentStatusOf(data)
     if (
@@ -93,6 +94,10 @@ function attachmentBadgeGeometry(iconSize) {
 }
 
 function attachmentIconViewState(data = {}) {
+  if (!hasAttachmentFile(data) && Array.isArray(data.knowledgeFiles) && data.knowledgeFiles.length) {
+    return { phase: 'ready', previewable: true, iconOpacity: 1, progressMode: 'none', percent: 100,
+      progressColor: '#12b76a', badge: null, showPercent: false, title: `文件知识库 · ${data.knowledgeFiles.length} 个文件 · 点击查看解析` }
+  }
   const status = attachmentStatusOf(data)
   const name = String(data.attachmentName || '附件')
   const percent = clampPercent(data.attachmentProgress)

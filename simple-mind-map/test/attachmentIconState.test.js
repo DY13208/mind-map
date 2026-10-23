@@ -11,6 +11,9 @@ const {
 } = require('../src/utils/attachmentIconState')
 
 assert.equal(hasAttachmentIcon({ attachmentId: 'a1' }), true)
+assert.equal(hasAttachmentIcon({ knowledgeFiles: [{ id: 'kb-a' }, { id: 'kb-b' }] }), true)
+assert.equal(attachmentIconViewState({ knowledgeFiles: [{ id: 'kb-a' }, { id: 'kb-b' }] }).previewable, true)
+assert.ok(attachmentIconViewState({ knowledgeFiles: [{ id: 'kb-a' }] }).title.includes('文件知识库'))
 assert.equal(
   hasAttachmentIcon({ attachmentName: '表.xlsx', attachmentStatus: 'uploading' }),
   true

@@ -369,6 +369,7 @@ const UNDO_CONTROL_KEYS = [
 ]
 
 const FEATURE_RECREATE_KEYS = {
+  knowledgeFiles: ['attachment'],
   text: ['text'],
   richText: ['text'],
   resetRichText: ['text'],
@@ -411,6 +412,7 @@ const GEOMETRY_KEYS = {
   hyperlink: true,
   hyperlinkTitle: true,
   mapRef: true,
+  knowledgeFiles: true,
   attachmentUrl: true,
   attachmentName: true,
   attachmentId: true,

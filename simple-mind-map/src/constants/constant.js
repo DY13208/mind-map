@@ -201,6 +201,7 @@ export const nodeDataNoStylePropList = [
   'associativeLinePoint',
   'associativeLineText',
   'attachmentUrl',
+  'knowledgeFiles',
   'attachmentName',
   'attachmentId',
   'attachmentMimeType',

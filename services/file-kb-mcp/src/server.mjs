@@ -52,6 +52,11 @@ const TOOL_FIELDS = {
     pageSize: z.number().int().optional()
   },
   get_knowledge_document: { fileId: z.string() },
+  read_knowledge_document: {
+    fileId: z.string(),
+    cursor: z.string().optional(),
+    length: z.number().int().min(1).max(20000).optional()
+  },
   get_knowledge_block: { blockId: z.string() },
   get_knowledge_source: {
     blockId: z.string().optional(),

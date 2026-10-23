@@ -58,7 +58,7 @@
     ></NodeImgPlacementToolbar>
     <NodeNoteSidebar v-if="mindMap" :mindMap="mindMap"></NodeNoteSidebar>
     <AiCreate v-if="mindMap && enableAi" :mindMap="mindMap"></AiCreate>
-    <AiChat v-if="enableAi"></AiChat>
+    <AiChat v-if="enableAi" :mind-map="mindMap"></AiChat>
     <NodeAutoExpand v-if="mindMap" :mindMap="mindMap"></NodeAutoExpand>
     <NodeAttachment v-if="mindMap" :mindMap="mindMap"></NodeAttachment>
     <NodeAttachmentPreview v-if="mindMap"></NodeAttachmentPreview>

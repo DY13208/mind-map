@@ -1,0 +1,12 @@
+const assert = require('node:assert/strict')
+const fields = require('../../simple-mind-map/bin/fieldMerge')
+const features = require('../../simple-mind-map/src/utils/collabNodeFeatures')
+const state = require('../../simple-mind-map/src/utils/attachmentIconState')
+const references = [{ id: 'kb-1', name: '说明.txt', extractedText: '解析信息' }, { id: 'kb-2', name: '流程.pdf' }]
+assert.equal(fields.fieldGroupOf('knowledgeFiles'), 'knowledgeFiles')
+assert.ok(fields.ALL_PATCH_KEYS.includes('knowledgeFiles'))
+assert.deepEqual(features.recreateTypesFromPatch({ knowledgeFiles: references }), ['attachment'])
+assert.equal(features.needsGeometryRefresh({ knowledgeFiles: references }), true)
+assert.equal(state.hasAttachmentIcon({ knowledgeFiles: references }), true)
+assert.equal(state.attachmentIconViewState({ knowledgeFiles: references }).previewable, true)
+console.log('Knowledge file collaboration fields and renderer integration tests passed')

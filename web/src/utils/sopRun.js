@@ -2,6 +2,7 @@
  * SOP 台账 → AI 后端直接运行（WorkBuddy / 小策 / 助理，由设置与运行弹窗选择）
  * 交互对齐：点运行 → 选产物 → 执行 SOP → 拿回报告/链接
  */
+import { appendKnowledgeFullText } from './knowledgeFiles'
 import {
   AI_BACKEND_OPENCLAW,
   AI_BACKEND_XIAOCE,
@@ -344,6 +345,7 @@ export async function loadSopRunContext(roomKey, sop) {
     sopId: (sop && sop.id) || '',
     sopTitle: (sop && sop.title) || '',
     sopUid: uid,
+    knowledgeFullText: await appendKnowledgeFullText('', sourceTree, { includeDescendants: true, includeAncestors: false }),
     outline: outline.slice(0, 80000),
     fullOutline: String(fullOutline || outline || '').slice(0, 120000),
     steps,
@@ -1879,8 +1881,7 @@ export async function runSopWithWorkbuddy({
     ? `\n\n${notifyExtraParts.join('\n\n')}`
     : ''
 
-  const promptUser =
-    buildUserPrompt({ ctx, outputs, extraNote, refMapsNote }) + notifyExtra
+  const promptUser = buildUserPrompt({ ctx, outputs, extraNote, refMapsNote }) + notifyExtra + (ctx.knowledgeFullText || '')
   const promptSystem = buildSystemPrompt()
   if (onContext) {
     onContext({

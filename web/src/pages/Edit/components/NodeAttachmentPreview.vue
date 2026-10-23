@@ -177,6 +177,10 @@ export default {
     onErrorDialogClosed() { this.errorDialog.node = null; this.errorDialog.data = null },
     onAttachmentClick(node) {
       const data = node && node.getData ? node.getData() || {} : {}
+      if (!data.attachmentId && !data.attachmentUrl && Array.isArray(data.knowledgeFiles) && data.knowledgeFiles.length) {
+        this.$bus.$emit('viewKnowledgeFiles', node)
+        return
+      }
       if (isAttachmentErrorActive(data)) { this.openErrorActions(node, data); return }
       if (!data.attachmentId && !data.attachmentUrl) { this.$message.info(attachmentBusyMessage(data)); return }
       if (isHtmlAttachment(data.attachmentName, data.attachmentMimeType, data.attachmentUrl)) {

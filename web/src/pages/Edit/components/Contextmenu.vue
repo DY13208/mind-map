@@ -313,6 +313,10 @@
           <MenuIcon name="attachment" />
           <span class="name">{{ $t('toolbar.attachment') }}</span>
         </div>
+        <div class="item" data-testid="node-knowledge-file" :class="{ disabled: isGeneralization }" @click="useNodeTool('knowledgeFile')">
+          <MenuIcon name="attachment" />
+          <span class="name">文件知识库</span>
+        </div>
         <div class="item" data-testid="mapref" @click="openMapRef">
           <MenuIcon name="network" />
           <span class="name">{{ $t('contextmenu.mapRef') }}</span>
@@ -420,6 +424,7 @@
 </template>
 
 <script>
+import { appendKnowledgeFullText } from '@/utils/knowledgeFiles'
 import { mapState, mapMutations } from 'vuex'
 import MenuIcon from './ContextmenuIcon.vue'
 import { getTextFromHtml, imgToDataUrl } from 'simple-mind-map/src/utils'
@@ -673,7 +678,7 @@ export default {
         if (this.$message) this.$message.warning('当前为只读权限，无法修改导图')
         return
       }
-      const structureTool = ['painter', 'associativeLine', 'formula', 'attachment', 'outerFrame', 'flowExpand'].includes(name)
+      const structureTool = ['painter', 'associativeLine', 'formula', 'attachment', 'knowledgeFile', 'outerFrame', 'flowExpand'].includes(name)
       if (structureTool && this.isGeneralization) return
       if (name === 'flowExpand' && this.node.isRoot) return
       const nodes = this.resolveLiveSelectedNodes()
@@ -690,6 +695,7 @@ export default {
       else if (name === 'associativeLine') this.$bus.$emit('createAssociativeLine')
       else if (name === 'formula') this.setActiveSidebar('formulaSidebar')
       else if (name === 'attachment') this.$bus.$emit('selectAttachment', list)
+      else if (name === 'knowledgeFile') this.$bus.$emit('selectKnowledgeFile', list)
       else if (name === 'outerFrame') this.$bus.$emit('execCommand', 'ADD_OUTER_FRAME')
       else if (name === 'flowExpand') this.$bus.$emit('node_flow_expand', list[0])
     },
@@ -721,15 +727,19 @@ export default {
       const reference = this.getNodeAiReference()
       this.hide()
       if (!reference) return
-      await this.copyAiInstruction(`执行这个SOP：${reference}`, 'SOP 指令已复制，可粘贴给 AI 使用')
+      await this.copyAiInstruction(`执行这个SOP：${reference}`, '指令已复制，可粘贴给 AI 使用')
     },
 
     async distillNodeSkill() {
+      const node = this.node
       const reference = this.getNodeAiReference()
       this.hide()
       if (!reference) return
       const text = `/skill-to-mindmap-sop 利用这个skill\n识别${reference}所有D节点，智能查找对应的D节点适配的skill 或者对话 任务 记忆等，补充对应D需要的信息，整理放在对应D的子节点下。`
-      await this.copyAiInstruction(text, '蒸馏skill 指令已复制，可粘贴给 AI 使用')
+      try {
+        const fullText = await appendKnowledgeFullText(text, node, { includeDescendants: true })
+        await this.copyAiInstruction(fullText, '蒸馏skill 指令及挂载文件正文已复制')
+      } catch (error) { this.$message.error(error.message || '读取挂载文件正文失败，未复制') }
     },
 
     async copyAiInstruction(text, successMessage) {

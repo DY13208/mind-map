@@ -632,6 +632,7 @@ import {
   buildFollowUpPrompt,
   withCpdAdvisor
 } from '@/utils/mindmapRunPrompt'
+import { appendKnowledgeFullText } from '@/utils/knowledgeFiles'
 import {
   lastTaskContainer,
   isFollowUpPlaceholder
@@ -2098,6 +2099,13 @@ export default {
      * 按当前节点派发的任务内容：只做这一步，并把前面几步跑出来的结果当输入继续往下做
      * （不是把整张脑图当 SOP 从头再跑一遍）。组装逻辑在 utils/mindmapRunPrompt.js
      */
+    async withKnowledgeFullText(prompt, node) {
+      const room = this.$route.query && this.$route.query.room
+      const result = await appendKnowledgeFullText(prompt, node, { includeDescendants: true })
+      if (room !== (this.$route.query && this.$route.query.room)) throw new Error('已切换脑图，本次任务未发送，请重新运行')
+      return result
+    },
+
     buildDefaultJobPrompt(wanted = null, runDir = '', cwd) {
       const active = (this.activeNodes || [])[0]
       const selected =
@@ -2217,7 +2225,7 @@ export default {
         const runTarget = this.rememberRunTarget({ reuseContainer: true })
         this.jobStatus = `正在继续执行…（会话 ${this.gatewayShort(gateway)}）`
         this.jobStatusType = 'jobWait'
-        const promptText = this.buildFollowUpJobPrompt(prompt)
+        const promptText = await this.withKnowledgeFullText(this.buildFollowUpJobPrompt(prompt), this.activeJobNode || (this.activeNodes || [])[0])
         const result = await dispatchWorkbuddyJob({
           host,
           gateway,
@@ -3528,6 +3536,7 @@ export default {
         prompt = picked.prompt
       }
 
+      prompt = await this.withKnowledgeFullText(prompt, runNode)
       // 由队列派下来的条目：容器在入队时就建好了，别再建一个任务节点
       let container = options.container || null
       if (!container || !container.ok) {
@@ -3799,6 +3808,7 @@ export default {
           prompt = picked.prompt
           continued = picked.continued
         }
+        prompt = await this.withKnowledgeFullText(prompt, runNode)
         // 先建「任务 · 时间」容器，这次的任务内容与结果都挂在它下面。
         // 落点从返回值拿 —— 并发时读 this.jobRunNodeUid 会被后一条覆盖
         // 给个阶段提示：这一步之后是网络派发，公网页面走中继会有一两秒，
