@@ -293,7 +293,7 @@ export default {
         this.nodeHits = []
       }
     },
-    confirm() {
+    async confirm() {
       if (!this.selected || !fileKey(this.selected)) {
         this.$message.warning(this.$t('mapRef.needSelect'))
         return
@@ -314,6 +314,7 @@ export default {
       ) {
         mapRef.nodeId = this.selectedNode.uid
         mapRef.type = 'node'
+        mapRef.syncMode = 'mirror'
       }
       if (!this.targetNode && !this.targetUid && !this.activeNodes.length) {
         this.$message.warning(this.$t('mapRef.needNode'))
@@ -323,7 +324,7 @@ export default {
         this.selected,
         this.bindMode === 'node' ? this.selectedNode : null
       )
-      const result = { ok: false, error: '' }
+      const result = { ok: false, error: '', truncated: false, nodeCount: 0 }
       this.$bus.$emit('applySubMapToNode', {
         node: this.targetNode,
         uid: this.targetUid,
@@ -331,6 +332,12 @@ export default {
         title,
         result
       })
+      try {
+        if (result.promise) await result.promise
+      } catch (err) {
+        result.ok = false
+        result.error = (err && err.message) || 'apply failed'
+      }
       if (!result.ok) {
         this.$message.error(
           this.$t('mapRef.applyFailed') +
@@ -338,8 +345,19 @@ export default {
         )
         return
       }
-      this.$message.success(this.$t('mapRef.savedTip'))
+      if (result.truncated) {
+        this.$message.warning(
+          this.$t('mapRef.mirrorTruncated', {
+            n: result.nodeCount || 2000
+          })
+        )
+      } else if (mapRef.syncMode === 'mirror') {
+        this.$message.success(this.$t('mapRef.mirrorSavedTip'))
+      } else {
+        this.$message.success(this.$t('mapRef.savedTip'))
+      }
       this.dialogVisible = false
+      this.$bus.$emit('mapRefMirrorChanged')
     }
   }
 }

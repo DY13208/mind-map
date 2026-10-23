@@ -178,7 +178,8 @@ import CooperateDialog from './CooperateDialog.vue'
 import ConflictDraftInbox from './ConflictDraftInbox.vue'
 import NodeShareDialog from './NodeShareDialog.vue'
 import MapRefDialog from './MapRefDialog.vue'
-import { normalizeMapRef } from '@/utils/mapRefNav'
+import { normalizeMapRef, isMirrorMapRef } from '@/utils/mapRefNav'
+import { implantMirrorSubtree } from '@/utils/mapRefMirror'
 import {
   writeJobResultToMap,
   createJobContainer,
@@ -1720,80 +1721,104 @@ export default {
       this.mindMap.execCommand(...args)
     },
 
-    /** 原子写入子脑图引用 + 企业微信卡片样式 */
+    /** 原子写入子脑图引用 + 企业微信卡片样式；定位到节点时植入镜像子树 */
     applySubMapToNode(payload) {
       const result =
         payload && payload.result && typeof payload.result === 'object'
           ? payload.result
           : { ok: false }
-      try {
-        if (!this.mindMap || !this.mindMap.renderer) {
+      result.promise = (async () => {
+        try {
+          if (!this.mindMap || !this.mindMap.renderer) {
+            result.ok = false
+            result.error = 'mindMap missing'
+            return result.ok
+          }
+          const rawRef = payload && (payload.mapRef || payload.ref)
+          const ref = normalizeMapRef(rawRef)
+          if (!ref) {
+            result.ok = false
+            result.error = 'invalid mapRef'
+            return result.ok
+          }
+          let node = payload && payload.node
+          const uid =
+            (payload && payload.uid) ||
+            (node && node.getData && node.getData('uid')) ||
+            ''
+          if (uid && typeof this.mindMap.renderer.findNodeByUid === 'function') {
+            const live = this.mindMap.renderer.findNodeByUid(uid)
+            if (live) node = live
+          }
+          if (
+            !node &&
+            this.mindMap.renderer.activeNodeList &&
+            this.mindMap.renderer.activeNodeList[0]
+          ) {
+            node = this.mindMap.renderer.activeNodeList[0]
+          }
+          if (!node || typeof node.getData !== 'function') {
+            result.ok = false
+            result.error = 'node missing'
+            return result.ok
+          }
+
+          // 定位到节点 → 镜像整棵子树
+          if (isMirrorMapRef(rawRef) || isMirrorMapRef(ref)) {
+            showLoading(this.$t('mapRef.mirrorLoading'))
+            try {
+              const implanted = await implantMirrorSubtree({
+                mindMap: this.mindMap,
+                node,
+                mapRef: { ...ref, syncMode: 'mirror' },
+                title: payload && payload.title
+              })
+              result.ok = !!implanted.ok
+              result.uid = node.getData('uid') || uid
+              result.truncated = !!implanted.truncated
+              result.nodeCount = implanted.nodeCount || 0
+              if (!result.ok) {
+                result.error = implanted.error || 'mirror implant failed'
+              }
+              return result.ok
+            } finally {
+              hideLoading()
+            }
+          }
+
+          const text =
+            String(
+              (payload && payload.title) || ref.mapId || '子脑图'
+            ).trim() || '子脑图'
+          this.mindMap.renderer.setNodeDataRender(node, {
+            mapRef: ref,
+            text,
+            richText: false,
+            resetRichText: true,
+            shape: 'roundedRectangle',
+            fillColor: '#F2F3F5',
+            borderColor: 'transparent',
+            borderWidth: 0,
+            color: '#1F2329',
+            fontSize: 14,
+            fontWeight: 'normal',
+            paddingX: 10,
+            paddingY: 8
+          })
+          this.mindMap.execCommand('SET_NODE_MAP_REF', node, ref)
+          const saved = normalizeMapRef(node.getData('mapRef'))
+          result.ok = !!saved
+          result.uid = node.getData('uid') || uid
+          if (!result.ok) result.error = 'mapRef not persisted'
+          return result.ok
+        } catch (err) {
+          console.error('[applySubMapToNode]', err)
           result.ok = false
-          result.error = 'mindMap missing'
+          result.error = (err && err.message) || 'apply failed'
           return result.ok
         }
-        const ref = normalizeMapRef(
-          payload && (payload.mapRef || payload.ref)
-        )
-        if (!ref) {
-          result.ok = false
-          result.error = 'invalid mapRef'
-          return result.ok
-        }
-        let node = payload && payload.node
-        const uid =
-          (payload && payload.uid) ||
-          (node && node.getData && node.getData('uid')) ||
-          ''
-        if (uid && typeof this.mindMap.renderer.findNodeByUid === 'function') {
-          const live = this.mindMap.renderer.findNodeByUid(uid)
-          if (live) node = live
-        }
-        if (
-          !node &&
-          this.mindMap.renderer.activeNodeList &&
-          this.mindMap.renderer.activeNodeList[0]
-        ) {
-          node = this.mindMap.renderer.activeNodeList[0]
-        }
-        if (!node || typeof node.getData !== 'function') {
-          result.ok = false
-          result.error = 'node missing'
-          return result.ok
-        }
-        const text =
-          String(
-            (payload && payload.title) || ref.mapId || '子脑图'
-          ).trim() || '子脑图'
-        // 一次写入，避免多次 command 互相覆盖
-        this.mindMap.renderer.setNodeDataRender(node, {
-          mapRef: ref,
-          text,
-          richText: false,
-          resetRichText: true,
-          shape: 'roundedRectangle',
-          fillColor: '#F2F3F5',
-          borderColor: 'transparent',
-          borderWidth: 0,
-          color: '#1F2329',
-          fontSize: 14,
-          fontWeight: 'normal',
-          paddingX: 10,
-          paddingY: 8
-        })
-        // 再显式走 SET_NODE_MAP_REF，便于协同推送 mapRef 字段
-        this.mindMap.execCommand('SET_NODE_MAP_REF', node, ref)
-        const saved = normalizeMapRef(node.getData('mapRef'))
-        result.ok = !!saved
-        result.uid = node.getData('uid') || uid
-        if (!result.ok) result.error = 'mapRef not persisted'
-        return result.ok
-      } catch (err) {
-        console.error('[applySubMapToNode]', err)
-        result.ok = false
-        result.error = (err && err.message) || 'apply failed'
-        return result.ok
-      }
+      })()
+      return result.ok
     },
 
     /**
@@ -2042,11 +2067,22 @@ export default {
     },
 
     onDrop(e) {
-      if (!this.enableDragImport) return
       this.showDragMask = false
       const dt = e.dataTransfer
       const file = dt.files && dt.files[0]
       if (!file) return
+      // 有选中节点时，本地文件优先挂附件，而不是整图导入/当超链接
+      const active =
+        (this.mindMap &&
+          this.mindMap.renderer &&
+          this.mindMap.renderer.activeNodeList) ||
+        []
+      const mapExt = /\.(smm|xmind|md|markdown|json|txt)$/i
+      if (active.length && !mapExt.test(file.name || '')) {
+        this.$bus.$emit('attachLocalFiles', { files: [file], nodes: active.slice() })
+        return
+      }
+      if (!this.enableDragImport) return
       this.$bus.$emit('importFile', file)
     }
   }

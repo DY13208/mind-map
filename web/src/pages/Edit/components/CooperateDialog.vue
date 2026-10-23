@@ -323,11 +323,13 @@ import { countNodes, stubImportedTree } from '@/utils/importTree'
 import {
   captureMapView,
   inspectMapRef,
+  isMirrorMapRef,
   loadMapView,
   normalizeMapRef,
   restoreMapView,
   saveMapView
 } from '@/utils/mapRefNav'
+import { MapRefMirrorSync } from '@/utils/mapRefMirror'
 import {
   buildChildTrail,
   consumeMapNavViewRestore,
@@ -580,6 +582,8 @@ export default {
     this.$bus.$on('map_ref_click', this.onMapRefClick)
     this.$bus.$on('node_dblclick', this.onNodeDblclickMapRef)
     this.$bus.$on('openMapRefEdit', this.navigateToMapRef)
+    this.$bus.$on('mapRefMirrorChanged', this.onMapRefMirrorChanged)
+    this._mapRefMirrorSync = null
     this.$bus.$on('showShareAcl', this.openShare)
     this.$bus.$on('copyInviteLink', this.copyInvite)
     this._seenHttpChanges = new Map()
@@ -601,6 +605,8 @@ export default {
     this.$bus.$off('map_ref_click', this.onMapRefClick)
     this.$bus.$off('node_dblclick', this.onNodeDblclickMapRef)
     this.$bus.$off('openMapRefEdit', this.navigateToMapRef)
+    this.$bus.$off('mapRefMirrorChanged', this.onMapRefMirrorChanged)
+    this.stopMapRefMirrorSync()
     this.$bus.$off('showShareAcl', this.openShare)
     this.$bus.$off('copyInviteLink', this.copyInvite)
     if (this.mindMap) {
@@ -1536,13 +1542,39 @@ export default {
       await this.restoreOpenedMapView()
     },
 
-    async onMapRefClick(_node, ref) {
+    async onMapRefClick(node, ref) {
       const normalized = normalizeMapRef(ref)
       if (!normalized) {
         this.$message.warning(this.$t('mapRef.openFailed'))
         return
       }
-      // 点击子脑图图标 / 双击节点 → 直接打开编辑页（跳过预览弹窗）
+      // 镜像模式：在本图展开宿主节点，不跳转
+      if (isMirrorMapRef(normalized)) {
+        const host =
+          node ||
+          (normalized.mirrorRootUid &&
+            this.mindMap &&
+            this.mindMap.renderer &&
+            this.mindMap.renderer.findNodeByUid &&
+            this.mindMap.renderer.findNodeByUid(normalized.mirrorRootUid))
+        if (host && typeof host.setData === 'function') {
+          host.setData({ expand: true })
+          if (this.mindMap && this.mindMap.renderer) {
+            this.mindMap.render()
+          }
+          const uid =
+            (host.getData && host.getData('uid')) || normalized.mirrorRootUid
+          if (uid && this.mindMap && this.mindMap.cooperate) {
+            try {
+              await this.mindMap.cooperate.revealUid(uid)
+            } catch (e) {
+              /* ignore */
+            }
+          }
+        }
+        return
+      }
+      // 导航模式：跳转目标导图
       await this.navigateToMapRef(normalized)
     },
 
@@ -1551,6 +1583,36 @@ export default {
       const ref = normalizeMapRef(node.getData('mapRef'))
       if (!ref) return
       this.onMapRefClick(node, ref)
+    },
+
+    onMapRefMirrorChanged() {
+      this.startMapRefMirrorSync()
+    },
+
+    startMapRefMirrorSync() {
+      this.stopMapRefMirrorSync()
+      if (!this.mindMap || !this.roomName) return
+      this._mapRefMirrorSync = new MapRefMirrorSync({
+        mindMap: this.mindMap,
+        sourceRoomKey: this.roomName,
+        onMessage: (type, detail) => {
+          if (type === 'forwardError' && detail && detail.error) {
+            console.warn('[mapRefMirror]', detail.error)
+          }
+        }
+      })
+      this._mapRefMirrorSync.start()
+    },
+
+    stopMapRefMirrorSync() {
+      if (this._mapRefMirrorSync) {
+        try {
+          this._mapRefMirrorSync.stop()
+        } catch (e) {
+          /* ignore */
+        }
+        this._mapRefMirrorSync = null
+      }
     },
 
     async navigateToMapRef(ref) {
@@ -1879,6 +1941,7 @@ export default {
     },
 
     unbindProvider() {
+      this.stopMapRefMirrorSync()
       if (this.provider) {
         try {
           this.provider.awareness.off('change', this.updatePeers)
@@ -2401,6 +2464,7 @@ export default {
           this.syncHttpPresence()
         }
         this.loadHistory()
+        this.startMapRefMirrorSync()
       }, 0)
     },
 

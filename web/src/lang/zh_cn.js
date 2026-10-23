@@ -165,6 +165,7 @@ export default {
     linkToNode: '链接到指定节点',
     removeNodeLink: '删除节点链接',
     mapRef: '插入子脑图',
+    openMapRefSource: '在原图中打开',
     removeMapRef: '移除子脑图'
   },
   count: {
@@ -262,7 +263,9 @@ export default {
     openHint: '链接将在新标签页打开，当前脑图会保留',
     remove: '移除链接',
     invalidLink: '请输入有效的网址，仅支持 HTTP 或 HTTPS',
-    requiredLink: '请先输入链接地址'
+    requiredLink: '请先输入链接地址',
+    localFileAsAttachment: '本地文件不能添加为超链接，请改为上传附件',
+    localFileRedirect: '「{name}」是本地文件，已改为上传附件'
   },
   nodeIcon: {
     title: '图标'
@@ -644,8 +647,13 @@ export default {
     noPermission: '没有访问该导图的权限',
     saved: '已插入子脑图',
     savedTip: '已插入子脑图：节点应变为灰底卡片+紫色图标，双击打开编辑（F2 可改名）',
+    mirrorSavedTip:
+      '已定位到节点并同步子树：可在本图展开编辑，修改会与原图双向同步',
+    mirrorLoading: '正在拉取目标节点子树…',
+    mirrorTruncated:
+      '目标子树过大，已同步前 {n} 个节点（深度最多 12 层）；其余未同步',
     applyFailed: '插入失败，请重新选中节点后再试',
-    removed: '已移除子脑图',
+    removed: '已移除子脑图引用（本地子节点已保留，不再跨图同步）',
     openFailed: '无法打开引用的导图',
     currentMap: '不能引用当前导图',
     previewTitle: '子脑图预览',

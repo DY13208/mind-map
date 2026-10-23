@@ -20,11 +20,36 @@ function normalizeMapRef(value) {
   const nodeId = String(
     value.nodeId || value.node_id || value.uid || ''
   ).trim()
-  return {
+  const syncMode = String(value.syncMode || value.sync_mode || '').trim()
+  const mirrorRootUid = String(
+    value.mirrorRootUid || value.mirror_root_uid || ''
+  ).trim()
+  const uidMap =
+    value.uidMap && typeof value.uidMap === 'object' && !Array.isArray(value.uidMap)
+      ? { ...value.uidMap }
+      : null
+  const peerVersionRaw = value.peerVersion != null ? value.peerVersion : value.peer_version
+  const peerVersion =
+    peerVersionRaw == null || peerVersionRaw === ''
+      ? null
+      : Number(peerVersionRaw)
+  const out = {
     mapId,
     nodeId: nodeId || null,
     type: nodeId ? 'node' : String(value.type || 'map')
   }
+  if (syncMode === 'mirror' && nodeId) {
+    out.syncMode = 'mirror'
+    if (mirrorRootUid) out.mirrorRootUid = mirrorRootUid
+    if (uidMap && Object.keys(uidMap).length) out.uidMap = uidMap
+    if (Number.isFinite(peerVersion)) out.peerVersion = peerVersion
+  }
+  return out
+}
+
+function isMirrorMapRef(value) {
+  const ref = normalizeMapRef(value)
+  return !!(ref && ref.syncMode === 'mirror' && ref.nodeId)
 }
 
 function mapRefEquals(a, b) {
@@ -32,11 +57,16 @@ function mapRefEquals(a, b) {
   const right = normalizeMapRef(b)
   if (!left && !right) return true
   if (!left || !right) return false
-  return left.mapId === right.mapId && left.nodeId === right.nodeId
+  return (
+    left.mapId === right.mapId &&
+    left.nodeId === right.nodeId &&
+    (left.syncMode || '') === (right.syncMode || '')
+  )
 }
 
 const api = {
   normalizeMapRef,
+  isMirrorMapRef,
   mapRefEquals
 }
 

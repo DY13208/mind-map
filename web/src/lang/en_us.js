@@ -169,6 +169,7 @@ export default {
     linkToNode: 'Link to node',
     removeNodeLink: 'Remove node link',
     mapRef: 'Insert sub-map',
+    openMapRefSource: 'Open in source map',
     removeMapRef: 'Remove sub-map'
   },
   count: {
@@ -268,6 +269,8 @@ export default {
     openHint: 'Opens in a new tab. Your map stays open.',
     remove: 'Remove link',
     invalidLink: 'Enter a valid HTTP or HTTPS URL',
+    localFileAsAttachment: 'Local files cannot be hyperlinks. Upload them as attachments instead.',
+    localFileRedirect: '“{name}” is a local file. Opening the attachment picker instead.'
     requiredLink: 'Enter a link address'
   },
   nodeIcon: {
@@ -667,8 +670,14 @@ export default {
     saved: 'Sub-map inserted',
     savedTip:
       'Sub-map inserted: node should become a gray card with a purple icon; double-click to open editor (F2 to rename)',
+    mirrorSavedTip:
+      'Node located and subtree mirrored: expand and edit here; changes sync both ways with the source map',
+    mirrorLoading: 'Fetching target node subtree…',
+    mirrorTruncated:
+      'Target subtree is too large; synced the first {n} nodes (max depth 12); the rest were skipped',
     applyFailed: 'Insert failed; select the node and try again',
-    removed: 'Sub-map removed',
+    removed:
+      'Sub-map reference removed (local children kept; cross-map sync stopped)',
     openFailed: 'Could not open the referenced map',
     currentMap: 'Cannot reference the current map',
     previewTitle: 'Sub-map preview',

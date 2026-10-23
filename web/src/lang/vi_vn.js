@@ -128,6 +128,7 @@ export default {
     removeImage: 'Xóa hình ảnh',
     removeHyperlink: 'Xóa liên kết',
     mapRef: 'Chèn sơ đồ con',
+    openMapRefSource: 'Mở trong sơ đồ gốc',
     removeMapRef: 'Xóa sơ đồ con',
     removeNote: 'Xóa ghi chú',
     removeCustomStyles: 'Xóa kiểu tùy chỉnh',
@@ -642,8 +643,14 @@ export default {
     saved: 'Đã chèn sơ đồ con',
     savedTip:
       'Đã chèn sơ đồ con: nút sẽ thành thẻ xám + icon tím; nhấp đúp để xem (F2 để đổi tên)',
+    mirrorSavedTip:
+      'Đã định vị nút và đồng bộ cây con: mở rộng và sửa tại đây; thay đổi đồng bộ hai chiều với sơ đồ gốc',
+    mirrorLoading: 'Đang tải cây con của nút đích…',
+    mirrorTruncated:
+      'Cây con quá lớn; đã đồng bộ {n} nút đầu (độ sâu tối đa 12); phần còn lại bị bỏ qua',
     applyFailed: 'Chèn thất bại; hãy chọn lại nút rồi thử',
-    removed: 'Đã xóa sơ đồ con',
+    removed:
+      'Đã xóa tham chiếu sơ đồ con (giữ nút con cục bộ; dừng đồng bộ liên sơ đồ)',
     openFailed: 'Không mở được sơ đồ được tham chiếu',
     currentMap: 'Không thể tham chiếu sơ đồ hiện tại',
     previewTitle: 'Xem trước sơ đồ con',
