@@ -164,3 +164,12 @@ export function getViewport(win) {
     height: (win && win.innerHeight) || 0
   }
 }
+
+// Touch / narrow viewports cannot keep a flyout submenu on screen.
+export function preferStackedSubmenu(viewport, opts = {}) {
+  if (opts.isMobile || opts.coarsePointer) return true
+  const width = (viewport && viewport.width) || 0
+  const height = (viewport && viewport.height) || 0
+  if (width <= 0 || height <= 0) return false
+  return width < 768 || height < 500
+}
