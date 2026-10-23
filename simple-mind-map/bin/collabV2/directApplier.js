@@ -126,9 +126,10 @@ function sopError(trace) {
 }
 
 function dataFields(input = {}) {
+  const { sanitizeHyperlinkFields } = require('../localFileLink')
   const patch = { ...(input || {}) }
   DATA_META_KEYS.forEach(key => delete patch[key])
-  return patch
+  return sanitizeHyperlinkFields(patch)
 }
 
 function clampIndex(index, max) {

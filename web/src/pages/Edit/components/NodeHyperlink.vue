@@ -92,6 +92,10 @@ import {
 } from '@/utils/conflictEdit'
 import { conflictDraftKey, removeConflictDraft } from '@/utils/conflictDraftStore'
 import { roomFromLocation } from '@/utils/roomLocation'
+import {
+  isLocalFileReference,
+  localFileDisplayName
+} from 'simple-mind-map/src/utils/localFileLink'
 
 // Keep draft fields and target nodes stable until the dialog is saved or cancelled.
 export default {
@@ -145,6 +149,7 @@ export default {
     normalizeLink(value) {
       const input = value.trim()
       if (!input || /\s/.test(input)) throw new Error('invalid')
+      if (isLocalFileReference(input)) throw new Error('local-file')
       const relative = /^(\/(?!\/)|\.\.?\/|[?#])/.test(input)
       const explicitHttp = /^https?:\/\//i.test(input)
       // Allow host:port while rejecting schemes the existing link opener cannot open.
@@ -164,10 +169,34 @@ export default {
         this.normalizeLink(this.link)
         this.error = ''
         return true
-      } catch (_) {
+      } catch (err) {
+        if (err && err.message === 'local-file') {
+          this.error = this.$t('nodeHyperlink.localFileAsAttachment')
+          return false
+        }
         this.error = this.$t(this.link.trim() ? 'nodeHyperlink.invalidLink' : 'nodeHyperlink.requiredLink')
         return false
       }
+    },
+    redirectLocalFileToAttachment() {
+      const input = (this.link || '').trim()
+      if (!isLocalFileReference(input)) return false
+      const name = localFileDisplayName(input) || '本地文件'
+      const nodes = this.targetUids
+        .map(uid => getLiveNode(this.mindMap, uid))
+        .filter(Boolean)
+      this.$message.warning(
+        this.$t('nodeHyperlink.localFileRedirect', { name })
+      )
+      this.sessions.forEach(entry =>
+        discardEditSession(getEditCooperate(this.mindMap), entry.id)
+      )
+      this.sessions = []
+      this.dialogVisible = false
+      this.$nextTick(() => {
+        this.$bus.$emit('selectAttachment', nodes)
+      })
+      return true
     },
     handleShowNodeLink(node) {
       if (this.dialogVisible) return
@@ -278,7 +307,9 @@ export default {
       await this.saveLink('', '')
     },
     async confirm() {
-      if (!this.dialogVisible || this.saving || this.conflictEntries.length || !this.validateLink()) return
+      if (!this.dialogVisible || this.saving || this.conflictEntries.length) return
+      if (this.redirectLocalFileToAttachment()) return
+      if (!this.validateLink()) return
       await this.saveLink(this.normalizeLink(this.link), this.linkTitle.trim())
     },
     async saveLink(link, linkTitle) {

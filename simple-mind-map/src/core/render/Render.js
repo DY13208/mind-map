@@ -59,6 +59,7 @@ import edgeGeometryModule from '../../utils/edgeGeometry'
 const edgeGeometry = edgeGeometryModule.boundsFromPath
   ? edgeGeometryModule
   : edgeGeometryModule.default
+import { isLocalFileReference, localFileDisplayName } from '../../utils/localFileLink'
 
 // 布局列表
 const layouts = {
@@ -2126,18 +2127,34 @@ class Render {
 
   readClipboardDataFromEvent(clipboardData) {
     let img = null
+    const files = []
     const text =
       clipboardData.getData('text/plain') || clipboardData.getData('text') || ''
     const html = clipboardData.getData('text/html') || ''
     const items = clipboardData.items
     if (items) {
       Array.from(items).forEach(item => {
-        if (item.type && item.type.indexOf('image') > -1) {
-          img = item.getAsFile()
+        if (!item) return
+        if (item.kind === 'file') {
+          const file = typeof item.getAsFile === 'function' ? item.getAsFile() : null
+          if (!file) return
+          if (item.type && item.type.indexOf('image') > -1 && !img) img = file
+          // 非图片本地文件：走附件，不进超链接
+          if (!(item.type && item.type.indexOf('image') > -1)) files.push(file)
         }
       })
     }
-    return { text, html, img }
+    if ((!files.length || !img) && clipboardData.files && clipboardData.files.length) {
+      Array.from(clipboardData.files).forEach(file => {
+        if (!file) return
+        if (file.type && file.type.indexOf('image') > -1) {
+          if (!img) img = file
+          return
+        }
+        if (!files.some(item => item === file)) files.push(file)
+      })
+    }
+    return { text, html, img, files }
   }
 
   // 原生 paste：HTTP 可用，且点击节点后焦点在 SVG 上也能粘贴
@@ -2153,6 +2170,28 @@ class Render {
       (event.originalEvent && event.originalEvent.clipboardData)
     if (!clipboardData) return
     const payload = this.readClipboardDataFromEvent(clipboardData)
+    // 剪贴板里是本地文件：上传附件，禁止当成超链接/纯文本路径
+    if (payload.files && payload.files.length) {
+      this._pasteFromNativeEvent = true
+      event.preventDefault()
+      this.mindMap.emit('attach_local_files', {
+        files: payload.files,
+        nodes: (this.activeNodeList || []).slice()
+      })
+      return
+    }
+    if (payload.text && isLocalFileReference(payload.text) && !payload.html && !payload.img) {
+      this._pasteFromNativeEvent = true
+      event.preventDefault()
+      this.mindMap.emit('local_file_hyperlink_blocked', {
+        node: this.activeNodeList[0],
+        link: payload.text.trim(),
+        title: '',
+        fileName: localFileDisplayName(payload.text),
+        source: 'paste-text'
+      })
+      return
+    }
     if (!payload.text && !payload.html && !payload.img) {
       const historyTrees = this.getHistoryCopyForCurrentRoom()
       if (!historyTrees) return
@@ -3294,6 +3333,19 @@ class Render {
 
   //  设置节点超链接
   setNodeHyperlink(node, link, title = '') {
+    // 本地 file:// / 盘符路径不能跨端打开，禁止写入超链接（应走附件）
+    if (link && isLocalFileReference(link)) {
+      if (typeof console !== 'undefined' && console.warn) {
+        console.warn('[mind-map] refused local file hyperlink; use attachment instead', link)
+      }
+      this.mindMap.emit('local_file_hyperlink_blocked', {
+        node,
+        link,
+        title,
+        fileName: localFileDisplayName(link)
+      })
+      return
+    }
     this.setNodeDataRender(node, {
       hyperlink: link,
       hyperlinkTitle: title

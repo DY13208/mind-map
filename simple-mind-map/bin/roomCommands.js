@@ -130,9 +130,10 @@ function withAuthoritativeOrder(event, stamp) {
 }
 
 function dataFields(input = {}) {
+  const { sanitizeHyperlinkFields } = require('./localFileLink')
   const patch = { ...(input || {}) }
   COMMAND_META_KEYS.forEach(key => delete patch[key])
-  return patch
+  return sanitizeHyperlinkFields(patch)
 }
 
 function sopError() {

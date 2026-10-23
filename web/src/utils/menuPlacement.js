@@ -85,6 +85,17 @@ export function placeMenu(size, anchor, safeArea, opts = {}) {
 }
 
 /**
+ * 窄屏 / 触控：侧向二级菜单容易被裁切或点完即关，改用主菜单内钻取。
+ */
+export function preferStackedSubmenu(viewport = {}, opts = {}) {
+  const width = Number(viewport.width) || 0
+  if (width > 0 && width < 720) return true
+  if (opts.isMobile) return true
+  if (opts.coarsePointer) return true
+  return false
+}
+
+/**
  * 子菜单定位
  * @param size { width, height } 子菜单自然尺寸
  * @param itemRect 触发项矩形
