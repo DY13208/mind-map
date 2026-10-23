@@ -33,7 +33,7 @@ async function run() {
   methods.pick.call({ editor: () => ({ root, quill }), mentionRange: {}, mentionEditor: { root }, query: '同事', close() {},
     pending: [{ userId: 'u1' }] }, { userId: 'u1', name: '同事' })
   assert.equal(inserted[0][1], '@同事')
-  assert.deepEqual(inserted[0][2], { size: '18px', italic: true, color: '#087d56', background: '#e7f5ed', bold: true })
+  assert.deepEqual(inserted[0][2], { size: '18px', italic: true, color: '#087d56', background: false, bold: true })
   assert.equal(inserted[1][1], ' ')
   assert.equal(inserted[1][2].color, false)
   assert.equal(inserted[1][2].background, false)

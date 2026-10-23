@@ -136,7 +136,7 @@ export default {
         const base = editor.quill.getFormat(start, 1)
         const normal = { ...base, color: base.color || false, background: base.background || false, bold: base.bold || false }
         editor.quill.deleteText(start, this.query.length + 1, 'user')
-        editor.quill.insertText(start, token.slice(0, -1), { ...base, color: '#087d56', background: '#e7f5ed', bold: true }, 'user')
+        editor.quill.insertText(start, token.slice(0, -1), { ...base, color: '#087d56', background: false, bold: true }, 'user')
         editor.quill.insertText(start + token.length - 1, ' ', normal, 'user')
         editor.quill.setSelection(start + token.length, 0, 'silent')
         // A collapsed selection otherwise inherits the preceding highlighted text.
@@ -188,4 +188,10 @@ export default {
 .mention-options small { display: block; margin-top: 3px; font-size: 11px; color: #7c8981; }
 .mention-avatar { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: #ddefe5; color: #087d56; flex-shrink: 0; }
 .mention-state { padding: 16px 12px; color: #7c8981; font-size: 12px; }
+</style>
+
+<style>
+/* Previously saved mentions also lose the old highlight without rewriting nodes. */
+.smm-richtext-node-wrap strong[style*="rgb(8, 125, 86)"][style*="rgb(231, 245, 237)"],
+.smm-richtext-node-edit-wrap strong[style*="rgb(8, 125, 86)"][style*="rgb(231, 245, 237)"] { background-color: transparent !important; }
 </style>
