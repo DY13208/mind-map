@@ -413,6 +413,8 @@ class RichText {
 
   // 隐藏文本编辑控件，即完成编辑
   hideEditText(nodes) {
+    // One click can reach several editor-exit handlers while awaiting ACK.
+    if (this._hideEditTextPromise) return this._hideEditTextPromise
     if (!this.showTextEdit) {
       return
     }
@@ -468,10 +470,12 @@ class RichText {
         return Promise.resolve(false)
       }
       this.syncEditSessionDraft()
-      return cooperate
+      this._hideEditTextPromise = cooperate
         .commitEditSession(sessionId, patch)
         .then(result => result && result.draftSaved === false ? false : finish(true))
         .catch(() => false)
+        .finally(() => { this._hideEditTextPromise = null })
+      return this._hideEditTextPromise
     }
     return finish(false)
   }

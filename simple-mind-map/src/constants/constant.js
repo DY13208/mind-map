@@ -190,6 +190,9 @@ export const nodeDataNoStylePropList = [
   'richText',
   'resetRichText', // 重新创建富文本内容，去掉原有样式
   'uid',
+  'position', // server sibling ordering, never a node style/content patch
+  'parent_uid',
+  'parentUid',
   'childCount', // structural/lazy-load metadata, not a user-editable style
   'descendantCount',
   'subtreeVersion',

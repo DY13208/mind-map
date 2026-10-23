@@ -566,6 +566,9 @@ export default class TextEdit {
     if (this.mindMap.richText) {
       return this.mindMap.richText.hideEditText()
     }
+    // svg_mousedown / before_node_active / body_click can end the same edit
+    // before its asynchronous ACK arrives. Submit that edit only once.
+    if (this._hideEditTextPromise) return this._hideEditTextPromise
     if (!this.showTextEdit) {
       return
     }
@@ -621,10 +624,12 @@ export default class TextEdit {
         return Promise.resolve(false)
       }
       this.syncEditSessionDraft()
-      return cooperate
+      this._hideEditTextPromise = cooperate
         .commitEditSession(sessionId, patch)
         .then(result => result && result.draftSaved === false ? false : finish(true))
         .catch(() => false)
+        .finally(() => { this._hideEditTextPromise = null })
+      return this._hideEditTextPromise
     }
     return finish(false)
   }

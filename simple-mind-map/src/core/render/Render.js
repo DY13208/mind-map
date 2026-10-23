@@ -977,8 +977,18 @@ class Render {
     return false
   }
 
-  rememberConnectorSpecs(node) {
-    if (!node || (node.getData && node.getData('expand') === false)) return
+  rememberConnectorSpecs(node, refreshGeometry = false) {
+    if (!node) return
+    if (node.getData && node.getData('expand') === false) {
+      if (refreshGeometry) node.removeLine()
+      node._connectorSpecs = []
+      return
+    }
+    // A structural edit can move a previously painted branch offscreen.
+    // Skipping its node DOM must not let the viewport index reuse old paths.
+    // Update existing connector slots only; unpainted branches still use
+    // geometry specs without allocating offscreen SVG paths.
+    if (refreshGeometry && (node._lines || []).length) node.renderLine()
     const live = node._lines || []
     if (live.length) {
       node._connectorSpecs = live
@@ -991,7 +1001,7 @@ class Render {
         .filter(Boolean)
       return
     }
-    if (node._connectorSpecs && node._connectorSpecs.length) return
+    if (!refreshGeometry && node._connectorSpecs && node._connectorSpecs.length) return
     const captured = edgeGeometry.captureNodeConnectors(node)
     node._connectorSpecs = captured.map(item => ({
       d: item.d,
@@ -1023,7 +1033,7 @@ class Render {
     const pinned = lazy ? this.collectPinnedViewportNodes() : null
     walkLayoutInSlices([this.root, null, node => {
       if (lazy && !this.shouldPaintNodeNow(node, viewport, pinned)) {
-        this.rememberConnectorSpecs(node)
+        this.rememberConnectorSpecs(node, true)
         return node.getData('expand') === false
       }
       node.render(() => {}, forceRender, false, true)

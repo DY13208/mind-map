@@ -175,11 +175,17 @@ export function createEditSessionManager() {
     const groups = new Set(session.fields.map(fieldGroup))
     const initial = initialValues || latest.data
     if (!session.fields.every(field => stableValue(session.baseValues[field]) === stableValue(initial[field]))) return null
-    if (![...groups].every(group =>
-      (Number(session.baseVersions[group]) || 0) === 0 &&
-      Number(latest.fieldVersions[group]) === revision
-    )) return null
-    groups.forEach(group => { session.baseVersions[group] = revision })
+    if (![...groups].every(group => {
+      const version = Number(latest.fieldVersions[group]) || 0
+      // Optional fields absent from the insert (e.g. textMentions) have no
+      // creation stamp. Keep that group's zero baseline, without preventing
+      // the text group from adopting its own insert ACK.
+      const absent = session.fields.filter(field => fieldGroup(field) === group)
+        .every(field => !Object.prototype.hasOwnProperty.call(latest.data, field))
+      return (Number(session.baseVersions[group]) || 0) === 0 &&
+        (version === revision || (version === 0 && absent))
+    })) return null
+    groups.forEach(group => { session.baseVersions[group] = Number(latest.fieldVersions[group]) || 0 })
     session.baseValues = valuesForFields(latest.data, session.fields)
     return sessionCopy(session)
   }

@@ -1057,6 +1057,29 @@ async function testAckReprojectsOrderAfterChildrenMaterialize() {
 
 async function main() {
   const runtime = await loadRuntime()
+  {
+    const context = createContext(runtime)
+    const session = openSession(context, 'local-child', ['text', 'richText', 'textMentions'])
+    const draft = context.getEditSession(session.id).draft
+    context.acknowledgeLocalNodeCreation(insertAck('local-child', 'local initial', 3).operation, 3)
+    const initialized = context.getEditSession(session.id)
+    assert.equal(initialized.baseVersions.text, 3, 'an absent optional mentions group must not block the text creation baseline')
+    assert.equal(initialized.baseVersions.textMentions, 0, 'absent mentions retain their zero baseline')
+    assert.deepEqual(initialized.draft, draft)
+    assert.equal(context.validateEditSession(session.id, ['text', 'richText', 'textMentions']).ok, true)
+    context.currentData['local-child'].data.textMentions = [{ userId: 'peer', name: 'Peer' }]
+    context.currentData['local-child'].data.__fv.textMentions = 4
+    assert.equal(context.validateEditSession(session.id, ['textMentions']).ok, false,
+      'a later remote mention edit must remain a conflict')
+  }
+  {
+    const context = createContext(runtime)
+    const session = openSession(context, 'local-child', ['text', 'richText', 'textMentions'])
+    const malformed = insertAck('local-child', 'local initial', 3, { textMentions: [] })
+    context.acknowledgeLocalNodeCreation(malformed.operation, 3)
+    assert.equal(context.getEditSession(session.id).baseVersions.text, 0,
+      'present optional content without its field version must not be adopted')
+  }
   testCanonicalUpdatePreservesOnlyMatchingDataFieldVersions(runtime)
   await testOwnUpdateAckSurvivesNewerLocalIntentOnlyForItsSession()
   await testOldTextAckCannotCrossDeleteOrSameUidRestore()

@@ -2572,6 +2572,9 @@ class Cooperate {
 
   // 节点树渲染完毕事件
   onNodeTreeRenderEnd() {
+    if (typeof this.refreshCollapsedNodeCounts === 'function') {
+      this.refreshCollapsedNodeCounts().catch(() => {})
+    }
     const reorderedParents = []
     if (!this._dragViewDeferred && this._pendingChildOrderParents) {
       this._pendingChildOrderParents.forEach(uid => {
@@ -2876,6 +2879,11 @@ class Cooperate {
         this.renderedVersion = Math.max(Number(this.renderedVersion) || 0, watermark)
       }
       if (this.collabStore) this.collabStore.setLastAppliedVersion(watermark)
+      // A remote insert under a collapsed parent can update no layout at all.
+      // Its ancestor badges still need the newly committed server totals.
+      if (typeof this.refreshCollapsedNodeCounts === 'function') {
+        this.refreshCollapsedNodeCounts().catch(() => {})
+      }
       advanced = false
     }
     commitWatermark()
@@ -3111,7 +3119,8 @@ class Cooperate {
     this.editSessionManager.list().forEach(session => {
       if (session.uid !== uid || (session.roomKey && session.roomKey !== this.httpRoomKey)) return
       if (!snapshot || !session.fields.every(field =>
-        Number(snapshot.fieldVersions[editFieldGroup(field)]) === revision &&
+        (Number(snapshot.fieldVersions[editFieldGroup(field)]) || 0) ===
+          (Number(readFieldVersions(data)[editFieldGroup(field)]) || 0) &&
         stableFieldValue(snapshot.data[field]) === stableFieldValue(data[field])
       )) return
       let initialValues = data
@@ -8264,6 +8273,7 @@ class Cooperate {
       await this.httpInsertPromise
     } finally {
       this.httpInsertPromise = null
+      this.refreshCollapsedNodeCounts().catch(() => {})
     }
   }
 
@@ -8898,6 +8908,58 @@ class Cooperate {
     }
     walk(this.mindMap.renderer && this.mindMap.renderer.renderTree)
     return uids
+  }
+
+  // Count badges are read-only server projections. Structural events carry
+  // node content, but do not refresh cached totals on every collapsed ancestor.
+  // Fetch only badge owners and apply only counts; never replace edit baselines.
+  async refreshCollapsedNodeCounts() {
+    const renderer = this.mindMap && this.mindMap.renderer
+    if (this._disposed || !this.httpCollabMode || !this.collabV2Adapter ||
+      !this.httpFetchNodes || !renderer || !renderer.renderTree || this.httpInsertPromise) return false
+    const status = this.collabV2Adapter.getStatus && this.collabV2Adapter.getStatus()
+    if (status && (status.pendingCount || status.phase !== 'LIVE')) return false
+    const tree = renderer.renderTree
+    const indexed = indexTreeNodesByUid(tree)
+    const uids = Array.from(indexed).filter(([, node]) =>
+      node.data && node.data.expand === false &&
+      ((node.children || []).length || Number(node.data.childCount) > 0 ||
+        Number(node.data.descendantCount) > 0 || node.data.hasMore)
+    ).map(([uid]) => uid).sort()
+    if (!uids.length) return false
+    const scope = { tree, room: this.httpRoomKey, adapter: this.collabV2Adapter,
+      revision: Number(this.lastAppliedVersion) || 0, key: uids.join('|') }
+    const same = other => other && other.tree === tree && other.room === scope.room &&
+      other.adapter === scope.adapter && other.revision === scope.revision && other.key === scope.key
+    if (same(this._badgeCountRefreshDone)) return false
+    if (this._badgeCountRefreshPending) {
+      this._badgeCountRefreshPending.queued = true
+      return false
+    }
+    this._badgeCountRefreshPending = scope
+    try {
+      const nodes = await this.fetchHttpNodes(uids)
+      if (this._disposed || renderer !== this.mindMap.renderer || tree !== renderer.renderTree ||
+        scope.room !== this.httpRoomKey || scope.adapter !== this.collabV2Adapter ||
+        scope.revision !== (Number(this.lastAppliedVersion) || 0)) return false
+      nodes.forEach(item => {
+        const raw = indexed.get(item.uid)
+        if (!raw || !raw.data) return
+        const counts = item.data || {}
+        ;['childCount', 'descendantCount'].forEach(key => {
+          if (Number.isInteger(counts[key]) && counts[key] >= 0) raw.data[key] = counts[key]
+        })
+        const node = renderer.findNodeByUid(item.uid)
+        if (node && node.nodeData === raw && typeof node.updateExpandBtnNode === 'function') {
+          node.updateExpandBtnNode()
+        }
+      })
+      this._badgeCountRefreshDone = scope
+      return true
+    } finally {
+      if (this._badgeCountRefreshPending === scope) this._badgeCountRefreshPending = null
+      if (scope.queued && !this._disposed) this.refreshCollapsedNodeCounts().catch(() => {})
+    }
   }
 
   async fetchHttpNodes(uids) {
