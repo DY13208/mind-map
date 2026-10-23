@@ -3887,6 +3887,20 @@ class Cooperate {
     const parent = renderer && renderer.findNodeByUid && renderer.findNodeByUid(parentUid)
     const children = parent && parent.nodeData && parent.nodeData.children
     if (!Array.isArray(children)) return false
+    const canonical = new Set(entry.children.map(String))
+    // 懒加载补入画布的旧节点可能还没有合并进 currentData.children。
+    // 此时按缓存中的少数新节点排序，会把新节点排到全部旧节点前面。
+    // 保留命令/服务端 index 已确定的顺序，等缓存完整后再投影。
+    const missingCommittedChild = children.some(node => {
+      const uid = String(node && node.data && node.data.uid || '')
+      return uid && !canonical.has(uid) && this.isPersistAcked(uid) &&
+        !this.isTombstonedUid(uid)
+    })
+    if (missingCommittedChild) {
+      if (!this._pendingChildOrderParents) this._pendingChildOrderParents = new Set()
+      this._pendingChildOrderParents.add(parentUid)
+      return false
+    }
     const loaded = new Set(children.map(node => String(node && node.data && node.data.uid || '')))
     if (entry.children.every(uid => loaded.has(String(uid))) && this._pendingChildOrderParents) {
       this._pendingChildOrderParents.delete(parentUid)
