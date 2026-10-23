@@ -26,7 +26,7 @@
           class="productLogo"
           @click="$router.push('/files')"
         >
-          <img class="wcpdLogoImage" :src="brandLogo" alt="WCPD" /><strong>WCPD</strong>
+          <WcpdLogoMark class="wcpdLogoImage" role="img" aria-label="WCPD" /><strong>WCPD</strong>
         </div>
         <button
           v-else
@@ -38,7 +38,7 @@
           data-testid="sidebar-toggle"
           @click="openSidebar"
         >
-          <img class="collapsedLogoMark wcpdLogoImage" :src="brandLogo" alt="" aria-hidden="true" />
+          <WcpdLogoMark class="collapsedLogoMark wcpdLogoImage" aria-hidden="true" />
           <svg
             class="collapsedLogoOpenIcon"
             viewBox="0 0 24 24"
@@ -136,13 +136,13 @@
     </aside>
     <header v-if="shellMode !== 'embed'" class="mobileShellHeader">
       <template v-if="$route.path === '/spaces'">
-        <button class="mobileBrandButton mobileTeamBrand" aria-label="打开全部功能" @click="openNavigation"><img class="mobileBrandMark wcpdLogoImage" :src="brandLogo" alt="" /><strong>WCPD</strong></button>
+        <button class="mobileBrandButton mobileTeamBrand" aria-label="打开全部功能" @click="openNavigation"><WcpdLogoMark class="mobileBrandMark wcpdLogoImage" aria-hidden="true" /><strong>WCPD</strong></button>
         <div class="mobileHeaderSpacer" />
         <button aria-label="搜索团队" @click="$bus.$emit('mobile-search-teams')"><i class="el-icon-search" /></button>
         <button aria-label="全部功能与设置" @click="openNavigation"><i class="el-icon-menu" /></button>
       </template>
       <template v-else>
-      <button class="mobileBrandButton" aria-label="打开全部功能" @click="openNavigation"><img class="mobileBrandMark wcpdLogoImage" :src="brandLogo" alt="" /><strong>WCPD</strong></button>
+      <button class="mobileBrandButton" aria-label="打开全部功能" @click="openNavigation"><WcpdLogoMark class="mobileBrandMark wcpdLogoImage" aria-hidden="true" /><strong>WCPD</strong></button>
       <button v-if="$route.path.startsWith('/spaces/')" class="detailLauncher" aria-label="全部功能与设置" @click="openNavigation"><i class="el-icon-menu" /></button>
       <template v-else-if="!$route.path.startsWith('/spaces/')">
       <button aria-label="全部功能与设置" @click="openNavigation"><i class="el-icon-menu" /></button>
@@ -204,7 +204,7 @@
         tabindex="-1"
       >
         <div class="navigationDrawerHeader">
-          <div class="navigationDrawerBrand"><img class="wcpdLogoImage" :src="brandLogo" alt="" /><div><strong>WCPD</strong><span>全部功能与设置</span></div></div>
+          <div class="navigationDrawerBrand"><WcpdLogoMark class="wcpdLogoImage" aria-hidden="true" /><div><strong>WCPD</strong><span>全部功能与设置</span></div></div>
           <button
             type="button"
             class="shellModeButton"
@@ -239,6 +239,7 @@ import mobileViewport from '@/utils/mobileViewport'
 import productService from '@/services/productService'
 import { logoutAndRedirect } from '@/utils/auth'
 import UserAvatar from '@/components/UserAvatar.vue'
+import WcpdLogoMark from '@/components/WcpdLogoMark.vue'
 import AccessNotificationTrigger from '@/components/AccessNotificationTrigger.vue'
 import { shellTheme, applyShellThemeToRoot } from '@/utils/shellTheme'
 import { resolveShellMode, withShell } from '@/utils/shellMode'
@@ -257,11 +258,10 @@ const readSidebarPreference = () => {
 export default {
   name: 'ProductShellLayout',
   mixins: [mobileViewport],
-  components: { UserAvatar, AccessNotificationTrigger, ProductNavigation },
+  components: { UserAvatar, WcpdLogoMark, AccessNotificationTrigger, ProductNavigation },
   data() {
     const preference = readSidebarPreference()
     return {
-      brandLogo: process.env.BASE_URL + 'wcpd-logo.png',
       sidebarCollapsed: preference === null ? isSmallScreen() : preference,
       isTabletNavigation: window.matchMedia(TABLET_NAVIGATION_QUERY).matches,
       hasSidebarPreference: preference !== null,
@@ -445,11 +445,12 @@ export default {
 </script>
 
 <style lang="less">
-.productShell img.wcpdLogoImage {
-  display: block; object-fit: contain; flex-shrink: 0;
+.productShell .wcpdLogoImage {
+  display: block; flex-shrink: 0;
+  color: var(--ui-text-secondary);
   background: transparent; border-radius: 0; box-shadow: none;
 }
-.productShell .productLogo .wcpdLogoImage { width: 36px; height: 36px; }
+.productShell .productLogo .wcpdLogoImage { width: 24px; height: 24px; }
 .mobileShellHeader, .mobileBottomNav { display: none; }
 // Keep shell overrides after component styles, including asynchronously loaded chunks.
 @media (max-width: 767px) {
@@ -623,8 +624,8 @@ export default {
   padding: 0;
   transition: background 0.15s ease, color 0.15s ease;
   .collapsedLogoMark {
-    width: 32px;
-    height: 32px;
+    width: 24px;
+    height: 24px;
     border-radius: 9px;
     display: grid;
     place-items: center;
@@ -704,10 +705,10 @@ export default {
   .productLogo {
     display: flex;
     align-items: center;
-    gap: 11px;
+    gap: 8px;
     min-width: 0;
     cursor: pointer;
-    font-size: 17px;
+    font-size: 15px;
     span {
       width: 32px;
       height: 32px;
@@ -720,6 +721,7 @@ export default {
       flex-shrink: 0;
     }
     strong {
+      font-weight: 600;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
@@ -1341,4 +1343,23 @@ export default {
     .mobileShellHeader i { font-size: 23px; }
   }
 }
+// Override the legacy filled placeholders in every compact brand entry.
+.productShell .collapsedLogoTrigger svg.wcpdLogoImage,
+.productShell .mobileShellHeader svg.wcpdLogoImage,
+.productShell .navigationDrawerBrand svg.wcpdLogoImage {
+  color: var(--ui-text-secondary);
+  background: transparent;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.productShell {
+  svg.wcpdLogoImage,
+  .productLogo strong,
+  .mobileBrandButton strong,
+  .navigationDrawerBrand strong {
+    color: var(--ui-text-secondary);
+  }
+}
+
 </style>
