@@ -26,23 +26,31 @@
           <el-checkbox v-model="sheet.include">本次提交此工作表</el-checkbox>
           <span v-if="!sheet.include" class="kb-muted">{{ sheet.detection.confirmed ? '未提交的工作表保留当前已确认的表头和字段名' : '未提交的工作表由后端自动检测表头' }}</span>
         </div>
-        <p v-if="sheet.detection.needsConfirmation && !sheet.detection.confirmed" class="kb-map-warn">后端自动判断把握不够，当前不会把猜测字段当成已确认数据。请选择表头行和数据起始行，核对后再入库。</p>
+        <p v-if="sheet.detection.needsConfirmation && !sheet.detection.confirmed" class="kb-map-warn">自动识别结果需要核对。请选择解析方式，确认表头、数据起始行与字段映射后再入库。</p>
         <p class="kb-muted kb-map-reason">
           <template v-if="sheet.detection.reason">判断依据：{{ sheet.detection.reason }}</template>
           <template v-else-if="!sheet.detection.confirmed">后端未提供检测原因。</template>
           <template v-if="sheet.detection.regionCount > 1"> 后端在此工作表检测到 {{ sheet.detection.regionCount }} 个表格区域。</template>
         </p>
-        <div v-if="sheet.detection.regionCount > 1" class="kb-map-warn">
+        <div v-if="sheet.mode !== 'form' && sheet.detection.regionCount > 1" class="kb-map-warn">
           同一工作表多个表格的独立映射暂不支持：结构化接口目前每个工作表只接受一套表头（没有 table_index），提交后数据起始行之后的所有行都会按这一套表头入库。
           <el-select size="mini" disabled placeholder="按表格区域分别映射（暂不支持）" popper-class="kb-popper" class="kb-map-table-select" />
         </div>
 
         <div class="kb-map-config">
           <label>
+            <span>解析方式</span>
+            <el-select :value="sheet.mode" size="small" popper-class="kb-popper" @change="changeMode">
+              <el-option label="明细表（每行一条记录）" value="table" />
+              <el-option label="纵向表单（整表一条记录）" value="form" />
+              <el-option label="辅助表（只保留原文）" value="skip" />
+            </el-select>
+          </label>
+          <label v-if="sheet.mode !== 'skip'">
             <span>表头行</span>
             <el-input v-model="headerInput" size="small" placeholder="如 2 或 2,3" class="kb-map-input" @change="applyHeaderInput" @keyup.enter.native="applyHeaderInput" />
           </label>
-          <label>
+          <label v-if="sheet.mode !== 'skip'">
             <span>数据起始行</span>
             <el-input-number :value="sheet.dataStartRow" size="small" :min="1" :max="maxRowLimit" controls-position="right" @change="applyDataStart" />
           </label>
@@ -53,6 +61,19 @@
             <el-button size="small" @click="jump">定位</el-button>
           </label>
         </div>
+        <p v-if="sheet.mode === 'skip'" class="kb-map-warn">此工作表作为辅助字典或说明保留原文，不生成字段和记录。请保持勾选「本次提交此工作表」并核对后提交，让后端保存此设置。</p>
+        <template v-if="sheet.mode === 'form'">
+          <p class="kb-map-warn">适用于供应商资料等逐项填写的表单。字段名和填写值来自指定列；分类继承上方分组，电话结合联系人命名，空值和说明保留。核对完整预览后，整张工作表生成一条记录。</p>
+          <div class="kb-map-config">
+            <label v-for="item in formColumnLabels" :key="item.key">
+              <span>{{ item.label }}</span>
+              <el-select :value="sheet.form[item.key]" size="small" popper-class="kb-popper" @change="v => changeFormColumn(item.key, v)">
+                <el-option v-if="item.optional" label="不使用" :value="-1" />
+                <el-option v-for="c in sourceColumns" :key="c" :label="letter(c) + ' 列'" :value="c" />
+              </el-select>
+            </label>
+          </div>
+        </template>
         <div class="kb-map-source kb-muted">
           <template v-if="currentRaw">
             已只读读取原文件中的此工作表：{{ currentRaw.truncated ? `共 ${currentRaw.fullRows} 行，本地只读取前 ${knownRows} 行（更多行需后端分页预览）` : `共 ${knownRows} 行` }}。原始文件不会被修改。
@@ -104,11 +125,12 @@
           <div v-for="n in notes" :key="n.row" class="kb-map-note"><span>第 {{ n.row }} 行</span>{{ n.text }}</div>
         </div>
 
-        <div class="kb-map-sub">字段名（{{ fields.length }} 列）<span class="kb-muted">「自动」随表头行重新计算；手工改过的名字按列保留，不会被覆盖</span></div>
+        <template v-if="sheet.mode !== 'skip'">
+        <div class="kb-map-sub">字段名（{{ fields.length }} 个）<span class="kb-muted">{{ sheet.mode === 'form' ? '字段从表单项目生成；左侧为字段名所在单元格' : '「自动」随表头行重新计算；手工改过的名字按列保留，不会被覆盖' }}</span></div>
         <div v-if="sheet.pendingRows.length" class="kb-map-warn">表头行 {{ sheet.pendingRows.join('、') }} 尚未读取，字段名未重新计算。</div>
         <div class="kb-map-fields">
           <label v-for="f in fields" :key="f.index" :class="'is-' + f.source">
-            <span class="kb-map-letter">{{ f.letter }}</span>
+            <span class="kb-map-letter">{{ fieldLocation(f) }}</span>
             <el-input :value="f.source === 'auto' ? f.auto : rawUser(f.index)" size="small" :placeholder="f.auto" @input="v => rename(f.index, v)" />
             <el-tag size="mini" :type="f.source === 'auto' ? 'info' : 'warning'">{{ sourceLabel(f.source) }}</el-tag>
             <el-button v-if="f.source !== 'auto'" type="text" size="mini" :title="'恢复为：' + f.auto" @click="resetName(f.index)">恢复自动</el-button>
@@ -121,7 +143,7 @@
             <thead>
               <tr>
                 <th class="kb-map-rowno">Excel 行</th>
-                <th v-for="f in fields" :key="f.index">{{ f.name || '（空）' }}<small> {{ f.letter }}</small></th>
+                <th v-for="f in fields" :key="f.index">{{ f.name || '（空）' }}<small> {{ fieldLocation(f) }}</small></th>
               </tr>
             </thead>
             <tbody>
@@ -136,6 +158,7 @@
           </table>
         </div>
         <p v-if="sample.incomplete && sample.rows.length" class="kb-muted">样例只覆盖已读取的行。</p>
+        </template>
 
         <div v-if="problems.length" class="kb-map-problems">
           <div class="kb-map-sub">提交前需要处理</div>
@@ -146,7 +169,7 @@
         </div>
 
         <div class="kb-map-bar">
-          <el-checkbox :value="sheet.reviewed || (sheet.detection.confirmed && !sheet.dirty)" :disabled="sheet.detection.confirmed && !sheet.dirty" @change="v => review(v)">已核对「{{ sheet.name }}」的表头与字段</el-checkbox>
+          <el-checkbox :value="sheet.reviewed || (sheet.detection.confirmed && !sheet.dirty)" :disabled="(sheet.detection.confirmed && !sheet.dirty) || (sheet.mode === 'form' && !sheet.formComplete)" @change="v => review(v)">已核对「{{ sheet.name }}」的{{ sheet.mode === 'skip' ? '辅助表设置' : '表头与字段' }}</el-checkbox>
           <span class="kb-muted">表头行 {{ headerText }} · 数据从第 {{ sheet.dataStartRow || '—' }} 行 · 提交 {{ includedCount }} 个工作表</span>
           <el-button size="small" type="primary" :loading="saving" :disabled="!!(tracking && tracking.phase === 'running')" @click="save">按此映射重新结构化</el-button>
         </div>
@@ -163,7 +186,7 @@ import KbStateBlock from './KbStateBlock.vue'
 import {
   createSheetState, effectiveFields, setHeaderRows, toggleHeaderRow, setDataStartRow, setFieldName, resetFieldName,
   markReviewed, validateAll, buildStructurePayload, dataSample, noteRows, rowRole, parseRowList, formatRowList,
-  inferSavedOverrides, recomputeFields, rowsFromAoa, mergesFromSheetJs, colLetter, cellText
+  inferSavedOverrides, recomputeFields, rowsFromAoa, mergesFromSheetJs, colLetter, cellText, setMappingMode, setFormColumn
 } from '../utils/headerMapping'
 
 const ROLE_LABELS = { header: '表头', data: '数据', note: '说明' }
@@ -209,8 +232,16 @@ export default {
       return out
     },
     fields() { return this.sheet ? effectiveFields(this.sheet) : [] },
+    formColumnLabels() {
+      return [{ key: 'fieldColumn', label: '字段名列' }, { key: 'valueColumn', label: '填写值列' },
+        { key: 'groupColumn', label: '分类列', optional: true }, { key: 'requiredColumn', label: '必填标记列', optional: true },
+        { key: 'noteColumn', label: '说明列', optional: true }]
+    },
+    sourceColumns() {
+      return Array.from({ length: Math.min(500, (this.sheet && this.sheet.columnCount) || 2) }, (_, i) => i)
+    },
     gridCols() {
-      const width = Math.max(this.fields.length, ...this.pageRows.map(r => (r.values || []).length), 1)
+      const width = Math.max(this.sheet && this.sheet.mode === 'form' ? 0 : this.fields.length, ...this.pageRows.map(r => (r.values || []).length), 1)
       return Array.from({ length: Math.min(width, GRID_COLS) }, (_, i) => i)
     },
     sample() {
@@ -248,6 +279,20 @@ export default {
     letter: colLetter,
     text: cellText,
     sourceLabel(s) { return SOURCE_LABELS[s] || s },
+    fieldLocation(f) { return this.sheet.mode === 'form' ? ((this.sheet.formEntries[f.index] || {}).fieldCell || '—') : f.letter },
+    async changeMode(mode) {
+      const s = this.sheet
+      if (!s) return
+      if (mode === 'form' && !(await this.ensureRaw(s.name))) return
+      setMappingMode(s, mode, this.rowGetter(s.name), this.merges(s.name))
+      this.bump()
+    },
+    async changeFormColumn(key, value) {
+      const s = this.sheet
+      if (!s || !(await this.ensureRaw(s.name))) return
+      setFormColumn(s, key, value, this.rowGetter(s.name), this.merges(s.name))
+      this.bump()
+    },
     role(n) { return this.sheet ? rowRole(this.sheet, n) : 'note' },
     roleLabel(n) { return ROLE_LABELS[this.role(n)] },
     rawUser(index) {
@@ -267,7 +312,8 @@ export default {
     },
     merges(name) {
       const raw = this.store.raw && this.store.raw[name]
-      return raw ? raw.merges : []
+      const s = this.sheets.find(s => s.name === name)
+      return raw ? raw.merges : (s && s.merges) || []
     },
     maxKnownRow(name) {
       const raw = this.store.raw && this.store.raw[name]
@@ -353,11 +399,13 @@ export default {
         this.rawState = 'ready'
         const s = this.sheets.find(x => x.name === sheetName)
         if (s) {
-          if (s.rowCount == null && !truncated) s.rowCount = rows.length
+          s.rowCount = fullRows
           const get = this.rowGetter(sheetName)
           const merges = this.store.raw[sheetName].merges
+          if (s.mode === 'form') recomputeFields(s, get, merges)
+          if (s.mode === 'form' && truncated) s.formComplete = false
           if (s.detection.confirmed) inferSavedOverrides(s, get, merges)
-          if (s.autoSource === 'recomputed' || s.pendingRows.length) recomputeFields(s, get, merges)
+          if (s.mode !== 'form' && (s.autoSource === 'recomputed' || s.pendingRows.length)) recomputeFields(s, get, merges)
         }
         this.bump()
         return true
@@ -392,6 +440,7 @@ export default {
     },
     async toggleHeader(n) {
       const s = this.sheet
+      if (s && s.mode === 'skip') return
       if (!s || !(await this.prepare(s, [n]))) return
       toggleHeaderRow(s, n, this.rowGetter(s.name), this.merges(s.name))
       this.headerInput = formatRowList(s.headerRows)
@@ -399,9 +448,11 @@ export default {
     },
     async applyDataStart(n) {
       const s = this.sheet
+      if (s && s.mode === 'skip') return
       if (!s || n == null) return
       if (n > this.maxKnownRow(s.name) && !this.rawReady(s.name)) await this.ensureRaw(s.name)
       setDataStartRow(s, n)
+      if (s.mode === 'form') recomputeFields(s, this.rowGetter(s.name), this.merges(s.name))
       this.bump()
     },
     async jump() {
@@ -422,6 +473,9 @@ export default {
     },
     async save() {
       this.showProblems = true
+      for (const s of this.sheets.filter(s => s.include && s.mode === 'form' && !s.formComplete)) {
+        if (!(await this.ensureRaw(s.name))) { this.focusSheet(s.name); return }
+      }
       // 已确认的工作表：提交前必须先从原表识别上次保存的人工改名，否则会被后端按表头重算而丢失
       const needInfer = this.sheets.filter(s => s.include && s.detection.confirmed && !s.savedInferred)
       for (const s of needInfer) {
@@ -528,7 +582,7 @@ export default {
 .kb-map-note { padding: 2px 0; span { color: var(--ui-text-muted); margin-right: 8px; } }
 .kb-map-fields { display: flex; flex-wrap: wrap; gap: 8px; }
 .kb-map-fields label { display: flex; align-items: center; gap: 4px; width: 260px; font-size: 12px; }
-.kb-map-letter { width: 22px; color: var(--ui-text-muted); }
+.kb-map-letter { min-width: 22px; flex-shrink: 0; color: var(--ui-text-muted); }
 .kb-map-problems { margin-top: 10px; padding: 8px 10px; border-radius: var(--ui-radius-md); background: var(--ui-danger-soft, rgba(245, 108, 108, 0.1)); font-size: 12px; color: var(--ui-danger); }
 .kb-map-problem { padding: 2px 0; .kb-map-link { color: var(--ui-danger); font-weight: 600; margin-right: 8px; text-decoration: underline; } }
 .kb-map-bar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-top: 10px; }

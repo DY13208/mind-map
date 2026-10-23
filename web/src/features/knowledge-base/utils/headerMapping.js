@@ -3,6 +3,7 @@
 // 自动列名的推导与后端 services/file-kb/src/structurer/header.js#combineHeaders 保持同一规则：
 // 合并单元格向右/向下填充 → 多行表头按列用「 / 」拼接（相邻重复去掉）→ 去掉尾部空列 → 空名补「列N」→ 重名加 _2、_3。
 // 最终字段名以后端按原表计算为准；前端只把「用户明确改过的名字」作为 columnOverrides 发送。
+import { buildForm, validForm } from '../../../../../services/file-kb/src/shared/excelForm'
 
 export const MAX_COLUMNS = 500 // 与后端 columnOverrides.index < 500 一致
 export const MAX_NAME_LENGTH = 200 // 与后端 name.length <= 200 一致
@@ -125,6 +126,11 @@ export function createSheetState(layoutSheet) {
   const confirmed = s.confirmed === true
   return {
     name: String(s.name || ''),
+    mode: s.mode || 'table',
+    form: { fieldColumn: 0, valueColumn: 1, groupColumn: -1, requiredColumn: -1, noteColumn: -1, ...(s.form || {}) },
+    formEntries: [],
+    formComplete: false,
+    merges: s.merges || [],
     detection: {
       // 只展示后端给的值；后端未给时为 null，界面不编造
       confidence: s.confidence == null || confirmed ? null : Number(s.confidence),
@@ -148,7 +154,7 @@ export function createSheetState(layoutSheet) {
     include: true,
     reviewed: false,
     dirty: false,
-    savedInferred: false
+    savedInferred: s.mode === 'skip'
   }
 }
 
@@ -162,7 +168,8 @@ export function inferSavedOverrides(state, getRow, merges) {
   if (state.savedInferred || !state.detection.confirmed) return false
   const rows = state.headerRows.map(n => getRow(n))
   if (!rows.length || rows.some(r => !r)) return false
-  const raw = combineHeaders(rows, merges)
+  if (state.mode === 'form' && !state.formComplete) return false
+  const raw = state.mode === 'form' ? state.formEntries.map(e => e.name) : combineHeaders(rows, merges)
   state.fields.forEach(f => {
     const auto = raw[f.index] != null ? raw[f.index] : `列${f.index + 1}`
     if (f.user == null && f.auto !== auto) {
@@ -183,7 +190,20 @@ export function recomputeFields(state, getRow, merges) {
   if (missing.length) return false
   const rows = state.headerRows.map(n => getRow(n))
   state.emptyHeaderRows = rows.filter(r => rowIsBlank(r.values)).map(r => r.number)
-  const auto = rows.length ? combineHeaders(rows, merges) : []
+  let auto = rows.length ? combineHeaders(rows, merges) : []
+  if (state.mode === 'form') {
+    const all = []
+    const end = state.rowCount || 0
+    state.formComplete = end > 0
+    for (let n = 1; n <= end; n++) {
+      const row = getRow(n)
+      if (!row) { state.formComplete = false; break }
+      all.push(row)
+    }
+    state.formEntries = buildForm(all, merges, state)
+    auto = state.formEntries.map(e => e.name)
+    if (state.detection.confirmed && !state.savedInferred) inferSavedOverrides(state, getRow, merges)
+  }
   const keep = new Map(state.fields.filter(f => f.user != null).map(f => [f.index, f]))
   const width = Math.max(auto.length, ...[...keep.keys()].map(i => i + 1), 0)
   const next = []
@@ -196,12 +216,29 @@ export function recomputeFields(state, getRow, merges) {
   return true
 }
 
+export function setMappingMode(state, mode, getRow, merges) {
+  if (mode !== state.mode) { state.fields = []; state.savedInferred = true }
+  state.mode = mode
+  touch(state)
+  if (mode === 'skip') { state.fields = []; state.pendingRows = []; return true }
+  return recomputeFields(state, getRow, merges)
+}
+
+export function setFormColumn(state, key, value, getRow, merges) {
+  state.form[key] = value
+  state.fields = []
+  state.savedInferred = true
+  touch(state)
+  return recomputeFields(state, getRow, merges)
+}
+
 function touch(state) {
   state.dirty = true
   state.reviewed = false
 }
 
 export function setHeaderRows(state, rows, getRow, merges) {
+  if (state.mode === 'form') { state.fields = []; state.savedInferred = true }
   state.headerRows = normalizeRows(rows)
   touch(state)
   return recomputeFields(state, getRow, merges)
@@ -218,6 +255,7 @@ export function toggleHeaderRow(state, n, getRow, merges) {
 }
 
 export function setDataStartRow(state, n) {
+  if (state.mode === 'form') { state.fields = []; state.savedInferred = true }
   const v = Number(n)
   state.dataStartRow = Number.isInteger(v) && v > 0 ? v : null
   touch(state)
@@ -256,6 +294,10 @@ export function markReviewed(state, value = true) {
 // 一张 sheet 的问题列表（中文）。空数组表示可以提交。
 export function validateSheet(state, { maxKnownRow = null } = {}) {
   const errors = []
+  if (state.mode === 'skip') {
+    if (!state.reviewed && !(state.detection.confirmed && !state.dirty)) errors.push('尚未勾选「已核对此工作表」')
+    return errors
+  }
   const label = n => `第 ${n} 行`
   if (!state.headerRows.length) errors.push('未选择表头行')
   if (!state.dataStartRow) errors.push('未设置数据起始行')
@@ -275,9 +317,15 @@ export function validateSheet(state, { maxKnownRow = null } = {}) {
   if (state.emptyHeaderRows && state.emptyHeaderRows.length) errors.push(`表头行 ${state.emptyHeaderRows.join('、')} 是空行，不能作为表头`)
   if (state.pendingRows.length) errors.push(`表头行 ${state.pendingRows.join('、')} 尚未读取，无法计算字段名，请读取原文件`)
   const fields = effectiveFields(state)
+  if (state.mode === 'form') {
+    if (!validForm(state.form, state.columnCount || MAX_COLUMNS)) errors.push('请为字段名、填写值和可选信息选择不同的有效列')
+    if (!state.formComplete) errors.push('纵向表单需要读取完整工作表后再核对提交')
+    if (!state.formEntries.length && state.formComplete) errors.push('所选列没有可入库的表单字段')
+    if (fields.length > MAX_COLUMNS) errors.push(`纵向表单超过 ${MAX_COLUMNS} 个字段，请拆分工作表`)
+  }
   if (state.headerRows.length && !state.pendingRows.length && !fields.length) errors.push('所选表头行没有任何字段名')
   fields.forEach(f => {
-    if (f.source !== 'auto' && state.columnCount != null && f.index >= state.columnCount) errors.push(`列 ${f.letter} 超出工作表列数（共 ${state.columnCount} 列），请恢复自动或删除该改名`)
+    if (state.mode !== 'form' && f.source !== 'auto' && state.columnCount != null && f.index >= state.columnCount) errors.push(`列 ${f.letter} 超出工作表列数（共 ${state.columnCount} 列），请恢复自动或删除该改名`)
     if (f.source !== 'auto' && !f.name) errors.push(`列 ${f.letter} 的字段名不能为空（可点「恢复自动」）`)
     if (f.name.length > MAX_NAME_LENGTH) errors.push(`列 ${f.letter} 的字段名超过 ${MAX_NAME_LENGTH} 个字符`)
   })
@@ -308,10 +356,11 @@ export function validateAll(states, opts = {}) {
 // 不发送旧的 columns 快照，避免换表头后把旧猜测名写回（审计 P1-05）。
 export function buildStructurePayload(states) {
   return {
-    sheets: (states || []).filter(s => s.include).map(s => ({
+    sheets: (states || []).filter(s => s.include).map(s => s.mode === 'skip' ? { sheet: s.name, mode: 'skip' } : ({
       sheet: s.name,
       headerRows: s.headerRows.slice(),
       dataStartRow: s.dataStartRow,
+      ...(s.mode === 'form' ? { mode: 'form', form: { ...s.form } } : {}),
       columnOverrides: s.fields.filter(f => f.user != null).map(f => ({ index: f.index, name: f.user.trim() }))
     }))
   }
@@ -320,6 +369,9 @@ export function buildStructurePayload(states) {
 // 数据样例：从数据起始行开始，跳过表头行与空行；row 为 Excel 行号（1 基）。
 export function dataSample(state, getRow, { limit = 5, scan = 200, maxRow = null } = {}) {
   const out = []
+  if (state.mode === 'form') {
+    return { rows: state.formEntries.length ? [{ row: `${state.dataStartRow}–${state.formEntries[state.formEntries.length - 1].row}`, values: state.formEntries.map(e => cellText(e.value)) }] : [], incomplete: !state.formComplete }
+  }
   if (!state.dataStartRow) return { rows: out, incomplete: false }
   let incomplete = false
   const end = state.dataStartRow + scan
@@ -349,6 +401,7 @@ export function noteRows(state, getRow, { maxScan = 200 } = {}) {
 }
 
 export function rowRole(state, n) {
+  if (state.mode === 'skip') return 'note'
   if (state.headerRows.includes(n)) return 'header'
   if (state.dataStartRow && n >= state.dataStartRow) return 'data'
   return 'note'

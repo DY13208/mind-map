@@ -6,6 +6,7 @@ const ExcelJS = require('exceljs')
 const JSZip = require('jszip')
 const { detectSpecialColumns, cellValue, createTypeTracker, buildRecord } = require('./fields')
 const { detectLayout, combineHeaders, uniqueHeaders, cellText, mergeSpan, colLetter } = require('./header')
+const { detectForm, buildForm, validForm } = require('../shared/excelForm')
 
 function rowValues(row) {
   const raw = Array.isArray(row.values) ? row.values.slice(1) : [] // exceljs is 1-based
@@ -50,6 +51,7 @@ async function workbookParts(filePath) {
     if (id && target) relMap.set(id[1], decodeXml(target[1]))
   }
   const sheets = []
+  sheets.hasSharedStrings = !!zip.file('xl/sharedStrings.xml')
   const sheetRe = /<sheet\b[^>]*>/g
   while ((match = sheetRe.exec(wb))) {
     const tag = match[0]
@@ -71,7 +73,7 @@ async function workbookParts(filePath) {
         if (parsed) merges.push(parsed)
       }
     }
-    sheets.push({ name: name ? decodeXml(name[1]) : `Sheet${sheets.length + 1}`, merges, rowCount, columnCount })
+    sheets.push({ name: name ? decodeXml(name[1]) : `Sheet${sheets.length + 1}`, target: zipPath(target).replace(/\/\.\//g, '/'), merges, rowCount, columnCount })
   }
   return sheets
 }
@@ -110,6 +112,113 @@ function layoutFor(layout, sheetName) {
   const sheets = layout && layout.sheets
   if (!Array.isArray(sheets)) return null
   return sheets.find(s => s && s.sheet === sheetName) || null
+}
+
+function excelReader(filePath) {
+  const reader = new ExcelJS.stream.xlsx.WorkbookReader(filePath, {
+    entries: 'emit', sharedStrings: 'cache', hyperlinks: 'ignore', styles: 'cache', worksheets: 'emit'
+  })
+  // Some producers put workbook.xml after sharedStrings and worksheets. ExcelJS
+  // dereferences model.sheets before reading that entry; our own relations are
+  // already available, so a placeholder is sufficient until it reads the model.
+  reader.model = { sheets: [] }
+  // ZIP entry order is independent of workbook tab order. The entry event keeps
+  // the physical sheet number even when ExcelJS replaces WorksheetReader.id.
+  reader.on('entry', e => { if (e.type === 'worksheet') reader.sheetTarget = `xl/worksheets/sheet${e.id}.xml` })
+  return reader
+}
+
+function streamPart(reader, parts) {
+  const index = parts.findIndex(p => p.target === reader.sheetTarget)
+  if (index < 0) throw new Error('Cannot resolve worksheet relationship: ' + reader.sheetTarget)
+  return { part: parts[index], key: `#${index + 1}` }
+}
+
+async function* readWorksheets(filePath, parts) {
+  const reader = excelReader(filePath)
+  const seen = new Set()
+  for await (const ws of reader) {
+    // ExcelJS can yield a deferred worksheet without having cached shared
+    // strings (ZIP/chunk order dependent). Never convert unresolved objects
+    // into nulls: fall back before emitting any rows from this worksheet.
+    if (parts.hasSharedStrings && !reader.sharedStrings) {
+      const wb = new ExcelJS.Workbook()
+      await wb.xlsx.readFile(filePath)
+      for (let i = 0; i < parts.length; i++) {
+        const key = `#${i + 1}`
+        if (seen.has(key)) continue
+        const sheet = wb.getWorksheet(parts[i].name)
+        if (!sheet) throw new Error('Missing worksheet: ' + parts[i].name)
+        yield { part: parts[i], key, rows: (async function* () {
+          for (let n = 1; n <= sheet.rowCount; n++) yield sheet.getRow(n)
+        })() }
+      }
+      return
+    }
+    const bound = streamPart(reader, parts)
+    seen.add(bound.key)
+    yield { ...bound, rows: ws }
+  }
+}
+
+async function consumeForm(sheetKey, rows, merges, config, { onBatch, total, maxRows }) {
+  const width = Math.max(...rows.map(r => r.values.length), 0)
+  if (!validForm(config.form, width)) throw new Error('纵向表单列映射无效')
+  const entries = buildForm(rows, merges, config)
+  if (config.confirmed && !entries.length) throw new Error('纵向表单没有可入库的字段')
+  if (entries.length > 500) throw new Error('纵向表单超过 500 个字段，请拆分工作表后重试')
+  if ((config.columns || []).some(c => c.index >= entries.length)) throw new Error('纵向表单字段改名超出实际字段范围')
+  const headers = applyNames(entries.map(e => e.name), config.columns)
+  const trackers = entries.map(e => { const t = createTypeTracker(); t.add(e.value); return t })
+  const end = rows.length ? rows[rows.length - 1].number : config.dataStartRow
+  const region = { ...config, headers, trackers, special: {}, dataEndRow: end, confirmed: config.confirmed === true,
+    fieldSources: entries.map(({ value, ...source }, i) => ({ ...source, name: headers[i], originalName: source.name })) }
+  const notes = rows.filter(r => !(config.headerRows || []).includes(r.number)).map(r => ({
+    sheet: sheetKey, row: r.number, text: (r.values || []).map(cellText).filter(Boolean).join(' | ')
+  })).filter(r => r.text)
+  if (entries.length && total.n < maxRows) {
+    const record = buildRecord(headers, entries.map(e => e.value), {})
+    headers.forEach((h, i) => { if (entries[i].value == null) record.data[h] = null })
+    if (onBatch) await onBatch([{ sheet: sheetKey, table_index: 0, row_index: entries[0].row - 1,
+      cell_range: `A${config.dataStartRow}:${colLetter(Math.max(...rows.map(r => r.values.length), 1) - 1)}${end}`, ...record }])
+    total.n++
+  }
+  return { regions: [region], notes, rows: entries.length ? 1 : 0 }
+}
+
+async function consumeSheet(sheetKey, rows, options) {
+  if (options.userRegion && options.userRegion.mode === 'skip') {
+    const notes = []
+    for await (const row of rows) {
+      const text = (row.values || []).map(cellText).filter(Boolean).join(' | ')
+      if (text) notes.push({ sheet: sheetKey, row: row.number, text })
+      if (notes.length > 20000) throw new Error('辅助表超过 20000 个非空行，请拆分工作表后重试')
+    }
+    return { rows: 0, notes, regions: [{ mode: 'skip', headerRows: [], headers: [], trackers: [], special: {},
+      dataStartRow: null, confidence: 1, confirmed: true, needsConfirmation: false }] }
+  }
+  const iterator = rows[Symbol.asyncIterator]()
+  const probe = []
+  for (let i = 0; i < 40; i++) {
+    const step = await iterator.next()
+    if (step.done) break
+    probe.push(step.value)
+  }
+  const detected = options.userRegion ? null : detectForm(probe)
+  const config = options.userRegion || detected
+  if (config && config.mode === 'form') {
+    const all = probe.slice()
+    for (let step = await iterator.next(); !step.done; step = await iterator.next()) {
+      if (all.length >= 20000) throw new Error('纵向表单超过 20000 行，请拆分工作表后重试')
+      all.push(step.value)
+    }
+    return consumeForm(sheetKey, all, options.merges, { ...config, confirmed: !!options.userRegion,
+      confidence: options.userRegion ? 1 : config.confidence, needsConfirmation: !options.userRegion }, options)
+  }
+  return consume(sheetKey, (async function* () {
+    yield* probe
+    for (let step = await iterator.next(); !step.done; step = await iterator.next()) yield step.value
+  })(), options)
 }
 
 async function* withRowGaps(input) {
@@ -268,20 +377,13 @@ function annotate(row, merges, maxCols) {
 
 async function structureExcel(filePath, { onBatch, batchSize = 1000, maxRows = 1000000, maxCols = 500, layout = null } = {}) {
   const parts = await workbookParts(filePath)
-  const reader = new ExcelJS.stream.xlsx.WorkbookReader(filePath, {
-    entries: 'ignore', sharedStrings: 'cache', hyperlinks: 'ignore', styles: 'cache', worksheets: 'emit'
-  })
   const sheets = []
   const notes = []
   const total = { n: 0 }
-  let ordinal = 0
   try {
-  for await (const ws of reader) {
-    ordinal++
-    const sheetKey = `#${ordinal}`
-    const part = parts[ordinal - 1] || { name: ws.name || `Sheet${ordinal}`, merges: [] }
-    const taken = await consume(sheetKey, (async function* () {
-      for await (const row of ws) yield annotate(row, part.merges, maxCols)
+  for await (const { rows: sourceRows, part, key: sheetKey } of readWorksheets(filePath, parts)) {
+    const taken = await consumeSheet(sheetKey, (async function* () {
+      for await (const row of sourceRows) yield annotate(row, part.merges, maxCols)
     })(), {
       merges: part.merges,
       userRegion: layoutFor(layout, part.name),
@@ -320,7 +422,7 @@ async function structureExcel(filePath, { onBatch, batchSize = 1000, maxRows = 1
       const part = parts[i] || { name: ws.name, merges: [] }
       const list = []
       ws.eachRow({ includeEmpty: true }, row => { list.push(annotate(row, part.merges, maxCols)) })
-      const taken = await consume(key, list, {
+      const taken = await consumeSheet(key, (async function* () { yield* list })(), {
         merges: part.merges, userRegion: layoutFor(layout, part.name), onBatch, batchSize, maxRows, total
       })
       notes.push(...taken.notes)
@@ -340,11 +442,10 @@ async function structureExcel(filePath, { onBatch, batchSize = 1000, maxRows = 1
       }
     }
   }
-  const streamedNames = resolveNames(reader)
   const nameMap = {}
   for (const s of sheets) {
     const index = Number(s.sheet.slice(1)) - 1
-    const real = (parts[index] && parts[index].name) || s.name || streamedNames.get(s.sheet) || `Sheet${s.sheet.slice(1)}`
+    const real = (parts[index] && parts[index].name) || s.name || `Sheet${s.sheet.slice(1)}`
     nameMap[s.sheet] = real
     s.sheet = real
     for (const f of s.fields) f.sheet = real
@@ -372,14 +473,8 @@ async function previewExcel(filePath, { maxRows = 12, maxCols = 80, fromRow = 1,
   const start = Math.max(1, Number(fromRow) || 1)
   const count = Math.max(1, Math.min(200, Number(limit || maxRows) || maxRows))
   const end = start + count - 1
-  const reader = new ExcelJS.stream.xlsx.WorkbookReader(filePath, {
-    entries: 'ignore', sharedStrings: 'cache', hyperlinks: 'ignore', styles: 'cache', worksheets: 'emit'
-  })
   const sheets = []
-  let ordinal = 0
-  for await (const ws of reader) {
-    ordinal++
-    const part = parts[ordinal - 1] || { name: ws.name || `Sheet${ordinal}`, merges: [], rowCount: null, columnCount: null }
+  for await (const { rows: sourceRows, part } of readWorksheets(filePath, parts)) {
     const wanted = !sheet || part.name === sheet
     const selected = selectedBySheet[part.name] || []
     const stopAt = Math.max(end, 40, ...(selected.length ? selected : [0]))
@@ -387,7 +482,7 @@ async function previewExcel(filePath, { maxRows = 12, maxCols = 80, fromRow = 1,
     const window = []
     const selectedValues = new Map()
     let seen = 0
-    for await (const row of ws) {
+    for await (const row of sourceRows) {
       seen = Math.max(seen, row.number || 0)
       if (!wanted && !selected.length) continue
       const annotated = annotate(row, part.merges, maxCols)
@@ -396,7 +491,8 @@ async function previewExcel(filePath, { maxRows = 12, maxCols = 80, fromRow = 1,
       if (selected.includes(annotated.number)) selectedValues.set(annotated.number, annotated.values)
       if (annotated.number >= stopAt) break
     }
-    const layout = detectLayout(headerProbe, part.merges || [])
+    const form = detectForm(headerProbe)
+    const layout = form ? { regions: [{ ...form, headers: buildForm(headerProbe, part.merges, form).map(e => e.name), notes: [] }] } : detectLayout(headerProbe, part.merges || [])
     const rowCount = part.rowCount || seen || 0
     const columnCount = part.columnCount || Math.max(0, ...headerProbe.map(r => (r.values || []).length), ...window.map(r => (r.values || []).length))
     const cap = rowCount ? Math.min(end, Math.max(rowCount, start - 1)) : (window.length ? window[window.length - 1].number : start - 1)
@@ -404,11 +500,12 @@ async function previewExcel(filePath, { maxRows = 12, maxCols = 80, fromRow = 1,
     const preview = []
     if (wanted) for (let n = start; n <= cap; n++) preview.push({ row: n, values: previewValues(byNumber.get(n) && byNumber.get(n).values, maxCols) })
     sheets.push({
-      name: part.name,
+      name: part.name, merges: part.merges,
       rowCount, columnCount,
       rowCountExact: part.rowCount != null,
       selectedRows: selected.map(n => ({ row: n, values: selectedValues.get(n) || [] })),
       regions: layout.regions.map(r => ({
+        mode: r.mode || 'table', form: r.form, reason: r.reason,
         headerRows: r.headerRows, dataStartRow: r.dataStartRow, dataEndRow: r.dataEndRow,
         confidence: r.confidence, needsConfirmation: r.needsConfirmation, headers: r.headers, notes: r.notes
       })),
@@ -416,7 +513,8 @@ async function previewExcel(filePath, { maxRows = 12, maxCols = 80, fromRow = 1,
     })
     if (sheet && part.name === sheet) break
   }
-  for (let i = sheets.length; i < parts.length; i++) {
+  for (let i = 0; i < parts.length; i++) {
+    if (sheets.some(s => s.name === parts[i].name)) continue
     sheets.push({
       name: parts[i].name, rowCount: parts[i].rowCount || 0, columnCount: parts[i].columnCount || 0, rowCountExact: parts[i].rowCount != null,
       selectedRows: [], regions: [], preview: [], previewFromRow: start, previewLimit: count, previewSkipped: true
@@ -425,6 +523,7 @@ async function previewExcel(filePath, { maxRows = 12, maxCols = 80, fromRow = 1,
   if (sheet && !sheets.some(s => s.name === sheet && !s.previewSkipped)) {
     const err = new Error('missing'); err.status = 404; err.code = 'missing'; throw err
   }
+  sheets.sort((a, b) => parts.findIndex(p => p.name === a.name) - parts.findIndex(p => p.name === b.name))
   return { sheets }
 }
 

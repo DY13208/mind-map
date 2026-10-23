@@ -147,6 +147,7 @@ function createPipeline({ pool, queue, storage, docling, nativeLightParse = fals
           sheets: res.sheets.map(s => ({
             sheet: s.sheet,
             regions: s.regions.map(r => ({
+              mode: r.mode || 'table', form: r.form, reason: r.reason, fieldSources: r.fieldSources,
               headerRows: r.headerRows, dataStartRow: r.dataStartRow, dataEndRow: r.dataEndRow,
               confidence: r.confidence, needsConfirmation: r.needsConfirmation, confirmed: r.confirmed === true,
               headers: r.headers

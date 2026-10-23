@@ -373,6 +373,8 @@ function createApi({ pool, storage, queue, config, limiter, geekcloud = null }) 
     if (!list.length || list.length>100) throw new HttpError(400, 'bad_layout')
     return list.map(s => {
       if (!s || typeof s.sheet !== 'string' || !s.sheet.trim()) throw new HttpError(400, 'bad_layout')
+      if (s.mode != null && !['table', 'form', 'skip'].includes(s.mode)) throw new HttpError(400, 'bad_layout')
+      if (s.mode === 'skip') return { sheet: s.sheet.trim().slice(0, 200), mode: 'skip', headerRows: [], dataStartRow: null }
       const headerRows = [...new Set((Array.isArray(s.headerRows) ? s.headerRows : []).map(Number))]
         .filter(n => Number.isInteger(n) && n > 0 && n < 1000000)
         .sort((a, b) => a - b)
@@ -384,7 +386,7 @@ function createApi({ pool, storage, queue, config, limiter, geekcloud = null }) 
         .map(c => ({ index: Number(c.index), name: String(c.name).trim().slice(0, 200) }))
       const columnOverrides=s.columnOverrides == null ? null : s.columnOverrides
       if(columnOverrides != null && (!Array.isArray(columnOverrides)||columnOverrides.some(c=>!Number.isInteger(c.index)||c.index<0||c.index>=500||typeof c.name!=='string'||!c.name.trim()||c.name.length>200)))throw new HttpError(400,'bad_layout')
-      return { sheet: s.sheet.trim().slice(0, 200), headerRows, dataStartRow, columns, columnOverrides }
+      return { sheet: s.sheet.trim().slice(0, 200), headerRows, dataStartRow, columns, columnOverrides, mode: s.mode || 'table', form: s.form }
     })
   }
 
@@ -413,12 +415,18 @@ function createApi({ pool, storage, queue, config, limiter, geekcloud = null }) 
         ? run.stats.layout.sheets.find(s => s.sheet === sheet.name)
         : null
       const applied = appliedSheet && appliedSheet.regions && appliedSheet.regions[0]
-      const headers = applied && applied.confirmed && Array.isArray(applied.headers) && applied.headers.length ? applied.headers : (region.headers || [])
-      const headerRows = applied && applied.confirmed && applied.headerRows && applied.headerRows.length ? applied.headerRows : (region.headerRows || [])
-      const dataStartRow = applied && applied.confirmed && applied.dataStartRow ? applied.dataStartRow : region.dataStartRow
-      const width = Math.max(headers.length, ...sheet.preview.map(r => (r.values || []).length), 0)
+      const skipped = applied && applied.confirmed && applied.mode === 'skip'
+      const headers = skipped ? [] : applied && applied.confirmed && Array.isArray(applied.headers) && applied.headers.length ? applied.headers : (region.headers || [])
+      const headerRows = skipped ? [] : applied && applied.confirmed && applied.headerRows && applied.headerRows.length ? applied.headerRows : (region.headerRows || [])
+      const dataStartRow = skipped ? null : applied && applied.confirmed && applied.dataStartRow ? applied.dataStartRow : region.dataStartRow
+      const mode = applied && applied.confirmed ? (applied.mode || 'table') : (region.mode || 'table')
+      const width = Math.max(mode === 'form' ? 0 : headers.length, ...sheet.preview.map(r => (r.values || []).length), 0)
       return {
         name: sheet.name,
+        mode,
+        form: applied && applied.confirmed ? applied.form : region.form,
+        reason: applied && applied.confirmed ? applied.reason : region.reason,
+        merges: sheet.merges || [],
         rowCount: sheet.rowCount,
         columnCount: sheet.columnCount,
         mappingVersion: 2,
@@ -433,7 +441,7 @@ function createApi({ pool, storage, queue, config, limiter, geekcloud = null }) 
           index,
           letter: colLetter(index),
           name,
-          samples: sheet.preview.filter(r => dataStartRow && r.row >= dataStartRow && !headerRows.includes(r.row)).slice(0, 3).map(r => (r.values && r.values[index] != null ? r.values[index] : ''))
+          samples: mode === 'form' ? [] : sheet.preview.filter(r => dataStartRow && r.row >= dataStartRow && !headerRows.includes(r.row)).slice(0, 3).map(r => (r.values && r.values[index] != null ? r.values[index] : ''))
         })),
         previewFromRow: sheet.previewFromRow || page.fromRow,
         previewLimit: sheet.previewLimit || page.limit,

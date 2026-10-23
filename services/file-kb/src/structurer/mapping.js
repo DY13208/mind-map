@@ -1,6 +1,7 @@
 'use strict'
 const {httpError}=require('../errors')
 const {combineHeaders}=require('./header')
+const {validForm}=require('../shared/excelForm')
 // Version 2 sends only deliberate renames in columnOverrides. Legacy snapshots
 // must not overwrite freshly selected headers when the selected rows change.
 // An unchanged header selection keeps saved custom names even when the client
@@ -21,11 +22,16 @@ function normalizeMappings(sheets,preview,previous){
   if(new Set(sheets.map(s=>s.sheet)).size!==sheets.length)throw httpError(400,'bad_layout')
   return sheets.map(s=>{
     const source=preview.sheets.find(x=>x.name===s.sheet)
+    if(source && s.mode==='skip')return {sheet:s.sheet,mode:'skip',headerRows:[],dataStartRow:null,columns:[],mappingVersion:2}
     if(!source || s.headerRows.some(n=>n>source.rowCount) || s.dataStartRow>source.rowCount+1)throw httpError(400,'bad_layout')
     if(source.selectedRows && s.headerRows.some(n=>!source.selectedRows.find(r=>r.row===n)?.values.some(v=>v!=null&&String(v).trim()!=='')))throw httpError(400,'empty_header')
+    if(s.mode === 'form'){
+      if(!validForm(s.form,source.columnCount || 500))throw httpError(400,'bad_layout')
+      return {sheet:s.sheet,mode:'form',form:s.form,headerRows:s.headerRows,dataStartRow:s.dataStartRow,columns:s.columnOverrides||[],mappingVersion:2}
+    }
     const saved=previous?.sheets?.find(x=>x.sheet===s.sheet)?.regions?.[0]
     const detected=source.regions[0]||{headerRows:[],headers:[]}
-    const savedConfirmed=saved&&saved.confirmed?saved:null
+    const savedConfirmed=saved&&saved.confirmed&&saved.mode!=='form'?saved:null
     const base=savedConfirmed||detected
     const same=sameRows(base.headerRows,s.headerRows)
     const preserved=same&&savedConfirmed?savedCustom(savedConfirmed,rawHeaders(source,detected)):[]
