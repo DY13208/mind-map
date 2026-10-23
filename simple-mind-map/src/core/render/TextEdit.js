@@ -474,7 +474,7 @@ export default class TextEdit {
     if (!uid) return
     const session = cooperate.beginEditSession({
       uid,
-      fields: ['text'],
+      fields: ['text', 'textMentions'],
       kind: 'text',
       initialDraft: { text: this.getEditText() }
     })
@@ -574,6 +574,8 @@ export default class TextEdit {
     const text = trimNodeEditText(this.getEditText(), false)
     const cooperate = this.mindMap && this.mindMap.cooperate
     const sessionId = this.editSessionId
+    const patch = { text }
+    this.mindMap.emit('before_node_text_edit_commit', currentNode, patch)
     const finish = editSessionSaved => {
       this.currentNode = null
       this.editSessionId = null
@@ -587,6 +589,7 @@ export default class TextEdit {
       this.setIsShowTextEdit(false)
       if (!editSessionSaved) {
         this.mindMap.execCommand('SET_NODE_TEXT', currentNode, text)
+        if (Object.prototype.hasOwnProperty.call(patch, 'textMentions')) this.mindMap.execCommand('SET_NODE_DATA', currentNode, { textMentions: patch.textMentions })
         this.mindMap.render()
       }
       this.mindMap.emit(
@@ -619,7 +622,7 @@ export default class TextEdit {
       }
       this.syncEditSessionDraft()
       return cooperate
-        .commitEditSession(sessionId, { text })
+        .commitEditSession(sessionId, patch)
         .then(result => result && result.draftSaved === false ? false : finish(true))
         .catch(() => false)
     }

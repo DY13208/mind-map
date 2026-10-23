@@ -1,5 +1,6 @@
 const FIELD_GROUPS = {
   text: ['text', 'richText'],
+  textMentions: ['textMentions'],
   note: ['note'],
   hyperlink: ['hyperlink', 'hyperlinkTitle']
 }
@@ -134,6 +135,9 @@ export function createEditSessionManager() {
   const updateDraft = (id, patch = {}) => {
     const session = sessions.get(String(id || ''))
     if (!session || !patch || typeof patch !== 'object') return null
+    // A single DOM input can reach both Quill and the native input listener.
+    // Re-reading the same draft during save must not look like a new edit.
+    if (Object.keys(patch).every(field => stableValue(session.draft[field]) === stableValue(patch[field]))) return sessionCopy(session)
     session.draft = { ...session.draft, ...patch }
     session.draftRevision += 1
     session.updatedAt = Date.now()
