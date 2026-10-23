@@ -77,6 +77,8 @@ new Function('require', 'module', 'exports', code)(
       }
     }
     if (id === './ConflictDraftPanel.vue') return { default: {} }
+    if (id === '@/utils/conflictDraftPolicy') return require('./loadConflictTestUtility.cjs')('conflictDraftPolicy')
+    if (id === '@/utils/conflictDraftDisplay') return require('./loadConflictTestUtility.cjs')('conflictDraftDisplay')
     throw new Error(`Unexpected import: ${id}`)
   },
   loaded,

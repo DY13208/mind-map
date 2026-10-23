@@ -3,6 +3,7 @@ import {
   listLocalDraftEntries,
   writeLocalDraftValue
 } from '@/api'
+import { hasUnchangedDraft } from '@/utils/conflictDraftPolicy'
 
 const VERSION = 1
 const queues = new Map()
@@ -98,6 +99,11 @@ export function createConflictDraftRecord({
  */
 export function persistConflictDraft(input) {
   const record = createConflictDraftRecord(input)
+  // A captured, unchanged baseline contains no new user input to recover.
+  // Do not delete an older persisted record: it may hold a different draft.
+  if (record.session.state === 'resolved' || hasUnchangedDraft(record.session)) {
+    return Promise.resolve({ key: record.key, record: null, stale: true, unchanged: true })
+  }
   const identity = sessionIdentity(record.key, record.sessionId)
   if (closedSessions.has(identity)) {
     return Promise.reject(new Error('冲突草稿会话已关闭'))

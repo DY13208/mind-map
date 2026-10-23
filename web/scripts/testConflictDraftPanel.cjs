@@ -27,6 +27,7 @@ function loadPanel(helpers) {
   assert.ok(!/\bv-html\b/.test(parsed.template.content), 'panel must render as escaped text')
 
   const context = {
+    classifyConflictDraft: require('./loadConflictTestUtility.cjs')('conflictDraftPolicy').classifyConflictDraft,
     formatConflictText: helpers.formatConflictText,
     isConflictRichText: helpers.isConflictRichText
   }
@@ -39,6 +40,8 @@ function loadPanel(helpers) {
 
 const helpers = loadDisplayHelpers()
 const component = loadPanel(helpers)
+assert.deepStrictEqual(Array.from(component.computed.fields.call({draft:{fields:['text','richText','textMentions'],draft:{text:'input',richText:true}}})),['text'],
+  'display/copy fields must omit transport metadata placeholders')
 const t = key => ({
   'nodeHyperlink.link': '链接',
   'nodeHyperlink.name': '链接名称'

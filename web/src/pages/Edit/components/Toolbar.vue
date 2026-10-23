@@ -1140,7 +1140,7 @@ export default {
     collabFailureHint() {
       const d = this.collabDiag || {}
       const code = (d.currentError && d.currentError.code) || d.errorCode || (d.lastError && d.lastError.code)
-      return this.$t(code === 'PRECONDITION_REQUIRED' ? 'editConflict.missingBaseline'
+      return this.$t(code === 'PRECONDITION_REQUIRED' ? 'editConflict.syncInternalError'
         : code === 'REPLACE_CONFLICT' ? 'editConflict.message' : 'editConflict.saveFailed')
     },
     collabDiagRows() {
