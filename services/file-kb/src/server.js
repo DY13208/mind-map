@@ -4,6 +4,7 @@ const { loadConfig } = require('./config')
 const { createAuthenticator, AuthError } = require('./auth')
 const { createDoclingClient } = require('./docling/client')
 const { ALLOWED } = require('./limits')
+const { PUBLIC_FILE } = require('./directLinks')
 
 function send(res, status, body) {
   if (res.headersSent) return
@@ -98,6 +99,17 @@ function createHandler(deps) {
     if (!config.enabled) return send(res, 404, { error: 'not found', code: 'kb_disabled' })
 
     const method = String(req.method || 'GET').toUpperCase()
+    // Only the token-protected original-file route accepts anonymous GET/HEAD.
+    // Validation and a fresh check of the creator's file access happen in the API.
+    if (PUBLIC_FILE.test(pathname) && (method === 'GET' || method === 'HEAD')) {
+      try {
+        if (deps.api && await deps.api(req, res, null, pathname, method, new URL(req.url, 'http://localhost'))) return
+        return send(res, 404, { error: 'not found', code: 'not_found' })
+      } catch (err) {
+        console.error('[file-kb] public file error', err)
+        return send(res, 500, { error: 'internal error', code: 'internal' })
+      }
+    }
     if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
       if (!mutationAllowed(req, config.trustedOrigins || [])) {
         return send(res, 403, { error: 'forbidden', code: 'origin_denied' })

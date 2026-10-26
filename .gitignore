@@ -104,3 +104,5 @@ output/*.py
 !/simple-mind-map/e2e/performance/*.cjs
 /work/
 !/simple-mind-map/test/roomAclStartup.pg.test.js
+!/services/file-kb/test/direct-links.test.js
+!/web/tests/kbDirectLink.test.cjs

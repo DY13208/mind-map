@@ -59,6 +59,9 @@ export default {
       params: query({ folder_id: folderId, q, status, limit, cursor, ids: ids && ids.length ? ids.join(',') : undefined })
     }).then(d => pickList(d, 'files')),
   getFile: id => http.get(`/files/${enc(id)}`),
+  listDirectLinks: id => http.get(`/files/${enc(id)}/direct-links`),
+  createDirectLink: (id, body) => http.post(`/files/${enc(id)}/direct-links`, body),
+  revokeDirectLink: (id, linkId) => http.delete(`/files/${enc(id)}/direct-links/${enc(linkId)}`),
   updateFile: (id, body) => http.patch(`/files/${enc(id)}`, body),
   deleteFile: id => http.delete(`/files/${enc(id)}`),
   // 后端变更请求要求 JSON Content-Type；axios 在没有请求体时会去掉它，所以必须带 {}

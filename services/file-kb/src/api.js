@@ -7,6 +7,7 @@ const readApi = require('./read')
 const { previewExcel } = require('./structurer/excel')
 const { colLetter } = require('./structurer/header')
 const { createBatches } = require('./batches')
+const { createDirectLinks, PUBLIC_FILE } = require('./directLinks')
 const { normalizeMappings, carryConfirmed } = require('./structurer/mapping')
 const { instrumentPool, measureUpload, scope } = require('./metrics')
 const { retryAfterMsFor } = require('./errors')
@@ -49,6 +50,7 @@ function fileView(f) {
 function createApi({ pool, storage, queue, config, limiter, geekcloud = null }) {
   instrumentPool(pool)
   const batches = createBatches(pool, queue)
+  const directLinks = createDirectLinks(pool)
   async function getFolder(db, user, id, minRole) {
     await access.requireRole(db, user, 'folder', id, minRole)
     const r = await db.query('select * from kb.folders where id = $1 and deleted_at is null', [id])
@@ -590,6 +592,15 @@ function createApi({ pool, storage, queue, config, limiter, geekcloud = null }) 
 
   function route(req, res, user, pathname, method, url) {
     let m
+    if ((m = PUBLIC_FILE.exec(pathname)) && (method === 'GET' || method === 'HEAD')) {
+      return directLinks.resolve(m[1]).then(link => fileRaw(req, res, link.user, link.fileId))
+    }
+    if ((m = /^\/api\/kb\/files\/([^/]+)\/direct-links(?:\/([^/]+))?$/.exec(pathname))) {
+      const fileId = m[1], linkId = m[2]
+      if (method === 'GET' && !linkId) return getFile(pool, user, fileId, 'viewer').then(() => directLinks.list(user, fileId)).then(body => send(res, 200, body))
+      if (method === 'POST' && !linkId) return getFile(pool, user, fileId, 'viewer').then(file => readJson(req).then(body => directLinks.create(user, file, body || {}))).then(body => send(res, 201, body))
+      if (method === 'DELETE' && linkId) return directLinks.revoke(user, fileId, linkId).then(body => send(res, 200, body))
+    }
     if(pathname==='/api/kb/batches' && method==='POST') return readJson(req).then(b=>batches.create(user,b)).then(b=>send(res,201,b))
     if(pathname==='/api/kb/batches' && method==='GET') return batches.list(user,{cursor:url.searchParams.get('cursor'),limit:url.searchParams.get('limit')}).then(b=>send(res,200,b))
     if((m=/^\/api\/kb\/batches\/([^/]+)(?:\/(items|metrics|seal|pause|resume|cancel|retry))?$/.exec(pathname))){
