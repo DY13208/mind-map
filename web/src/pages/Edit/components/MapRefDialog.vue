@@ -451,6 +451,13 @@ export default {
         )
         return
       }
+      if (result.attachmentError) {
+        this.$message.warning(
+          this.$t('mapRef.mirrorAttachmentFailed', {
+            err: result.attachmentError
+          })
+        )
+      }
       if (result.truncated) {
         this.$message.warning(
           this.$t('mapRef.mirrorTruncated', {
@@ -458,7 +465,13 @@ export default {
           })
         )
       } else if (mapRef.syncMode === 'mirror') {
-        this.$message.success(this.$t('mapRef.mirrorSavedTip'))
+        const tip =
+          result.attachmentCopied > 0
+            ? this.$t('mapRef.mirrorSavedWithAttachments', {
+                n: result.attachmentCopied
+              })
+            : this.$t('mapRef.mirrorSavedTip')
+        this.$message.success(tip)
       } else {
         this.$message.success(this.$t('mapRef.savedTip'))
       }

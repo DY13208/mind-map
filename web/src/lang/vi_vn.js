@@ -660,7 +660,12 @@ export default {
       'Đã chèn sơ đồ con: nút sẽ thành thẻ xám + icon tím; nhấp đúp để xem (F2 để đổi tên)',
     mirrorSavedTip:
       'Đã định vị nút và đồng bộ cây con: mở rộng và sửa tại đây; thay đổi đồng bộ hai chiều với sơ đồ gốc',
-    mirrorLoading: 'Đang tải cây con của nút đích…',
+    mirrorSavedWithAttachments:
+      'Đã định vị nút và đồng bộ cây con; đồng thời sao chép {n} tệp đính kèm sản phẩm',
+    mirrorLoading: 'Đang tải cây con và sản phẩm của nút đích…',
+    mirrorCopyAttachments: 'Đang sao chép tệp đính kèm sản phẩm vào sơ đồ hiện tại…',
+    mirrorAttachmentFailed:
+      'Đã đồng bộ cây con, nhưng sao chép tệp đính kèm thất bại: {err}',
     mirrorTruncated:
       'Cây con quá lớn; đã đồng bộ {n} nút đầu (độ sâu tối đa 12); phần còn lại bị bỏ qua',
     applyFailed: 'Chèn thất bại; hãy chọn lại nút rồi thử',

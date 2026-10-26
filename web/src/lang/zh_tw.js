@@ -664,7 +664,11 @@ export default {
     savedTip: '已插入子腦圖：節點應變為灰底卡片+紫色圖標，雙擊打開編輯（F2 可改名）',
     mirrorSavedTip:
       '已定位到節點並同步子樹：可在本圖展開編輯，修改會與原圖雙向同步',
-    mirrorLoading: '正在拉取目標節點子樹…',
+    mirrorSavedWithAttachments:
+      '已定位到節點並同步子樹，同時複製了 {n} 個產物附件',
+    mirrorLoading: '正在拉取目標節點子樹與產物…',
+    mirrorCopyAttachments: '正在複製產物附件到當前導圖…',
+    mirrorAttachmentFailed: '子樹已同步，但產物附件複製失敗：{err}',
     mirrorTruncated:
       '目標子樹過大，已同步前 {n} 個節點（深度最多 12 層）；其餘未同步',
     applyFailed: '插入失敗，請重新選中節點後再試',

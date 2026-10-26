@@ -1814,12 +1814,21 @@ export default {
                 mindMap: this.mindMap,
                 node,
                 mapRef: { ...ref, syncMode: 'mirror' },
-                title: payload && payload.title
+                title: payload && payload.title,
+                onProgress: stage => {
+                  if (stage === 'attachments') {
+                    showLoading(this.$t('mapRef.mirrorCopyAttachments'))
+                  } else {
+                    showLoading(this.$t('mapRef.mirrorLoading'))
+                  }
+                }
               })
               result.ok = !!implanted.ok
               result.uid = node.getData('uid') || uid
               result.truncated = !!implanted.truncated
               result.nodeCount = implanted.nodeCount || 0
+              result.attachmentCopied = implanted.attachmentCopied || 0
+              result.attachmentError = implanted.attachmentError || ''
               if (!result.ok) {
                 result.error = implanted.error || 'mirror implant failed'
               }
