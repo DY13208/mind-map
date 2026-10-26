@@ -118,6 +118,9 @@ function sumNode(data = []) {
 }
 //  创建或更新展开收缩按钮内容
 function updateExpandBtnNode() {
+  // 按钮组未挂载时不能写入缓存键：否则之后 renderExpandBtn 新建的空组会因
+  // 键相同而提前 return，远端插入后的折叠徽标变成空圈（无数字）。
+  if (!this._expandBtn) return
   let { expand } = this.getData()
   const descendantCount = expand === false && this.mindMap.opt.isShowExpandNum
     ? nodeDescendantCount.getDescendantCount(this) : null

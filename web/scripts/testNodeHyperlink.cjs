@@ -38,6 +38,7 @@ function makeNode(uid, hyperlink = '', hyperlinkTitle = '') {
 const componentModule = { exports: {} }
 new Function('require', 'module', 'exports', code)(
   id => {
+    if (id === 'simple-mind-map/src/utils/localFileLink') return require('../../simple-mind-map/src/utils/localFileLink.js')
     if (id === './ConflictDraftPanel.vue') return { default: {} }
     if (id === '@/utils/conflictEdit') {
       return {

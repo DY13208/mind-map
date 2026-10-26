@@ -4363,6 +4363,15 @@ class Cooperate {
         renderer.findNodeByUid(parentUid)) ||
       null
     if (!parentNode || !parentNode.nodeData) return false
+    // 接收端父节点已折叠且子级未加载（懒加载/远端新建）时，不能塞入单个恢复子树
+    // 并强制展开：这会撑开别人的布局，且展开后只显示部分子节点。保持折叠，
+    // 由 refreshCollapsedNodeCounts 按服务端 descendantCount 刷新徽标。
+    const parentCollapsed = parentNode.getData && parentNode.getData('expand') === false
+    if (parentCollapsed && !(parentNode.nodeData.children || []).length) {
+      this.markRemoteDirty(uid, parentUid)
+      if (typeof parentNode.updateExpandBtnNode === 'function') parentNode.updateExpandBtnNode()
+      return true
+    }
     const tree = collabDelete.buildSubtreeFromRows(rows, uid)
     if (!tree) return false
     this.isApplyingRemote = true
@@ -4380,7 +4389,7 @@ class Cooperate {
           parentNode.nodeData.children.push(tree)
         }
       }
-      renderer.setNodeData(parentNode, { expand: true })
+      if (!parentCollapsed) renderer.setNodeData(parentNode, { expand: true })
       this.requestRemoteApplyRender([uid, parentUid, ...reviveIds])
     } catch (err) {
       v2Trace('remote.apply.restore.err', { uid, message: err && err.message })

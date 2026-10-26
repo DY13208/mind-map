@@ -1,6 +1,7 @@
 <template>
   <el-dialog
     class="nodeNoteDialog"
+    append-to-body
     :title="$t('nodeNote.title')"
     :visible.sync="dialogVisible"
     :close-on-click-modal="false"
@@ -104,6 +105,7 @@ export default {
   beforeDestroy() {
     this.$bus.$off('node_active', this.handleNodeActive)
     this.$bus.$off('showNodeNote', this.handleShowNodeNote)
+    this.$bus.$off('node_note_dblclick', this.onNodeNoteDblclick)
     if (this.editor && typeof this.editor.off === 'function') {
       this.editor.off('change', this.onEditorChange)
     }
@@ -116,8 +118,13 @@ export default {
   created() {
     this.$bus.$on('node_active', this.handleNodeActive)
     this.$bus.$on('showNodeNote', this.handleShowNodeNote)
+    this.$bus.$on('node_note_dblclick', this.onNodeNoteDblclick)
   },
   methods: {
+    onNodeNoteDblclick(node, event) {
+      event.stopPropagation()
+      this.handleShowNodeNote(node)
+    },
     handleNodeActive(...args) {
       this.activeNodes = [...args[1]]
       if (!this.dialogVisible) this.updateNoteInfo()
@@ -134,7 +141,7 @@ export default {
 
     handleShowNodeNote(node) {
       if (this.dialogVisible) return
-      const targets = node ? [node] : this.activeNodes
+      const targets = Array.isArray(node) ? node : node ? [node] : this.activeNodes
       const uids = [...new Set(targets.map(item => item && item.getData && item.getData('uid')).filter(Boolean))]
       if (!uids.length) return
       this.mindMap = (targets[0] && targets[0].mindMap) || this.mindMap

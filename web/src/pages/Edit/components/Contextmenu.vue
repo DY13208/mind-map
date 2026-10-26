@@ -745,8 +745,8 @@ export default {
       else if (name === 'icon') {
         this.$bus.$emit('close_node_icon_toolbar')
         this.setActiveSidebar('nodeIconSidebar')
-      } else if (name === 'link') this.$bus.$emit('showNodeLink')
-      else if (name === 'note') this.$bus.$emit('showNodeNote')
+      } else if (name === 'link') this.$bus.$emit('showNodeLink', list)
+      else if (name === 'note') this.$bus.$emit('showNodeNote', list)
       else if (name === 'tag') this.$bus.$emit('showNodeTag')
       else if (name === 'painter') this.$bus.$emit('startPainter')
       else if (name === 'associativeLine') this.$bus.$emit('createAssociativeLine')

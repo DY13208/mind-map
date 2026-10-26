@@ -202,6 +202,7 @@ function loadComponent(file) {
   new Function('require', 'module', 'exports', transformed)(
     id => {
       if (id.endsWith('.css')) return {}
+      if (id === 'simple-mind-map/src/utils/localFileLink') return require('../../simple-mind-map/src/utils/localFileLink.js')
       if (Object.prototype.hasOwnProperty.call(mockModules, id)) return mockModules[id]
       throw new Error(`Unexpected import in ${file}: ${id}`)
     },
@@ -237,6 +238,32 @@ function makeVm(component, noteEditor = false) {
 }
 
 async function main() {
+  const editorSource = fs.readFileSync(path.resolve(__dirname, '../src/pages/Edit/components/Edit.vue'), 'utf8')
+  const toolbarSource = fs.readFileSync(path.resolve(__dirname, '../src/pages/Edit/components/Toolbar.vue'), 'utf8')
+  const editorTemplate = compiler.parseComponent(editorSource).template.content
+  for (const name of ['NodeImage', 'NodeHyperlink', 'NodeIcon', 'NodeNote', 'NodeTag']) {
+    assert(editorTemplate.includes(`<${name} v-if="mindMap">`), `${name} must survive Toolbar unmount`)
+    assert(!toolbarSource.includes(`<${name}>`), `${name} must have only one owner`)
+    const dialogSource = fs.readFileSync(path.resolve(__dirname, `../src/pages/Edit/components/${name}.vue`), 'utf8')
+    assert(compiler.parseComponent(dialogSource).template.content.includes('append-to-body'), `${name} must escape the canvas stacking context`)
+  }
+  // Context menus pass an explicit selection, even when cached active nodes are empty.
+  const explicitNodes = [makeNode('explicit-a', { note: 'target note' }), makeNode('explicit-b', {})]
+  const explicitNote = makeVm(noteComponent, true)
+  explicitNote.handleShowNodeNote(explicitNodes)
+  assert.deepStrictEqual(explicitNote.targetUids, ['explicit-a', 'explicit-b'])
+  assert.strictEqual(explicitNote.note, 'target note')
+  assert.strictEqual(explicitNote.dialogVisible, true)
+  let stopped = false
+  const doubleClickNote = makeVm(noteComponent, true)
+  doubleClickNote.onNodeNoteDblclick(explicitNodes[0], { stopPropagation() { stopped = true } })
+  assert(stopped)
+  assert.strictEqual(doubleClickNote.dialogVisible, true)
+  const explicitLink = makeVm(linkComponent)
+  explicitLink.handleShowNodeLink(explicitNodes)
+  assert.deepStrictEqual(explicitLink.targetUids, ['explicit-a', 'explicit-b'])
+  assert.strictEqual(explicitLink.dialogVisible, true)
+
   const noteNode = makeNode('note-uid', { note: '服务器备注' })
   state.mode = 'conflict'
   state.failStorage = true

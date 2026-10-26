@@ -56,6 +56,7 @@ import {
 import historyClipboard from '../../utils/historyClipboard'
 import remoteRenderScheduler from '../../utils/remoteRenderScheduler'
 import edgeGeometryModule from '../../utils/edgeGeometry'
+import { markCommand, markRemote } from '../../layouts/logicalPartialLayout'
 const edgeGeometry = edgeGeometryModule.boundsFromPath
   ? edgeGeometryModule
   : edgeGeometryModule.default
@@ -179,6 +180,10 @@ class Render {
     // 布局
     this.setLayout()
     // 绑定事件
+    // P3 局部布局：记录两次布局之间的脏节点；无法归类的命令使脏集失效
+    this.mindMap.on('beforeExecCommand', (name, ...args) =>
+      markCommand(this, name, args)
+    )
     this.bindEvent()
     // 注册命令
     this.registerCommands()
@@ -801,6 +806,7 @@ class Render {
   requestRemoteRender(uid, callback, source) {
     this.addRenderParams(callback, source)
     const uids = Array.isArray(uid) ? uid : uid == null ? [] : [uid]
+    markRemote(this, uids)
     uids.forEach(item => {
       if (item != null && String(item)) this._remoteRenderDirtyUids.add(String(item))
     })

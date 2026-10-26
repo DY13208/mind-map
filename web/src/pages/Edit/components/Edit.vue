@@ -63,6 +63,12 @@
     <NodeAttachment v-if="mindMap" :mindMap="mindMap"></NodeAttachment>
     <NodeAttachmentPreview v-if="mindMap"></NodeAttachmentPreview>
     <NodeHyperlinkPopover v-if="mindMap"></NodeHyperlinkPopover>
+    <!-- Node dialogs must remain available when Zen mode unmounts Toolbar. -->
+    <NodeImage v-if="mindMap"></NodeImage>
+    <NodeHyperlink v-if="mindMap"></NodeHyperlink>
+    <NodeIcon v-if="mindMap"></NodeIcon>
+    <NodeNote v-if="mindMap"></NodeNote>
+    <NodeTag v-if="mindMap"></NodeTag>
     <NodeCommentCard v-if="mindMap"></NodeCommentCard>
     <NodeTextMention v-if="mindMap" :mind-map="mindMap" :readonly="isReadonly" />
     <LeaveIntentTrigger v-if="mindMap" :mindMap="mindMap" />
@@ -173,6 +179,11 @@ import NodeAutoExpand from './NodeAutoExpand.vue'
 import NodeAttachment from './NodeAttachment.vue'
 import NodeAttachmentPreview from './NodeAttachmentPreview.vue'
 import NodeHyperlinkPopover from './NodeHyperlinkPopover.vue'
+import NodeImage from './NodeImage.vue'
+import NodeHyperlink from './NodeHyperlink.vue'
+import NodeIcon from './NodeIcon.vue'
+import NodeNote from './NodeNote.vue'
+import NodeTag from './NodeTag.vue'
 import NodeCommentCard from './NodeCommentCard.vue'
 import NodeTextMention from './NodeTextMention.vue'
 import LeaveIntentTrigger from './LeaveIntentTrigger.vue'
@@ -255,6 +266,11 @@ export default {
     NodeAttachment,
     NodeAttachmentPreview,
     NodeHyperlinkPopover,
+    NodeImage,
+    NodeHyperlink,
+    NodeIcon,
+    NodeNote,
+    NodeTag,
     NodeCommentCard,
     NodeTextMention,
     LeaveIntentTrigger,

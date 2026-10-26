@@ -263,7 +263,17 @@ export const defaultOpt = {
     scopedRemoteGeometry: false,
     deferDraftCopy: false,
     analyticEdgeBounds: false,
-    lazyOffscreenPaint: false
+    lazyOffscreenPaint: false,
+    // P3：逻辑结构图局部布局（仅 logicalStructure），默认关。?perfFlags=partialLayoutLogicalStructure
+    partialLayoutLogicalStructure: false,
+    // P3 调试：局部布局后做影子全量校验，仅测试使用，默认关
+    partialLayoutShadowValidate: false
+  },
+  // P3 局部布局阈值：重建节点数超过 maxTouchedRatio（且 > minTouchedForRatio）时回退全量
+  partialLayoutConfig: {
+    maxTouchedRatio: 0.3,
+    minTouchedForRatio: 64,
+    maxMovedRatio: 1
   },
   // 如果节点文本为空，那么为了避免空白节点高度塌陷，会用该字段指定的文本测量一个高度
   emptyTextMeasureHeightText: 'abc123我和你',

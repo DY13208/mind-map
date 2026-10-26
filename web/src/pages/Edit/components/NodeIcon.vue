@@ -1,6 +1,7 @@
 <template>
   <el-dialog
     class="nodeIconDialog"
+    append-to-body
     :title="$t('nodeIcon.title')"
     :visible.sync="dialogVisible"
     width="500"

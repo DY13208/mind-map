@@ -2,6 +2,13 @@ import Base from './Base'
 import { walkLayoutInSlices } from '../utils/layoutSlices'
 import { walk, asyncRun, getNodeIndexInNodeList } from '../utils'
 import { CONSTANTS } from '../constants/constant'
+import {
+  takeDirty,
+  tryPartialLayout,
+  recordFallback,
+  stampAfterFull,
+  getStats
+} from './logicalPartialLayout'
 
 //  逻辑结构图
 class LogicalStructure extends Base {
@@ -13,6 +20,25 @@ class LogicalStructure extends Base {
 
   //  布局
   doLayout(callback) {
+    const flags = this.mindMap.opt.performanceFlags || {}
+    const dirty = takeDirty(this.renderer)
+    if (flags.partialLayoutLogicalStructure && this.constructor === LogicalStructure) {
+      const res = tryPartialLayout(this, dirty)
+      if (res.ok) {
+        this.mindMap.emit('partial_layout_result', getStats(this.renderer).last)
+        callback(this.root)
+        return
+      }
+      recordFallback(this.renderer, res.reason)
+      this.mindMap.emit('partial_layout_result', getStats(this.renderer).last)
+      const done = callback
+      callback = root => {
+        stampAfterFull(this)
+        done(root)
+      }
+    } else {
+      this._plBaseline = null
+    }
     if (this.mindMap.opt.openPerformance) {
       const generation = this.renderer._renderGeneration
       const cancelled = () => generation !== this.renderer._renderGeneration

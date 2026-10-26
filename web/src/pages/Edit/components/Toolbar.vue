@@ -562,11 +562,6 @@
         </section>
       </div>
     </el-dialog>
-    <NodeImage></NodeImage>
-    <NodeHyperlink></NodeHyperlink>
-    <NodeIcon></NodeIcon>
-    <NodeNote></NodeNote>
-    <NodeTag></NodeTag>
     <Export></Export>
     <Import ref="ImportRef"></Import>
     <CPDCheckPanel
@@ -581,11 +576,6 @@
 </template>
 
 <script>
-import NodeImage from './NodeImage.vue'
-import NodeHyperlink from './NodeHyperlink.vue'
-import NodeIcon from './NodeIcon.vue'
-import NodeNote from './NodeNote.vue'
-import NodeTag from './NodeTag.vue'
 import Export from './Export.vue'
 import Import from './Import.vue'
 import CPDCheckPanel from './CPDCheckPanel.vue'
@@ -920,11 +910,6 @@ export default {
   },
   components: {
     NotchWing,
-    NodeImage,
-    NodeHyperlink,
-    NodeIcon,
-    NodeNote,
-    NodeTag,
     Export,
     Import,
     CPDCheckPanel,
@@ -1523,7 +1508,6 @@ export default {
     window.addEventListener('popstate', this.onMapNavPopstate)
     this.$bus.$on('lang_change', this.computeToolbarShowThrottle)
     window.addEventListener('beforeunload', this.onUnload)
-    this.$bus.$on('node_note_dblclick', this.onNodeNoteDblclick)
     // 上次没回写完的任务：捡回来接着轮询（刷新页面不该让任务白跑）
     // 「哪条会话回执收得回」也是跨刷新记住的 —— 挑派发会话要用
     // 先收尾：助理那条是流式直连，刷新页面这条流就断了，别让运行记录
@@ -1575,7 +1559,6 @@ export default {
     window.removeEventListener('resize', this.computeToolbarShowThrottle)
     this.$bus.$off('lang_change', this.computeToolbarShowThrottle)
     window.removeEventListener('beforeunload', this.onUnload)
-    this.$bus.$off('node_note_dblclick', this.onNodeNoteDblclick)
   },
   methods: {
     /**
@@ -5564,10 +5547,6 @@ export default {
       }
     },
 
-    onNodeNoteDblclick(node, e) {
-      e.stopPropagation()
-      this.$bus.$emit('showNodeNote', node)
-    }
   }
 }
 </script>
