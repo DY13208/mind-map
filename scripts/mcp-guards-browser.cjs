@@ -179,6 +179,7 @@ async function mcpClient(origin, token) {
 async function main() {
   const setupOnly = process.argv.includes('--setup-check')
   const apiOnly = process.argv.includes('--api-check')
+  const deleteTokenOnly = process.argv.includes('--delete-token-only')
   const interactionsOnly = process.argv.includes('--interactions-only')
   const concurrentAddOnly = process.argv.includes('--concurrent-add-only')
   const compatMode = process.argv.includes('--compat-mode')
@@ -287,6 +288,13 @@ async function main() {
     }
   }
   await check('10000-node initial database' + (apiOnly ? ' (API only)' : ' and three native browsers'), async () => ({ nodes: (await pool.query('select count(*)::int as n from room_nodes where room_key=$1 and deleted_at is null', [roomKey])).rows[0].n, clients: clients.length }))
+  if (deleteTokenOnly || process.argv.includes('--delete-token-check')) {
+    await require('./mcp-guards-delete-token.cjs')({ call, query, state, converge, roomKey, check, compatMode })
+  }
+  if (deleteTokenOnly) {
+    report.passed = true
+    return
+  }
   if (concurrentAddOnly) {
     await require('./mcp-guards-concurrent-add.cjs')({ clients, call, batch, query, serverChildren, state, converge, roomKey, check, OUT,
       expectSuccess: expectConcurrentAddSuccess, compatMode, draftDisplayCheck })

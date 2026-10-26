@@ -593,8 +593,9 @@ async function replaceRoomNodes(db, roomKey, obj, version, options = {}) {
          set is_root = false, updated_at = now()
          where room_key = $1
            and is_root
-           and deleted_at is null`,
-        [roomKey]
+           and deleted_at is null
+           and uid <> $2`,
+        [roomKey, rootUid]
       )
     }
     await db.query(
@@ -615,7 +616,16 @@ async function replaceRoomNodes(db, roomKey, obj, version, options = {}) {
          position = excluded.position,
          data = excluded.data,
          is_root = excluded.is_root,
-         node_version = excluded.node_version,
+         -- Full compatibility writes include untouched sibling subtrees. Their
+         -- versions must survive so unrelated deletions do not stale tokens.
+         node_version = case
+           when (room_nodes.parent_uid, room_nodes.position, room_nodes.data, room_nodes.is_root)
+             is distinct from
+             (excluded.parent_uid, excluded.position, excluded.data, excluded.is_root)
+             or room_nodes.deleted_at is not null
+           then excluded.node_version
+           else room_nodes.node_version
+         end,
          deleted_at = case
            when $8::boolean then null
            when room_nodes.deleted_at is null then null
