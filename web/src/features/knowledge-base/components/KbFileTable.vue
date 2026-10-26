@@ -13,11 +13,12 @@
         @delete="$emit('batch-delete', selection.slice())"
       />
       <span class="kb-batch-scope">仅限当前页</span>
+      <el-button size="small" icon="el-icon-lock" class="kb-batch-reparse" @click="$emit('batch-acl', selection.slice())">批量设置权限</el-button>
       <el-button size="small" icon="el-icon-refresh-right" class="kb-batch-reparse" @click="$emit('batch-reparse', selection.slice())">批量重新解析</el-button>
     </div>
     <div v-if="isMobileViewport" class="kb-mobile-files">
       <article v-for="row in files" :key="row.id" class="kb-mobile-file">
-        <el-checkbox v-if="selection.length" :value="selection.some(f => f.id === row.id)" :aria-label="`选择${row.name || row.fileName}`" @change="toggleMobile(row, $event)" />
+        <el-checkbox :value="selection.some(f => f.id === row.id)" :aria-label="`选择${row.name || row.fileName}`" @change="toggleMobile(row, $event)" />
         <button class="kb-document-icon" :class="'file-' + badgeOf(row).kind" :aria-label="`打开${row.name || row.fileName}`" @click="$emit('open', row)">{{ badgeOf(row).label }}</button>
         <div class="kb-document-body">
           <button class="kb-document-title" @click="$emit('open', row)">{{ row.name || row.fileName }}</button>
@@ -62,10 +63,11 @@
       <el-table-column label="更新时间" width="150">
         <template slot-scope="{ row }">{{ time(row.updatedAt || row.createdAt) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="210" fixed="right">
+      <el-table-column label="操作" width="260" fixed="right">
         <template slot-scope="{ row }">
           <el-button type="text" size="mini" icon="el-icon-document" @click="$emit('open', row)">解析</el-button>
           <el-button type="text" size="mini" icon="el-icon-s-grid" @click="$emit('data', row)">数据</el-button>
+          <el-button type="text" size="mini" icon="el-icon-lock" @click="$emit('acl', row)">权限</el-button>
           <el-dropdown trigger="click" size="small" @command="c => mobileCommand(c, row)">
             <el-button type="text" size="mini" icon="el-icon-more" aria-label="更多" />
             <el-dropdown-menu slot="dropdown" :visible-arrow="false">
@@ -94,6 +96,12 @@ export default {
   props: { files: { type: Array, default: () => [] } },
   data() {
     return { selection: [], linkVisible: false, linkFile: null }
+  },
+  watch: {
+    files(rows) {
+      const visible = new Map(rows.map(row => [row.id, row]))
+      this.selection = this.selection.filter(row => visible.has(row.id)).map(row => visible.get(row.id))
+    }
   },
   methods: {
     badgeOf(row) {
@@ -130,6 +138,7 @@ export default {
 <style scoped lang="less">
 .kb-batch {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   gap: 10px;
   > :first-child { flex: 1; }

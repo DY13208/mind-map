@@ -11,6 +11,11 @@
         </el-tooltip>
       </span>
     </div>
+    <div v-if="checkedFolders.length" class="kb-folder-batch">
+      <span>已选 {{ checkedFolders.length }} 个文件夹</span>
+      <el-button size="mini" icon="el-icon-lock" @click="$emit('batch-acl', checkedFolders.slice())">批量设置权限</el-button>
+      <el-button type="text" size="mini" @click="clearChecked">清空</el-button>
+    </div>
     <div class="kb-tree-root" :class="{ active: !value }" @click="select('')">
       <i class="el-icon-files" aria-hidden="true" />全部文件
     </div>
@@ -23,6 +28,8 @@
       ref="tree"
       :key="treeKey"
       lazy
+      show-checkbox
+      check-strictly
       :load="loadNode"
       node-key="id"
       :props="treeProps"
@@ -30,6 +37,7 @@
       highlight-current
       empty-text="暂无文件夹：点右上角新建，或在上传面板选择文件夹上传"
       @node-click="onNodeClick"
+      @check-change="onCheckedChange"
     >
       <span slot-scope="{ node, data }" class="kb-tree-node" :class="{ 'is-more': data.__more }">
         <template v-if="data.__more">
@@ -39,6 +47,7 @@
         <template v-else>
           <i class="el-icon-folder" aria-hidden="true" />
           <span class="kb-tree-label" :title="data.name">{{ data.name }}</span>
+          <button class="kb-tree-permission" type="button" :aria-label="`设置${data.name}的权限`" @click.stop="$emit('acl', { type: 'folder', id: data.id, name: data.name })"><i class="el-icon-lock" />权限</button>
           <el-dropdown trigger="click" size="small" @command="c => onCommand(c, data, node)" @click.native.stop>
             <i class="el-icon-more kb-tree-more" aria-label="更多" />
             <el-dropdown-menu slot="dropdown" :visible-arrow="false">
@@ -64,9 +73,11 @@ export default {
     return {
       treeKey: 1,
       error: null,
+      checkedFolders: [],
       treeProps: {
         label: 'name',
         children: 'children',
+        disabled: d => !!d.__more,
         isLeaf: d => !!d.__more || d.hasChildren === false || d.childCount === 0
       }
     }
@@ -74,7 +85,16 @@ export default {
   methods: {
     load() {
       this.error = null
+      this.checkedFolders = []
       this.treeKey += 1
+    },
+    onCheckedChange() {
+      const tree = this.$refs.tree
+      this.checkedFolders = tree ? tree.getCheckedNodes().filter(f => !f.__more).map(f => ({ id: f.id, name: f.name })) : []
+    },
+    clearChecked() {
+      if (this.$refs.tree) this.$refs.tree.setCheckedKeys([])
+      this.checkedFolders = []
     },
     async fetch(parentId, cursor) {
       const { items, nextCursor } = await kbApi.listFolders({ parentId, limit: PAGE, cursor })
@@ -132,6 +152,7 @@ export default {
       if (node) this.onNodeClick(node.data, node)
     },
     refreshNode(id) {
+      this.clearChecked()
       const tree = this.$refs.tree
       const node = id && tree ? tree.getNode(id) : null
       if (!node) return this.load()
@@ -161,6 +182,7 @@ export default {
           await kbApi.deleteFolder(folder.id)
           if (this.value === folder.id) this.select('')
           this.$refs.tree.remove(node)
+          this.onCheckedChange()
         }
         this.$message.success('操作成功')
       } catch (e) {
@@ -225,8 +247,10 @@ export default {
 }
 .kb-tree-more {
   color: var(--ui-text-muted);
-  visibility: hidden;
 }
+.kb-folder-batch { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 0; font-size: 12px; }
+.kb-tree-permission { border: 0; background: transparent; color: var(--ui-primary); font: inherit; font-size: 12px; padding: 4px; cursor: pointer; white-space: nowrap; }
+.kb-tree-permission:focus-visible { outline: 2px solid var(--ui-primary); outline-offset: 1px; }
 .kb-tree-node:hover .kb-tree-more { visibility: visible; }
 ::v-deep .el-tree {
   background: transparent;
