@@ -16,7 +16,7 @@
       ref="menuListRef"
       v-show="!(useStackedSubmenu && activeSubmenu)"
       :class="{ isDark: isDark }"
-      :style="menuMaxHeight ? { maxHeight: menuMaxHeight + 'px' } : null"
+      :style="scrollBoxStyle(menuMaxHeight)"
     >
     <template v-if="type === 'node' && !editable">
       <div class="item" @click="exec('EXPAND_ALL')"><MenuIcon name="expand" /><span class="name">{{ $t('contextmenu.expandNodeChild') }}</span></div>
@@ -212,14 +212,11 @@
       }"
       :style="
         useStackedSubmenu
-          ? menuMaxHeight
-            ? { maxHeight: menuMaxHeight + 'px' }
-            : null
-          : {
-              left: submenuLeft + 'px',
-              top: submenuTop + 'px',
-              maxHeight: submenuMaxHeight ? submenuMaxHeight + 'px' : null
-            }
+          ? scrollBoxStyle(menuMaxHeight)
+          : Object.assign(
+              { left: submenuLeft + 'px', top: submenuTop + 'px' },
+              scrollBoxStyle(submenuMaxHeight) || {}
+            )
       "
       @mouseenter="cancelSubmenuClose"
       @mouseleave="scheduleSubmenuClose"
@@ -855,6 +852,13 @@ export default {
       } catch (err) {
         this.$message.error('复制失败，请重试')
       }
+    },
+
+    // iOS/触控：仅 max-height 时常无法手指拖动滚动，需同时给出明确 height
+    scrollBoxStyle(maxHeight) {
+      if (!maxHeight) return null
+      const px = maxHeight + 'px'
+      return { maxHeight: px, height: px }
     },
 
     // 安全区：视口 - 外框 - 边距；刘海条作为障碍物单独避让
@@ -1632,6 +1636,9 @@ export default {
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
+  // 允许手指纵向拖动滚动；勿用 manipulation，否则部分 WebView 拖不动
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
   scrollbar-color: rgba(0, 0, 0, 0.18) transparent;
 
@@ -1668,6 +1675,21 @@ export default {
 
     &::-webkit-scrollbar-thumb:hover {
       background: rgba(255, 255, 255, 0.32);
+    }
+  }
+}
+
+// 触控设备：隐藏滚动条轨道（拖拇指无效），靠手指滑动内容
+@media (pointer: coarse) {
+  .menuScroll,
+  .submenu {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+
+    &::-webkit-scrollbar {
+      display: none;
+      width: 0;
+      height: 0;
     }
   }
 }
@@ -1746,7 +1768,8 @@ export default {
   gap: 8px;
   // 极低透明度底色：保证 flex 空白区也有命中面（纯 transparent 在部分 WebView 会点穿）
   background-color: rgba(255, 255, 255, 0.01);
-  touch-action: manipulation;
+  // pan-y：菜单超高时可手指拖动滚动；仍禁用双击缩放
+  touch-action: pan-y;
   -webkit-tap-highlight-color: transparent;
 
   // 整行命中层：盖住图标透明区与字右侧空白，点击一定落到本行
