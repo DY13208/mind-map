@@ -7,7 +7,7 @@
 - 服务端校验 MCP 身份、房间编辑权限与节点业务规则。UID 定位的普通文字、备注、超链接、新增、删除和移动可进入 Direct 路径；SOP 等守卫仍然生效。
 - `COLLAB_V2`、`COLLAB_V2_EVENT_BRIDGE`、`COLLAB_MCP_DIRECT` 同时开启，且房间节点表就绪，才允许增量写入。
 - `submissionPath` 表示这次请求实际走的路径；兼容路径同时返回 `fallbackReason`。路径、复杂附件和整图替换不强制进入普通节点 Direct 执行器。
-- 批量不拆成多个 HTTP 写入。Direct 关闭、节点表未就绪或批次形状不受支持时明确返回能力错误；不能自动改成循环单节点写入。
+- 批量不拆成多个 HTTP 写入。Direct 关闭、节点表未就绪或批次形状不受支持时明确返回能力错误，并带上可用的 `details.fallbackReason`；不能自动改成循环单节点写入。Direct 不可用不代表项目没有批量接口，而是当前实例未满足批量执行条件。
 
 ## 移动
 
@@ -18,10 +18,29 @@
 ## 并发前置条件
 
 - 修改已有节点的 `text`、富文本内容、`note`、`hyperlink` 或 `hyperlinkTitle` 时，`expected` 必须含 `uid` 和每个被改字段组的 `__fv.text`、`__fv.note`、`__fv.hyperlink`。旧节点缺少字段版本时按 `0` 处理；同一批多次操作按批次开始时的不可变基线校验，批内成功的前序修改不会被误判为外部冲突。
+- `query_nodes` 默认返回保持原样。需要直接复用的并发条件时传 `include_write_hints: true`，再将该节点 `write_hints.update.text`、`write_hints.update.note` 或 `write_hints.update.hyperlink` 中对应对象原样放入 `expected`。例如查询结果中的 `data.__fv.text=12` 对应 `{"uid":"node-123","__fv.text":12}`。提示来自本次读取，不保证写入前未发生新修改；同名候选不会提供写入提示。
+- `data.__fv.text`、`data.__fv.note`、`data.__fv.hyperlink` 是字段版本；响应顶层 `version` 是房间修订号。可选 `base_revision` 不能替代 `expected` 中的字段版本。`"__fv.text"` 是完整 JSON 键名，不能改写成 `"__fv":{"text":12}`。只改一个字段组时只需提供该字段组的版本；`hyperlink` 与 `hyperlinkTitle` 共用 `__fv.hyperlink`。工具示例中的数字仅说明结构，实际值须来自本次查询。
+- 节点 `text` 参数传纯文字，不把 HTML 标签当作富文本格式协议。
 - 移动/重排已有节点必须提供 `expected.uid`、原 `parent_uid` 和原 `position`。当请求指定零基 `index` 时，还必须提供 `expected.anchor_uid`、`anchor_parent_uid`、`anchor_position` 与 `anchor_side`（`before` 或 `after`），或者 `expected.target_empty=true`。锚点方式会在事务锁内重新找到锚点并计算相对位置；锚点在本批前序操作中被删除或移动时返回 `REPLACE_CONFLICT`。空目标方式要求锁内目标父节点除源节点外没有子节点，否则返回 `REPLACE_CONFLICT`。省略 `index` 表示追加到末尾。可选 `target_uid`、`target_parent_uid`、`target_position` 用于校验目标父节点未变化。
 - 删除必须提供 `expected.uid` 与 `expected.subtree_token`。先用 `query_nodes(scope="self", selector={type:"uid", value:"..."}, include_subtree_token=true)` 读取节点，返回值包含其完整子树摘要；该摘要是对 `(uid,parent_uid,position,node_version)` 排序后的行元组计算的 SHA-256。子树新增、移动、更新或删除都会改变摘要。数据库及写入路径无法计算摘要时明确拒绝，不会退回无保护删除。
 - 缺少必要校验信息返回 `PRECONDITION_REQUIRED`（HTTP 428）；基线已变化返回 `REPLACE_CONFLICT`（HTTP 409）。`apply_nodes` 将这些请求级业务错误作为固定的逐项失败回执保存；相同操作 ID 重放优先返回原回执，不会用新基线重试。
+- 批量不可用时一并检查 MCP 错误中的 `code`、`statusCode` 和可用的 `details.fallbackReason`。外层 MCP HTTP 200 不代表业务成功；`writeSubmitted=true` 只表示请求已提交给后端，不代表修改已落库。`outcome=rejected` 表示明确拒绝；`outcome=unknown` 或 `outcomeUnknown=true` 才表示结果未知。
 - HTTP、MCP Direct、V2 Socket 与 legacy 兼容写入使用同一前置条件语义。兼容路径无法取得完整删除子树索引时返回 `PRECONDITION_UNSUPPORTED`，不会跳过校验。undo/redo 使用现有操作冲突验证，其内部逆操作不要求外部 MCP CAS 字段。
+
+文字修改示例（版本数字仅演示结构，必须替换为本次查询返回值）：
+
+```json
+{
+  "room_key": "示例房间",
+  "node": "目标UID",
+  "text": "修改后的纯文字",
+  "expected": { "uid": "目标UID", "__fv.text": 12 }
+}
+```
+
+`query_nodes.include_write_hints` 是可选布尔参数，默认关闭；开启后分页续读必须保持该参数不变。只在目标明确时生成提示，且提示计入查询原有的字节预算。分片内容仍须读完；提示不会授予写权限，也不会锁住节点。异常字段版本只省略对应组并返回 warning，不编造条件。
+
+MCP 对相关错误附加 `guidance`（逐项失败时位于该 item），包含原因、所需键名、条件来源和下一步动作；原 `code`、状态、逐项结果和持久化回执不变。`guidance` 只供解释，不是服务端自动换基线或重试的指令。
 
 ## 批量部分成功
 
@@ -44,6 +63,8 @@
 | `items[].code` | 失败码；调用方据此核实，而不是忽略该项 |
 
 批次重复请求使用原 `operation_id` 返回首次已提交结果，不重新执行失败项。AI 应展示部分完成状态；遇到 `REPLACE_CONFLICT` 或 `PRECONDITION_REQUIRED` 必须报告并等待用户后续指示，不能自动读取新条件重写旧内容。其他失败核实后只补处理失败项，并为新意图生成新操作 ID。超过 100 项分批提交，禁止用循环单项调用代替已知批量意图。
+
+遇到 `PRECONDITION_REQUIRED`（428）或 `REPLACE_CONFLICT`（409）时，向用户说明并等待后续指示。不要自动重读最新版本、替换旧意图中的 `expected` 后重试；用户决定继续时，先重新读取，再确认新的条件与写入意图。
 
 ## 重试、恢复与取消
 
@@ -75,4 +96,6 @@
 
 部署前同时核对上游 `010_node_count_cache_generation`（新增房间计数 generation、触发器与索引）和 `011_access_request_roles`（申请授权角色、理由、已读时间及角色约束）的准备情况。`010` 按脚本要求在事务中执行；计数缓存开关只能在所有写入者就绪后开启。`011` 回滚若将丢失新角色或申请数据会明确拒绝。
 
-后续部署时先部署兼容服务与前端，验证事件桥，再启用 Direct。回滚优先关闭 Direct并保留兼容及恢复能力；关闭后批量明确不可用。性能验收和远端部署结果另记于本轮验收报告，不由本文档声称通过。
+后续部署时先部署兼容服务与前端，验证事件桥，再启用 Direct。启用前确认 `009_mcp_archive_operation_id_index`、`012_mcp_terminal_receipts` 及当前版本要求的迁移已应用并核验。先在测试实例启用事件桥，验证 `/api/health` 的监听健康、落后房间、补偿、重复通知及队列指标；再启用 Direct，在隔离测试房间确认 `submissionPath=direct` 并执行真实批量验收。仅更新 MCP 客户端说明不会启用服务端能力。远端发布和开关变更需独立安排；只读核查不代表已发布或启用。
+
+回滚优先关闭 Direct 并保留事件桥及兼容、恢复能力；关闭后批量明确不可用。不要因关闭 Direct 删除幂等索引或终态回执表。回退软件版本前确认旧版本可以识别现有操作记录、回执及逆操作格式。性能验收和远端部署结果另记于验收报告，不由本文档声称通过。

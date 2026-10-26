@@ -1491,6 +1491,31 @@ async function persistPatch(roomKey, ydoc, extra = {}) {
   }
 }
 
+function serializeMapOperationError(err) {
+  const allowedFallbackReasons = new Set([
+    'collab_v2_disabled',
+    'event_bridge_disabled',
+    'mcp_direct_disabled',
+    'room_nodes_not_initialized',
+    'direct_policy_unsupported',
+    'direct_unavailable'
+  ])
+  const body = {
+    error: err.message || 'bad request',
+    code: err.code || 'OPERATION_REJECTED',
+    retryAfterMs: err.retryAfterMs
+  }
+  const fallbackReason = err.details && err.details.fallbackReason
+  if (
+    err.code === 'MCP_DIRECT_UNAVAILABLE' &&
+    typeof fallbackReason === 'string' &&
+    allowedFallbackReasons.has(fallbackReason)
+  ) {
+    body.details = { fallbackReason }
+  }
+  return { status: err.statusCode || 400, body }
+}
+
 async function handleApi(req, res) {
   const url = new URL(req.url, 'http://127.0.0.1')
   const pathname = url.pathname
@@ -2647,11 +2672,8 @@ async function handleApi(req, res) {
           operationResponse(roomKey, committed)
         )
       } catch (err) {
-        sendJson(res, err.statusCode || 400, {
-          error: err.message || 'bad request',
-          code: err.code || 'OPERATION_REJECTED',
-          retryAfterMs: err.retryAfterMs
-        })
+        const response = serializeMapOperationError(err)
+        sendJson(res, response.status, response.body)
       }
       return true
     }

@@ -1214,10 +1214,43 @@ async function runFocusedContract() {
     result: replace
   })
 
+  const hintQueryArgs = {
+    room_key: roomKey,
+    selector: { type: 'uid', value: 'legacy-path-target' },
+    scope: 'self'
+  }
+  const legacyHintRead = assertToolOk('query_nodes', await call(owner, 'query_nodes', hintQueryArgs))
+  const legacyHintNode = (legacyHintRead.items || []).find(item => item && item.uid === 'legacy-path-target')
+  assert(legacyHintNode, 'default query_nodes did not return the isolated target', legacyHintRead)
+  assert(!Object.prototype.hasOwnProperty.call(legacyHintNode, 'write_hints'),
+    'default query_nodes unexpectedly returned opt-in write hints', legacyHintNode)
+
+  const hintRead = assertToolOk('query_nodes', await call(owner, 'query_nodes', {
+    ...hintQueryArgs,
+    include_write_hints: true
+  }))
+  const hintNode = (hintRead.items || []).find(item => item && item.uid === 'legacy-path-target')
+  const updateHints = hintNode && hintNode.write_hints && hintNode.write_hints.update
+  assert(hintNode && updateHints, 'include_write_hints query omitted update hints', hintRead)
+  const targetFieldVersions = (hintNode.data && hintNode.data.__fv) || {}
+  for (const group of ['text', 'note', 'hyperlink']) {
+    const key = `__fv.${group}`
+    const expectedVersion = Number(targetFieldVersions[group] ?? 0)
+    const expectedHint = { uid: 'legacy-path-target', [key]: expectedVersion }
+    assert(isDeepStrictEqual(updateHints[group], expectedHint),
+      `query_nodes write hint ${group} did not preserve the flat expected key`, { hint: updateHints[group], expectedHint })
+  }
+  record('query_nodes write hints are opt-in and provide flat per-field expected values', {
+    roomVersion: hintRead.version,
+    uid: hintNode.uid,
+    updateHints
+  })
+
   const pathResult = assertToolOk('update_node', await call(owner, 'update_node', {
     room_key: roomKey,
     node: 'Imported Root/Deep Parent/Legacy Path Target',
     text: 'Legacy Path Updated',
+    expected: updateHints.text,
     operation_id: randomUUID()
   }))
   assert(pathResult.submissionPath === 'legacy', 'complex path compatibility did not use its explicit legacy route', pathResult)

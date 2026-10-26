@@ -1,6 +1,7 @@
 const crypto = require('crypto')
 const { stripHtml } = require('./mindDoc')
 const { subtreeToken: makeSubtreeToken, readSubtreeRows } = require('./subtreeToken')
+const { buildNodeWriteHints } = require('./mcpWriteGuidance')
 
 const DEFAULT_PAGE_SIZE = 800
 const MAX_PAGE_SIZE = 5000
@@ -8,6 +9,8 @@ const DEFAULT_BYTE_LIMIT = 20 * 1024
 const QUERY_TIMEOUT_MS = 20000
 const MAX_CANDIDATES = 200
 const RESPONSE_CURSOR_RESERVE_BYTES = 768
+const WRITE_HINT_WARNINGS = Symbol('nodeQuery.writeHintWarnings')
+const LEGACY_SNAPSHOT_WARNING = 'legacy_snapshot_fallback：该导图尚未建立 room_nodes，已使用兼容快照读取'
 
 function queryError(message, code, statusCode = 400, extra = {}) {
   const err = new Error(message)
@@ -55,6 +58,7 @@ function queryFingerprintForRequest(request) {
     byte_limit: request.byte_limit
   }
   if (request.include_subtree_token) value.include_subtree_token = true
+  if (request.include_write_hints) value.include_write_hints = true
   return queryFingerprint(value)
 }
 
@@ -126,6 +130,11 @@ function normalizeRequest(input = {}) {
     )
   }
 
+  const includeWriteHints = input.include_write_hints === true
+  if (input.include_write_hints != null && typeof input.include_write_hints !== 'boolean') {
+    throw queryError('include_write_hints 必须是布尔值', 'INVALID_QUERY')
+  }
+
   if (selector) {
     const type = String(selector.type || '')
     if (!['uid', 'name', 'path'].includes(type)) {
@@ -158,7 +167,8 @@ function normalizeRequest(input = {}) {
     page_size: pageSize,
     byte_limit: byteLimit,
     cursor: input.cursor ? String(input.cursor) : null,
-    include_subtree_token: includeSubtreeToken
+    include_subtree_token: includeSubtreeToken,
+    include_write_hints: includeWriteHints
   }
 }
 
@@ -480,10 +490,10 @@ function cleanData(data, omitted) {
   return next
 }
 
-function itemFromRow(row, pathInfo, targetDepth, omitted) {
+function itemFromRow(row, pathInfo, targetDepth, omitted, request) {
   const uid = String(row.uid)
   const absoluteDepth = Number(pathInfo && pathInfo.depth || 0)
-  return {
+  const item = {
     uid,
     parent_uid: row.parent_uid || null,
     depth: absoluteDepth,
@@ -493,6 +503,21 @@ function itemFromRow(row, pathInfo, targetDepth, omitted) {
     path: (pathInfo && pathInfo.path) || [],
     data: cleanData(row.data, omitted)
   }
+  if (request && request.include_write_hints) {
+    const result = buildNodeWriteHints(uid, item.data)
+    if (result.writeHints) item.write_hints = result.writeHints
+    if (result.warnings.length) item[WRITE_HINT_WARNINGS] = result.warnings
+  }
+  return item
+}
+
+function writeHintWarnings(items) {
+  return Array.from(new Set((items || []).flatMap(item => item && item[WRITE_HINT_WARNINGS] || [])))
+}
+
+function legacyResponseBudgetWarnings(request, items) {
+  if (!request.include_write_hints) return []
+  return [LEGACY_SNAPSHOT_WARNING, ...writeHintWarnings(items)]
 }
 
 function jsonBytes(value) {
@@ -550,7 +575,7 @@ function fragmentItem(item, state, byteLimit, omitted) {
   }
 }
 
-function responseFitsByteLimit({ roomKey, version, target, scope, items, byteLimit, omitted }) {
+function responseFitsByteLimit({ roomKey, version, target, scope, items, byteLimit, omitted, warnings = [] }) {
   return jsonBytes({
     room_key: roomKey,
     version,
@@ -561,15 +586,15 @@ function responseFitsByteLimit({ roomKey, version, target, scope, items, byteLim
     next_cursor: 'x'.repeat(RESPONSE_CURSOR_RESERVE_BYTES),
     byte_limit: byteLimit,
     omitted_fields: Array.from(omitted),
-    warnings: []
+    warnings
   }) <= byteLimit
 }
 
-async function itemForFragment(db, roomKey, state, targetDepth, omitted) {
+async function itemForFragment(db, roomKey, state, targetDepth, omitted, request) {
   const rows = await nodeRows(db, roomKey, [state.uid])
   if (!rows.length) throw queryError('节点已不存在，请从第一页重新读取', 'STALE_CURSOR', 409)
   const paths = await pathsForUids(db, roomKey, [state.uid])
-  return itemFromRow(rows[0], paths.get(state.uid), targetDepth, omitted)
+  return itemFromRow(rows[0], paths.get(state.uid), targetDepth, omitted, request)
 }
 
 function cursorFor(fingerprint, version, offset, fragment) {
@@ -626,7 +651,7 @@ async function queryRoomNodes(db, roomKey, input) {
     const offset = cursor ? Number(cursor.offset || 0) : 0
     const omitted = new Set(['data.imgMap'])
     if (cursor && cursor.fragment) {
-      const item = await itemForFragment(client, roomKey, cursor.fragment, targetInfo.depth, omitted)
+      const item = await itemForFragment(client, roomKey, cursor.fragment, targetInfo.depth, omitted, request)
       if (targetSubtreeToken && item.uid === targetUid) item.subtree_token = targetSubtreeToken
       const fragmented = fragmentItem(item, cursor.fragment, request.byte_limit, omitted)
       const nextCursor = fragmented.nextFragment
@@ -642,7 +667,10 @@ async function queryRoomNodes(db, roomKey, input) {
         next_cursor: nextCursor,
         byte_limit: request.byte_limit,
         omitted_fields: Array.from(omitted),
-        warnings: ['节点长文本已按字段分片；请使用 next_cursor 继续读取']
+        warnings: [
+          '节点长文本已按字段分片；请使用 next_cursor 继续读取',
+          ...writeHintWarnings([fragmented.item])
+        ]
       }
     }
 
@@ -654,7 +682,7 @@ async function queryRoomNodes(db, roomKey, input) {
     let pendingFragment = null
     for (let index = 0; index < pageRows.length; index += 1) {
       const row = pageRows[index]
-      const item = itemFromRow(row, paths.get(String(row.uid)), targetInfo.depth, omitted)
+      const item = itemFromRow(row, paths.get(String(row.uid)), targetInfo.depth, omitted, request)
       if (targetSubtreeToken && item.uid === targetUid) item.subtree_token = targetSubtreeToken
       if (responseFitsByteLimit({
         roomKey,
@@ -663,7 +691,8 @@ async function queryRoomNodes(db, roomKey, input) {
         scope: request.scope,
         items: [...items, item],
         byteLimit: request.byte_limit,
-        omitted
+        omitted,
+        warnings: writeHintWarnings([...items, item])
       })) {
         items.push(item)
         continue
@@ -703,7 +732,7 @@ async function queryRoomNodes(db, roomKey, input) {
       next_cursor: hasMore ? cursorFor(fingerprint, version, nextOffset, pendingFragment) : null,
       byte_limit: request.byte_limit,
       omitted_fields: Array.from(omitted),
-      warnings: []
+      warnings: writeHintWarnings(items)
     }
   })
 }
@@ -869,7 +898,7 @@ function queryLegacyNodes(obj, roomKey, version, input) {
   if (cursor && cursor.fragment) {
     const row = rows.find(item => String(item.uid) === String(cursor.fragment.uid))
     if (!row) throw queryError('节点范围已变化，请从第一页重新读取', 'STALE_CURSOR', 409)
-    const item = itemFromRow(row, legacyPathInfo(obj, row.uid, parents), targetInfo.depth, omitted)
+    const item = itemFromRow(row, legacyPathInfo(obj, row.uid, parents), targetInfo.depth, omitted, request)
     const fragmented = fragmentItem(item, cursor.fragment, request.byte_limit, omitted)
     const nextCursor = fragmented.nextFragment
       ? cursorFor(fingerprint, Number(version || 0), offset, fragmented.nextFragment)
@@ -884,7 +913,7 @@ function queryLegacyNodes(obj, roomKey, version, input) {
       next_cursor: nextCursor,
       byte_limit: request.byte_limit,
       omitted_fields: Array.from(omitted),
-      warnings: ['legacy_snapshot_fallback：该导图尚未建立 room_nodes，已使用兼容快照读取']
+      warnings: [LEGACY_SNAPSHOT_WARNING, ...writeHintWarnings([fragmented.item])]
     }
   }
   const pageRows = rows.slice(offset, offset + request.page_size)
@@ -892,7 +921,7 @@ function queryLegacyNodes(obj, roomKey, version, input) {
   let pendingFragment = null
   for (const row of pageRows) {
     const info = legacyPathInfo(obj, row.uid, parents)
-    const item = itemFromRow(row, info, targetInfo.depth, omitted)
+    const item = itemFromRow(row, info, targetInfo.depth, omitted, request)
     if (!responseFitsByteLimit({
       roomKey,
       version: Number(version || 0),
@@ -900,7 +929,8 @@ function queryLegacyNodes(obj, roomKey, version, input) {
       scope: request.scope,
       items: [...items, item],
       byteLimit: request.byte_limit,
-      omitted
+      omitted,
+      warnings: legacyResponseBudgetWarnings(request, [...items, item])
     })) {
       if (!items.length) {
         const fragmented = fragmentItem(item, {
@@ -939,7 +969,7 @@ function queryLegacyNodes(obj, roomKey, version, input) {
       : null,
     byte_limit: request.byte_limit,
     omitted_fields: Array.from(omitted),
-    warnings: ['legacy_snapshot_fallback：该导图尚未建立 room_nodes，已使用兼容快照读取']
+    warnings: [LEGACY_SNAPSHOT_WARNING, ...writeHintWarnings(items)]
   }
 }
 
