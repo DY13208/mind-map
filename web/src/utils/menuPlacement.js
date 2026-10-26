@@ -88,11 +88,12 @@ export function placeMenu(size, anchor, safeArea, opts = {}) {
  * 窄屏 / 触控：侧向二级菜单容易被裁切或点完即关，改用主菜单内钻取。
  */
 export function preferStackedSubmenu(viewport = {}, opts = {}) {
-  const width = Number(viewport.width) || 0
+  if (opts.isMobile || opts.coarsePointer) return true
+  const width = Number(viewport && viewport.width) || 0
+  const height = Number(viewport && viewport.height) || 0
   if (width > 0 && width < 720) return true
-  if (opts.isMobile) return true
-  if (opts.coarsePointer) return true
-  return false
+  if (width <= 0 || height <= 0) return false
+  return width < 768 || height < 500
 }
 
 /**

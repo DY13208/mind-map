@@ -1,22 +1,26 @@
 <template>
   <div v-if="room && drafts.length" class="conflictDraftInbox">
-    <el-button class="draftInboxTrigger" round size="small" @click="openInbox">
+    <el-button class="draftInboxTrigger" round size="small" @mousedown.native.stop @click.stop="openInbox">
       <i class="el-icon-warning-outline"></i>
-      {{ $t('editConflict.inbox') }} · {{ drafts.length }}
+      {{ $t(actionableDrafts.length ? 'editConflict.inbox' : 'editConflict.syncRecords') }} · {{ actionableDrafts.length || diagnosticDrafts.length }}
     </el-button>
     <el-dialog
       :visible.sync="visible"
-      :title="$t('editConflict.inboxTitle')"
+      :title="$t(actionableDrafts.length ? 'editConflict.inboxTitle' : 'editConflict.syncRecords')"
       width="600px"
       custom-class="conflictDraftDialog"
       append-to-body
+      @mousedown.native.stop
+      @click.native.stop
     >
       <p v-if="!drafts.length">{{ $t('editConflict.empty') }}</p>
-      <div v-for="item in drafts" :key="item.key" class="conflictDraftItem">
+      <p class="inboxExplanation">{{ $t('editConflict.inboxExplanation') }}</p>
+      <div v-for="item in actionableDrafts" :key="item.key" class="conflictDraftItem">
         <div class="itemHead">
           <div class="itemIdentity">
-            <strong :title="item.uid">{{ $t('editConflict.node') }} {{ item.uid }}</strong>
+            <strong :title="item.uid">{{ draftTitle(item) }}</strong>
             <span class="itemGroup">{{ draftGroupLabel(item.group) }}</span>
+            <span class="itemState">{{ $t('editConflict.state_' + draftPolicy(item).kind) }}</span>
           </div>
           <el-button class="draftItemToggle" type="text" size="mini" :aria-label="$t('editConflict.myDraft')" :aria-expanded="String(selectedKey === item.key)" @click="toggleItem(item)">
             <i :class="selectedKey === item.key ? 'el-icon-arrow-up' : 'el-icon-arrow-down'" aria-hidden="true"></i>
@@ -28,8 +32,12 @@
           :latest="latestFor(item)"
           :persisted="true"
           :reason="item.reason"
+          :error="item.error"
           @show-latest="refreshLatest(item)"
         >
+          <el-button v-if="draftPolicy(item).canRetry" slot="retry" size="mini" type="primary" :loading="retryingKey === item.key" :disabled="!!retryingKey && retryingKey !== item.key" @mousedown.native.stop @click.stop="retryDraft(item)">
+            {{ $t('editConflict.retry') }}
+          </el-button>
           <el-button
             slot="discard"
             type="text"
@@ -39,6 +47,14 @@
           >{{ $t('editConflict.discard') }}</el-button>
         </ConflictDraftPanel>
       </div>
+      <details v-if="diagnosticDrafts.length" class="syncRecords">
+        <summary>{{ $t('editConflict.syncRecords') }} · {{ diagnosticDrafts.length }}</summary>
+        <p>{{ $t('editConflict.syncRecordsHint') }}</p>
+        <div v-for="item in diagnosticDrafts" :key="item.key" class="syncRecord">
+          <span>{{ draftTitle(item) }} · {{ (item.error && item.error.code) || '—' }}</span>
+          <el-button type="text" size="mini" @click="copyDiagnostic(item)">{{ $t('editConflict.copyDetails') }}</el-button>
+        </div>
+      </details>
     </el-dialog>
   </div>
 </template>
@@ -57,6 +73,8 @@ import {
   removeConflictDraft
 } from '@/utils/conflictDraftStore'
 import ConflictDraftPanel from './ConflictDraftPanel.vue'
+import { classifyConflictDraft } from '@/utils/conflictDraftPolicy'
+import { formatConflictText, isConflictRichText } from '@/utils/conflictDraftDisplay'
 
 export default {
   name: 'ConflictDraftInbox',
@@ -72,12 +90,20 @@ export default {
       persistentSessionIds: [],
       draftKeysBySession: {},
       visible: false,
-      loadToken: 0
+      loadToken: 0,
+      retryingKey: '',
+      retrySessionId: ''
     }
   },
   computed: {
     room() {
       return roomFromLocation(this.$route)
+    },
+    actionableDrafts() {
+      return this.drafts.filter(item => classifyConflictDraft(item).kind !== 'record')
+    },
+    diagnosticDrafts() {
+      return this.drafts.filter(item => classifyConflictDraft(item).kind === 'record')
     }
   },
   created() {
@@ -106,6 +132,64 @@ export default {
     this.unbindMindMapEvents(this.mindMap)
   },
   methods: {
+    draftPolicy: classifyConflictDraft,
+    draftTitle(item) {
+      const session = item.session || {}
+      const data = (item.latestSnapshot && item.latestSnapshot.data) || session.baseValues || {}
+      const text = data.text || (session.draft && session.draft.text)
+      return text ? formatConflictText(text, isConflictRichText({ text }, session)).slice(0, 80) : this.$t('editConflict.node') + ' ' + item.uid
+    },
+    async copyDiagnostic(item) {
+      try {
+        const text = JSON.stringify(item, null, 2)
+        if (navigator.clipboard && navigator.clipboard.writeText) await navigator.clipboard.writeText(text)
+        else {
+          const field = document.createElement('textarea')
+          field.value = text
+          field.style.cssText = 'position:fixed;opacity:0'
+          document.body.appendChild(field)
+          try { field.select(); if (!document.execCommand('copy')) throw new Error('copy failed') }
+          finally { field.remove() }
+        }
+        this.$message.success(this.$t('editConflict.copied'))
+      } catch (_) { this.$message.error(this.$t('editConflict.copyFailed')) }
+    },
+    async retryDraft(item) {
+      if (this.retryingKey || !classifyConflictDraft(item).canRetry) return
+      const room = this.room
+      const principal = currentEditPrincipal()
+      const cooperate = getEditCooperate(this.mindMap)
+      if (!cooperate || !cooperate.commitEditSession || item.room !== room || item.principal !== principal) return
+      const status = cooperate.collabV2Adapter && cooperate.collabV2Adapter.getStatus && cooperate.collabV2Adapter.getStatus()
+      if (!status || status.phase !== 'LIVE') {
+        this.$message.warning(this.$t('editConflict.retryPending'))
+        return
+      }
+      this.retryingKey = item.key
+      this.retrySessionId = item.session.id
+      try {
+        const session = cooperate.getEditSession(item.session.id) || cooperate.restoreEditSession(item.session)
+        if (!session) throw new Error('EDIT_SESSION_MISSING')
+        // Reuse the original field-version baseline. Never rebase automatically.
+        const result = await cooperate.commitEditSession(session.id, session.draft)
+        if (!result || result.draftSaved !== true || result.queued || !(Number(result.version) > 0)) {
+          this.$message.warning(this.$t('editConflict.retryPending'))
+          return
+        }
+        if (room !== this.room || principal !== currentEditPrincipal() || cooperate !== getEditCooperate(this.mindMap)) return
+        // Close only the editor whose exact draft received this ACK. This
+        // clears its UI without issuing another write or rebasing its content.
+        if (typeof cooperate.discardEditSession === 'function') cooperate.discardEditSession(session.id)
+        await removeConflictDraft(item)
+        await this.loadDrafts()
+        this.$message.success(this.$t('editConflict.retrySaved'))
+      } catch (error) {
+        if (room !== this.room || principal !== currentEditPrincipal() || cooperate !== getEditCooperate(this.mindMap)) return
+        const session = cooperate.getEditSession(item.session.id) || item.session
+        await this.persistSessionEvent(session, error, 'save_failed')
+        this.$message.error(this.$t('editConflict.retryFailed'))
+      } finally { this.retryingKey = ''; this.retrySessionId = '' }
+    },
     draftGroupLabel(group) {
       const labels = { text: 'style.text', note: 'nodeNote.title', hyperlink: 'nodeHyperlink.title', 'outbox-structure': 'editConflict.operationIntent' }
       return this.$t(labels[group] || 'editConflict.myDraft')
@@ -183,11 +267,13 @@ export default {
     onCollabWriteConflict(error) {
       if (!this.room) return
       const message = String((error && error.message) || '')
-      this.$message.warning(message || this.$t('editConflict.saveFailed'))
+      if (!error || !error.code || ['REPLACE_CONFLICT', 'STRUCTURE_CONFLICT'].includes(error.code)) this.$message.warning(message || this.$t('editConflict.message'))
+      else this.$message.error(this.$t(error && error.code === 'PRECONDITION_REQUIRED' ? 'editConflict.syncInternalError' : 'editConflict.saveFailed'))
     },
     async onSessionFinished(session) {
       const id = String((session && session.id) || '')
       if (!id) return
+      if (id === this.retrySessionId) return
       let keys = this.draftKeysBySession[id] || this.drafts
         .filter(item => item.session && item.session.id === id)
         .map(item => item.key)
@@ -300,6 +386,7 @@ export default {
         const drafts = await listConflictDrafts(currentEditPrincipal(), room)
         if (token !== this.loadToken || room !== this.room) return
         this.drafts = drafts
+        if (!drafts.length) this.visible = false
         const keysBySession = {}
         drafts.forEach(item => {
           const id = item.session && String(item.session.id || '')
@@ -318,8 +405,8 @@ export default {
     },
     openInbox() {
       this.visible = true
-      if (!this.selectedKey && this.drafts.length) {
-        this.toggleItem(this.drafts[0])
+      if (!this.selectedKey && this.actionableDrafts.length) {
+        this.toggleItem(this.actionableDrafts[0])
       }
     },
     toggleItem(item) {
@@ -416,6 +503,15 @@ export default {
 }
 
 .draftItemToggle { width: 32px; height: 32px; border-radius: 6px; }
+.inboxExplanation { margin: 4px 0 16px; color: #5c6e64; font-size: 13px; line-height: 1.6; }
+.itemState { color: #72501d; font-size: 12px; }
+.syncRecords { margin-top: 16px; border-top: 1px solid #e2e9e4; padding-top: 12px; font-size: 12px; color: #5c6e64;
+  summary { cursor: pointer; padding: 6px 0; }
+  p { line-height: 1.6; }
+}
+.syncRecord { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 0;
+  span { overflow-wrap: anywhere; min-width: 0; }
+}
 .discardButton { color: #b8433a; }
 .draftInboxTrigger { color: #72501d; border-color: #ddcaa6; background: #fff; box-shadow: 0 3px 12px rgba(23, 38, 31, .08); }
 </style>
@@ -444,6 +540,8 @@ body.isDark .conflictDraftDialog {
   .itemGroup { background: #34453b; color: #acbdb2; }
   .el-button--text { color: #7dcdab; }
   .discardButton { color: #ed9e96; }
+  .inboxExplanation, .syncRecords { color: #acbdb2; border-color: #3e5046; }
+  .itemState { color: #dfb66b; }
 }
 @media (max-width: 600px) {
   .conflictDraftInbox { right: 16px; bottom: max(16px, env(safe-area-inset-bottom)); }

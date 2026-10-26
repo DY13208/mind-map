@@ -238,7 +238,12 @@ export async function persistOutboxConflictDraft({ mindMap, route, payload }) {
       draft[field] = event.session.draft[field]
     }
   })
-  if (!uid || !opId || !fields.length) {
+  if (uid && opId && !fields.length) {
+    // The original operation remains quarantined in the outbox. An internal
+    // metadata/style error is not a recoverable text draft or a storage error.
+    return { records: [], record: null, stale: true, diagnostic: true }
+  }
+  if (!uid || !opId) {
     throw new Error('旧协同操作缺少可恢复的文本内容')
   }
 

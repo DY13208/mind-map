@@ -50,6 +50,10 @@ output/*.py
 /data/local-knowledge/
 /tmp/local-fill-build/
 
+/data/contracts/
+/data/fawu/
+/data/unove/
+/data/zizhi/
 /data/local-knowledge-cache/
 # Local development tests: keep on disk, exclude new test files from Git.
 /tests/
@@ -104,3 +108,16 @@ output/*.py
 !/simple-mind-map/e2e/performance/*.cjs
 /work/
 !/simple-mind-map/test/roomAclStartup.pg.test.js
+/output/
+
+
+# 环境配置与备份
+.env
+.env.*
+!.env.example
+
+# 临时代码备份
+*.bak
+
+# Wiki 数据备份
+/tmp/wiki-backup/

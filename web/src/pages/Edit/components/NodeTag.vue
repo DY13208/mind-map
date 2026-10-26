@@ -1,6 +1,7 @@
 <template>
   <el-dialog
     class="nodeTagDialog"
+    append-to-body
     :title="$t('nodeTag.title')"
     :visible.sync="dialogVisible"
     :width="isMobile ? '90%' : '50%'"

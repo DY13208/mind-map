@@ -55,9 +55,11 @@ function placeChild(next, parentUid, uid, payload) {
   const kids = [...((next[parentUid] && next[parentUid].children) || [])].filter(
     id => id !== uid
   )
+  // 初始/懒加载快照可能只有部分兄弟节点带 position。此时不能把
+  // 有 position 的新节点排在其余节点前面，应沿用服务端确认的 index。
   const canSort =
     payload.position &&
-    (payload.reindex || kids.some(id => next[id] && next[id].position))
+    kids.every(id => next[id] && next[id].position)
   if (canSort) {
     kids.push(uid)
     kids.sort((a, b) => {

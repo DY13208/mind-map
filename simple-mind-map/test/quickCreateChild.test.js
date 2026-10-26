@@ -28,7 +28,16 @@ function fixture() {
     activeNodeList: [original], findNodeByUid: uid => nodes.get(uid),
     textEdit: { hideEditTextBox() {} }, hasRichTextPlugin: () => false,
     getNewNodeBehavior: () => ({ focusNewNode: false, inserting: false }),
-    mindMap: { opt: {}, render() {} }
+    mindMap: {
+      opt: {}, render() {},
+      command: {
+        isCountableNode: () => true,
+        recordContentChange() {},
+        pause() { this.isPause = true },
+        recovery() { this.isPause = false },
+        addHistory() {}
+      }
+    }
   })
   return { original, other, nodes, renderer }
 }

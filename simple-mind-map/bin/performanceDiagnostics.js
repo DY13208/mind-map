@@ -3,7 +3,7 @@
 const { performance, monitorEventLoopDelay } = require('node:perf_hooks')
 const MAX_EVENTS = 3000
 const WINDOW_MS = 15 * 60 * 1000
-const KINDS = new Set(['http', 'mcp-http', 'pool', 'lock-query', 'transaction', 'transaction-stage', 'acl', 'render', 'longtask', 'ack', 'ack-failed', 'remote', 'local', 'resource', 'canvas-ready', 'cancel-render', 'api-queue', 'client-state', 'mcp-queue', 'mcp-write', 'batch-item'])
+const KINDS = new Set(['http', 'mcp-http', 'pool', 'lock-query', 'transaction', 'transaction-stage', 'acl', 'render', 'longtask', 'ack', 'ack-failed', 'remote', 'local', 'resource', 'canvas-ready', 'cancel-render', 'api-queue', 'client-state', 'mcp-queue', 'mcp-write', 'batch-item', 'render-phase', 'render-scale'])
 const SAFE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 // Fixed storage: recording an event must not shift thousands of array entries.
 const events = new Array(MAX_EVENTS)
@@ -166,7 +166,7 @@ async function handleApi(req, res, pathname, deps) {
       !Array.isArray(body.events) || body.events.length > 100) return send(400, { code: 'BAD_DIAGNOSTICS_REPORT' })
   try { await deps.assertRoomAccess(deps.pool, req, body.roomKey, 'view') }
   catch (error) { return send(error.statusCode || 403, { code: 'ROOM_ACCESS_DENIED' }) }
-  const clientKinds = new Set(['render', 'longtask', 'ack', 'ack-failed', 'remote', 'local', 'resource', 'canvas-ready', 'cancel-render', 'api-queue', 'client-state'])
+  const clientKinds = new Set(['render', 'longtask', 'ack', 'ack-failed', 'remote', 'local', 'resource', 'canvas-ready', 'cancel-render', 'api-queue', 'client-state', 'render-phase', 'render-scale'])
   for (const e of body.events) if (e && clientKinds.has(e.kind)) {
     record({ kind: e.kind, durationMs: e.durationMs, count: e.count, type: e.type, route: e.route,
       roomKey: body.roomKey, sessionId: body.sessionId, source: 'browser' })

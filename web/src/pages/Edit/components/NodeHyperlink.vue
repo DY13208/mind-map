@@ -1,6 +1,7 @@
 <template>
   <el-dialog
     class="nodeHyperlinkDialog"
+    append-to-body
     :title="$t('nodeHyperlink.title')"
     :visible.sync="dialogVisible"
     :close-on-click-modal="false"
@@ -200,7 +201,7 @@ export default {
     },
     handleShowNodeLink(node) {
       if (this.dialogVisible) return
-      const targets = node && typeof node.getData === 'function' ? [node] : [...this.activeNodes]
+      const targets = Array.isArray(node) ? node : node && typeof node.getData === 'function' ? [node] : [...this.activeNodes]
       const uids = [...new Set(targets.map(item => item && item.getData && item.getData('uid')).filter(Boolean))]
       if (!uids.length) return
       this.mindMap = (targets[0] && targets[0].mindMap) || this.mindMap

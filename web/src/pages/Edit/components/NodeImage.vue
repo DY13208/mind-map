@@ -1,6 +1,7 @@
 <template>
   <el-dialog
     class="nodeImageDialog"
+    append-to-body
     :title="$t('nodeImage.title')"
     :visible.sync="dialogVisible"
     :width="isMobile ? '90%' : '600px'"

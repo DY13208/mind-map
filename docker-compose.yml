@@ -407,7 +407,14 @@ services:
     environment:
       <<: *file-kb-env
       FILE_KB_WORKER_ID: file-kb-worker-1
-      KB_WORKER_CONCURRENCY: "2"
+      # Two light jobs can progress alongside one PDF/OCR job.
+      KB_WORKER_CONCURRENCY: ${KB_WORKER_CONCURRENCY:-3}
+      KB_LIGHT_CONCURRENCY: ${KB_LIGHT_CONCURRENCY:-2}
+      # On the local 4-CPU Docling service, two PDF requests did not improve warm throughput.
+      KB_HEAVY_CONCURRENCY: ${KB_HEAVY_CONCURRENCY:-1}
+      # Small XLSX/Markdown files skip Docling; spreadsheets still use the normal structure stage.
+      KB_NATIVE_LIGHT_PARSE: ${KB_NATIVE_LIGHT_PARSE:-true}
+      KB_NATIVE_LIGHT_MAX_BYTES: ${KB_NATIVE_LIGHT_MAX_BYTES:-2097152}
       # Scanned PDFs/images: first pass without OCR; re-run with OCR only when the result looks scanned.
       KB_DOCLING_OCR_MODE: ${KB_DOCLING_OCR_MODE:-auto}
       KB_DOCLING_OCR_ENGINE: ${KB_DOCLING_OCR_ENGINE:-rapidocr}

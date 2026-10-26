@@ -355,7 +355,13 @@ async function migrateRoomSnapshots(db) {
   const res = await db.query(
     `select s.room_key, s.version, s.nodes, s.created_at
      from room_snapshots s
-     join rooms r on r.room_key = s.room_key`
+     join rooms r on r.room_key = s.room_key
+     where not exists (
+       select 1 from room_version_legacy_map m
+       where m.room_key = s.room_key
+         and m.source = 'room_snapshots'
+         and m.old_pk = s.version::text
+     )`
   )
   let count = 0
   for (const row of res.rows) {

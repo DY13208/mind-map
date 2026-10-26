@@ -53,6 +53,8 @@ import {
   patchDelta,
   publicNodeData,
   readFieldVersions,
+  fieldGroupOf,
+  keysForGroups,
   FV_KEY
 } from '../utils/fieldMerge'
 import { createCollaborationStore } from '../utils/collaborationStore'
@@ -160,6 +162,7 @@ const NULLABLE_PATCH_KEYS = [
   'formula',
   'attachmentUrl',
   'knowledgeFiles',
+  'textMentions',
   'attachmentName',
   'attachmentId',
   'attachmentMimeType',
@@ -614,6 +617,8 @@ class Cooperate {
     this.ackedUids = new Set()
     this.pendingUids = new Set()
     this._pendingTextUids = new Set()
+    this._pendingAttachmentPatchByUid = new Map()
+    this._attachmentPatchIntentSeq = 0
     this._httpTextFlushAfterRender = false
     this._localIntentEpochByUid = new Map()
     this._localIntentSeq = 0
@@ -1671,6 +1676,7 @@ class Cooperate {
     this.ackedUids && this.ackedUids.clear()
     this.pendingUids && this.pendingUids.clear()
     this.httpTextFlushQueued = false
+    this._pendingAttachmentPatchByUid && this._pendingAttachmentPatchByUid.clear()
     this.deletedUids && this.deletedUids.clear()
     this.abandonedInsertUids && this.abandonedInsertUids.clear()
     this.recentHttpDeleted && this.recentHttpDeleted.clear()
@@ -2131,7 +2137,25 @@ class Cooperate {
 
   onAfterExecCommand(name) {
     if (this.collabV2Adapter && !this.isApplyingRemote && !this.isSetData && !this.httpReplacing) {
-      this.recordLocalIntentUids(this.commandIntentUids(name, Array.prototype.slice.call(arguments, 1)))
+      const commandUids = this.commandIntentUids(name, Array.prototype.slice.call(arguments, 1))
+      this.recordLocalIntentUids(commandUids)
+    }
+    if (
+      this.httpCollabMode &&
+      !this.isApplyingRemote &&
+      !this.isSetData &&
+      !this.httpReplacing &&
+      name === 'SET_NODE_ATTACHMENT'
+    ) {
+      if (!this._pendingAttachmentPatchByUid) this._pendingAttachmentPatchByUid = new Map()
+      if (!this._pendingTextUids) this._pendingTextUids = new Set()
+      const commandUids = this.commandIntentUids(name, Array.prototype.slice.call(arguments, 1))
+      commandUids.forEach(uid => {
+        this._attachmentPatchIntentSeq = (this._attachmentPatchIntentSeq || 0) + 1
+        this._pendingAttachmentPatchByUid.set(uid, this._attachmentPatchIntentSeq)
+        this._pendingTextUids.add(uid)
+      })
+      if (commandUids.length) this.scheduleHttpTextSync()
     }
     if (this.collabV2Adapter && (name === 'SET_NODE_TEXT' || name === 'SET_NODE_NOTE')) {
       const node = arguments[1]
@@ -2571,6 +2595,9 @@ class Cooperate {
 
   // 节点树渲染完毕事件
   onNodeTreeRenderEnd() {
+    if (typeof this.refreshCollapsedNodeCounts === 'function') {
+      this.refreshCollapsedNodeCounts().catch(() => {})
+    }
     const reorderedParents = []
     if (!this._dragViewDeferred && this._pendingChildOrderParents) {
       this._pendingChildOrderParents.forEach(uid => {
@@ -2875,6 +2902,11 @@ class Cooperate {
         this.renderedVersion = Math.max(Number(this.renderedVersion) || 0, watermark)
       }
       if (this.collabStore) this.collabStore.setLastAppliedVersion(watermark)
+      // A remote insert under a collapsed parent can update no layout at all.
+      // Its ancestor badges still need the newly committed server totals.
+      if (typeof this.refreshCollapsedNodeCounts === 'function') {
+        this.refreshCollapsedNodeCounts().catch(() => {})
+      }
       advanced = false
     }
     commitWatermark()
@@ -3110,7 +3142,8 @@ class Cooperate {
     this.editSessionManager.list().forEach(session => {
       if (session.uid !== uid || (session.roomKey && session.roomKey !== this.httpRoomKey)) return
       if (!snapshot || !session.fields.every(field =>
-        Number(snapshot.fieldVersions[editFieldGroup(field)]) === revision &&
+        (Number(snapshot.fieldVersions[editFieldGroup(field)]) || 0) ===
+          (Number(readFieldVersions(data)[editFieldGroup(field)]) || 0) &&
         stableFieldValue(snapshot.data[field]) === stableFieldValue(data[field])
       )) return
       let initialValues = data
@@ -3891,6 +3924,20 @@ class Cooperate {
     const parent = renderer && renderer.findNodeByUid && renderer.findNodeByUid(parentUid)
     const children = parent && parent.nodeData && parent.nodeData.children
     if (!Array.isArray(children)) return false
+    const canonical = new Set(entry.children.map(String))
+    // 懒加载补入画布的旧节点可能还没有合并进 currentData.children。
+    // 此时按缓存中的少数新节点排序，会把新节点排到全部旧节点前面。
+    // 保留命令/服务端 index 已确定的顺序，等缓存完整后再投影。
+    const missingCommittedChild = children.some(node => {
+      const uid = String(node && node.data && node.data.uid || '')
+      return uid && !canonical.has(uid) && this.isPersistAcked(uid) &&
+        !this.isTombstonedUid(uid)
+    })
+    if (missingCommittedChild) {
+      if (!this._pendingChildOrderParents) this._pendingChildOrderParents = new Set()
+      this._pendingChildOrderParents.add(parentUid)
+      return false
+    }
     const loaded = new Set(children.map(node => String(node && node.data && node.data.uid || '')))
     if (entry.children.every(uid => loaded.has(String(uid))) && this._pendingChildOrderParents) {
       this._pendingChildOrderParents.delete(parentUid)
@@ -4316,6 +4363,15 @@ class Cooperate {
         renderer.findNodeByUid(parentUid)) ||
       null
     if (!parentNode || !parentNode.nodeData) return false
+    // 接收端父节点已折叠且子级未加载（懒加载/远端新建）时，不能塞入单个恢复子树
+    // 并强制展开：这会撑开别人的布局，且展开后只显示部分子节点。保持折叠，
+    // 由 refreshCollapsedNodeCounts 按服务端 descendantCount 刷新徽标。
+    const parentCollapsed = parentNode.getData && parentNode.getData('expand') === false
+    if (parentCollapsed && !(parentNode.nodeData.children || []).length) {
+      this.markRemoteDirty(uid, parentUid)
+      if (typeof parentNode.updateExpandBtnNode === 'function') parentNode.updateExpandBtnNode()
+      return true
+    }
     const tree = collabDelete.buildSubtreeFromRows(rows, uid)
     if (!tree) return false
     this.isApplyingRemote = true
@@ -4333,7 +4389,7 @@ class Cooperate {
           parentNode.nodeData.children.push(tree)
         }
       }
-      renderer.setNodeData(parentNode, { expand: true })
+      if (!parentCollapsed) renderer.setNodeData(parentNode, { expand: true })
       this.requestRemoteApplyRender([uid, parentUid, ...reviveIds])
     } catch (err) {
       v2Trace('remote.apply.restore.err', { uid, message: err && err.message })
@@ -4719,6 +4775,8 @@ class Cooperate {
     this.hydrateFailedUids = new Set()
     this.hydrateInflight = new Map()
     this.lastPushed = {}
+    this._pendingAttachmentPatchByUid = new Map()
+    this._attachmentPatchIntentSeq = 0
     this.ackedUids = new Set()
     this.pendingUids = new Set()
     this.resetLocalIntentState()
@@ -5221,6 +5279,7 @@ class Cooperate {
     this.hydrateFailedUids = new Set()
     this.hydrateInflight = new Map()
     this.lastPushed = {}
+    this._pendingAttachmentPatchByUid && this._pendingAttachmentPatchByUid.clear()
     this.ackedUids = new Set()
     this.pendingUids = new Set()
     this.recentPushed = new Map()
@@ -5434,6 +5493,7 @@ class Cooperate {
 
   afterHttpReplace(result, treeOverride) {
     this.lastPushed = {}
+    this._pendingAttachmentPatchByUid && this._pendingAttachmentPatchByUid.clear()
     this.ackedUids = new Set()
     this.pendingUids = new Set()
     this.recentPushed = new Map()
@@ -5467,6 +5527,7 @@ class Cooperate {
 
   resyncHttpBaseline(tree) {
     this.lastPushed = {}
+    this._pendingAttachmentPatchByUid && this._pendingAttachmentPatchByUid.clear()
     this.ackedUids = new Set()
     this.pendingUids = new Set()
     this.recentPushed = new Map()
@@ -7658,7 +7719,16 @@ class Cooperate {
 
   hasUnsyncedLocalText(node) {
     if (!node) return false
-    return !!this.nodePatchPayload(node, { onlyChanged: true })
+    const uid = node.getData && node.getData('uid')
+    const attachmentPatchPending =
+      uid && this._pendingAttachmentPatchByUid &&
+      this._pendingAttachmentPatchByUid.has(uid)
+    return !!this.nodePatchPayload(node, {
+      onlyChanged: true,
+      forceGroups: attachmentPatchPending
+        ? [fieldGroupOf('attachmentId')]
+        : undefined
+    })
   }
 
   isHttpTextRendererReady() {
@@ -7699,6 +7769,13 @@ class Cooperate {
       const node = renderer.findNodeByUid(uid)
       if (node && this.hasUnsyncedLocalText(node)) byUid.set(uid, node)
     })
+    if (this._pendingAttachmentPatchByUid) {
+      this._pendingAttachmentPatchByUid.forEach((_revision, uid) => {
+        if (byUid.has(uid) || skipUid(uid)) return
+        const node = renderer.findNodeByUid(uid)
+        if (node && this.hasUnsyncedLocalText(node)) byUid.set(uid, node)
+      })
+    }
     return Array.from(byUid.values())
   }
 
@@ -7830,6 +7907,15 @@ class Cooperate {
     Object.keys(delta).forEach(field => {
       if (delta[field] === undefined) delete delta[field]
     })
+    if (Array.isArray(options.forceGroups) && options.forceGroups.length) {
+      keysForGroups(options.forceGroups).forEach(key => {
+        const value = data[key]
+        delta[key] =
+          value === undefined || value === null || value === ''
+            ? null
+            : collabGeneralization.snapshotValue(value)
+      })
+    }
     return Object.keys(delta).length ? delta : null
   }
 
@@ -7928,7 +8014,14 @@ class Cooperate {
       // them first returns NODE_DELETED and would drop the orphan incorrectly.
       if (!this.isPersistAcked(uid)) return
       const full = this.nodePatchPayload(node)
-      const delta = this.nodePatchPayload(node, { onlyChanged: true })
+      const attachmentPatchRevision = this._pendingAttachmentPatchByUid &&
+        this._pendingAttachmentPatchByUid.get(uid)
+      const delta = this.nodePatchPayload(node, {
+        onlyChanged: true,
+        forceGroups: attachmentPatchRevision
+          ? [fieldGroupOf('attachmentId')]
+          : undefined
+      })
       if (!delta) return
       // Skip a payload that is already in flight unchanged. Relying only on the
       // pending Set is not enough: an active node can be re-collected from
@@ -7937,7 +8030,7 @@ class Cooperate {
       if (this._inflightTextKeys && this._inflightTextKeys.get(uid) === deltaKey) return
       if(this.fillRepairGuards?.has(uid))delta.expected=this.fillRepairGuards.get(uid)
       const snap = JSON.stringify(full)
-      items.push({ uid, node, target, full, delta, snap, deltaKey })
+      items.push({ uid, node, target, full, delta, snap, deltaKey, attachmentPatchRevision })
     })
     if (!this._inflightTextKeys) this._inflightTextKeys = new Map()
     items.forEach(item => this._inflightTextKeys.set(item.uid, item.deltaKey))
@@ -7961,6 +8054,12 @@ class Cooperate {
             note: item.full.note,
             full: collabGeneralization.snapshotValue(item.full),
             snap: item.snap
+          }
+          if (
+            item.attachmentPatchRevision &&
+            this._pendingAttachmentPatchByUid.get(item.uid) === item.attachmentPatchRevision
+          ) {
+            this._pendingAttachmentPatchByUid.delete(item.uid)
           }
         })
         return true
@@ -7988,6 +8087,12 @@ class Cooperate {
               note: full.note,
               full: collabGeneralization.snapshotValue(full),
               snap
+            }
+            if (
+              item.attachmentPatchRevision &&
+              this._pendingAttachmentPatchByUid.get(uid) === item.attachmentPatchRevision
+            ) {
+              this._pendingAttachmentPatchByUid.delete(uid)
             }
           })
           .catch(err => {
@@ -8249,6 +8354,7 @@ class Cooperate {
       await this.httpInsertPromise
     } finally {
       this.httpInsertPromise = null
+      this.refreshCollapsedNodeCounts().catch(() => {})
     }
   }
 
@@ -8750,6 +8856,7 @@ class Cooperate {
   forgetHttpUid(uid) {
     if (!uid) return
     delete this.lastPushed[uid]
+    if (this._pendingAttachmentPatchByUid) this._pendingAttachmentPatchByUid.delete(uid)
     if (this.ackedUids) this.ackedUids.delete(uid)
     if (this.pendingUids) this.pendingUids.delete(uid)
     this.recentPushed.delete(uid)
@@ -8883,6 +8990,58 @@ class Cooperate {
     }
     walk(this.mindMap.renderer && this.mindMap.renderer.renderTree)
     return uids
+  }
+
+  // Count badges are read-only server projections. Structural events carry
+  // node content, but do not refresh cached totals on every collapsed ancestor.
+  // Fetch only badge owners and apply only counts; never replace edit baselines.
+  async refreshCollapsedNodeCounts() {
+    const renderer = this.mindMap && this.mindMap.renderer
+    if (this._disposed || !this.httpCollabMode || !this.collabV2Adapter ||
+      !this.httpFetchNodes || !renderer || !renderer.renderTree || this.httpInsertPromise) return false
+    const status = this.collabV2Adapter.getStatus && this.collabV2Adapter.getStatus()
+    if (status && (status.pendingCount || status.phase !== 'LIVE')) return false
+    const tree = renderer.renderTree
+    const indexed = indexTreeNodesByUid(tree)
+    const uids = Array.from(indexed).filter(([, node]) =>
+      node.data && node.data.expand === false &&
+      ((node.children || []).length || Number(node.data.childCount) > 0 ||
+        Number(node.data.descendantCount) > 0 || node.data.hasMore)
+    ).map(([uid]) => uid).sort()
+    if (!uids.length) return false
+    const scope = { tree, room: this.httpRoomKey, adapter: this.collabV2Adapter,
+      revision: Number(this.lastAppliedVersion) || 0, key: uids.join('|') }
+    const same = other => other && other.tree === tree && other.room === scope.room &&
+      other.adapter === scope.adapter && other.revision === scope.revision && other.key === scope.key
+    if (same(this._badgeCountRefreshDone)) return false
+    if (this._badgeCountRefreshPending) {
+      this._badgeCountRefreshPending.queued = true
+      return false
+    }
+    this._badgeCountRefreshPending = scope
+    try {
+      const nodes = await this.fetchHttpNodes(uids)
+      if (this._disposed || renderer !== this.mindMap.renderer || tree !== renderer.renderTree ||
+        scope.room !== this.httpRoomKey || scope.adapter !== this.collabV2Adapter ||
+        scope.revision !== (Number(this.lastAppliedVersion) || 0)) return false
+      nodes.forEach(item => {
+        const raw = indexed.get(item.uid)
+        if (!raw || !raw.data) return
+        const counts = item.data || {}
+        ;['childCount', 'descendantCount'].forEach(key => {
+          if (Number.isInteger(counts[key]) && counts[key] >= 0) raw.data[key] = counts[key]
+        })
+        const node = renderer.findNodeByUid(item.uid)
+        if (node && node.nodeData === raw && typeof node.updateExpandBtnNode === 'function') {
+          node.updateExpandBtnNode()
+        }
+      })
+      this._badgeCountRefreshDone = scope
+      return true
+    } finally {
+      if (this._badgeCountRefreshPending === scope) this._badgeCountRefreshPending = null
+      if (scope.queued && !this._disposed) this.refreshCollapsedNodeCounts().catch(() => {})
+    }
   }
 
   async fetchHttpNodes(uids) {

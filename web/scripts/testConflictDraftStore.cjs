@@ -36,6 +36,7 @@ const loadedModule = { exports: {} }
 new Function('require', 'module', 'exports', transformed)(
   id => {
     if (id === '@/api') return storage
+    if (id === '@/utils/conflictDraftPolicy') return require('./loadConflictTestUtility.cjs')('conflictDraftPolicy')
     throw new Error(`Unexpected import: ${id}`)
   },
   loadedModule,
@@ -86,6 +87,20 @@ async function nextTurn() {
 }
 
 async function main() {
+  const unchanged = input({ id: 'unchanged', revision: 1, text: 'same' })
+  unchanged.session.baseValues = { text: 'same' }
+  unchanged.session.baseVersions = { text: 3 }
+  const skipped = await store.persistConflictDraft(unchanged)
+  assert.strictEqual(skipped.unchanged, true)
+  assert.strictEqual(values.size, 0, 'unchanged baseline must not create a conflict draft')
+  const recoverable = input({ id: 'preserved', revision: 1, text: 'previous unsaved input' })
+  await store.persistConflictDraft(recoverable)
+  const next = input({ id: 'preserved', revision: 2, text: 'same' })
+  next.session.baseValues = { text: 'same' }
+  next.session.baseVersions = { text: 3 }
+  await store.persistConflictDraft(next)
+  assert.strictEqual([...values.values()][0].session.draft.text, 'previous unsaved input', 'suppression cannot delete an older persisted draft')
+  values.clear()
   const first = input({ revision: 1, text: '旧草稿' })
   const key = store.conflictDraftKey({
     principal: first.principal,

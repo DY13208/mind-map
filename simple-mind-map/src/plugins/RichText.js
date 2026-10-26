@@ -413,6 +413,8 @@ class RichText {
 
   // 隐藏文本编辑控件，即完成编辑
   hideEditText(nodes) {
+    // One click can reach several editor-exit handlers while awaiting ACK.
+    if (this._hideEditTextPromise) return this._hideEditTextPromise
     if (!this.showTextEdit) {
       return
     }
@@ -426,6 +428,8 @@ class RichText {
     const node = this.node
     const cooperate = this.mindMap && this.mindMap.cooperate
     const sessionId = this.editSessionId
+    const patch = { text: html, richText: true }
+    this.mindMap.emit('before_node_text_edit_commit', node, patch)
     const finish = editSessionSaved => {
       this.textEditNode.style.display = 'none'
       this.setIsShowTextEdit(false)
@@ -436,6 +440,7 @@ class RichText {
       if (!editSessionSaved) {
         list.forEach(target => {
           this.mindMap.execCommand('SET_NODE_TEXT', target, html, true)
+          if (Object.prototype.hasOwnProperty.call(patch, 'textMentions')) this.mindMap.execCommand('SET_NODE_DATA', target, { textMentions: patch.textMentions })
           this.mindMap.render()
         })
       }
@@ -465,10 +470,12 @@ class RichText {
         return Promise.resolve(false)
       }
       this.syncEditSessionDraft()
-      return cooperate
-        .commitEditSession(sessionId, { text: html, richText: true })
+      this._hideEditTextPromise = cooperate
+        .commitEditSession(sessionId, patch)
         .then(result => result && result.draftSaved === false ? false : finish(true))
         .catch(() => false)
+        .finally(() => { this._hideEditTextPromise = null })
+      return this._hideEditTextPromise
     }
     return finish(false)
   }
@@ -523,7 +530,7 @@ class RichText {
     if (!uid) return
     const session = cooperate.beginEditSession({
       uid,
-      fields: ['text', 'richText'],
+      fields: ['text', 'richText', 'textMentions'],
       kind: 'rich-text',
       initialDraft: { text: this.getEditText(), richText: true }
     })

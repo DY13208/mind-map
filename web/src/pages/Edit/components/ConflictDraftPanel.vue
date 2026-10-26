@@ -1,6 +1,6 @@
 <template>
-  <section class="conflictDraftPanel" role="alert">
-    <div class="draftStatus"><i class="el-icon-warning-outline" aria-hidden="true"></i><strong>{{ $t('editConflict.unsavedTitle') }}</strong></div>
+  <section class="conflictDraftPanel" role="region" :aria-label="$t('editConflict.unsavedTitle')">
+    <div class="draftStatus"><i class="el-icon-warning-outline" aria-hidden="true"></i><strong>{{ $t(presentation.kind === 'conflict' ? 'editConflict.state_conflict' : 'editConflict.unsavedTitle') }}</strong></div>
     <p class="draftExplanation">{{ messageText }}</p>
 
     <div class="draftSection">
@@ -14,6 +14,7 @@
     </div>
 
     <div class="draftActions">
+      <slot name="retry"></slot>
       <el-button type="text" size="mini" @click="toggleLatest">
         {{ showingLatest ? $t('editConflict.hideLatest') : $t('editConflict.viewLatest') }}
       </el-button>
@@ -33,6 +34,7 @@ import {
   formatConflictText,
   isConflictRichText
 } from '@/utils/conflictDraftDisplay'
+import { classifyConflictDraft } from '@/utils/conflictDraftPolicy'
 
 function dataOf(snapshot) {
   if (!snapshot || typeof snapshot !== 'object') return {}
@@ -58,16 +60,22 @@ export default {
     latest: { type: Object, default: null },
     persisted: { type: Boolean, default: false },
     storageError: { type: String, default: '' },
+    error: { type: Object, default: null },
     reason: { type: String, default: 'conflict' }
   },
   data() {
     return { showingLatest: false, copied: false }
   },
   computed: {
+    presentation() {
+      return classifyConflictDraft({ session: this.draft, error: this.error, reason: this.reason })
+    },
     fields() {
       const fields = this.draft && this.draft.fields
       const names = Array.isArray(fields) && fields.length ? fields : Object.keys((this.draft && this.draft.draft) || {})
-      return names.filter(field => field !== 'richText')
+      // Mention IDs and rich-text flags are saved metadata, not extra text to
+      // append to the user's recovered/copied content as an empty placeholder.
+      return names.filter(field => field !== 'richText' && field !== 'textMentions')
     },
     draftValues() {
       return (this.draft && this.draft.draft) || {}
@@ -79,12 +87,12 @@ export default {
       return this.formatValues(this.draftValues, this.fields, this.draft)
     },
     messageText() {
-      const error = this.draft && this.draft.conflict && this.draft.conflict.error
+      const error = this.error || (this.draft && this.draft.conflict && this.draft.conflict.error)
       if (error && error.code === 'PRECONDITION_REQUIRED') return this.$t('editConflict.missingBaseline')
       if (this.reason === 'operation_failed') return this.$t('editConflict.operationFailed')
-      return this.reason === 'save_failed'
-        ? this.$t('editConflict.saveFailed')
-        : this.$t('editConflict.message')
+      return error && error.code === 'REPLACE_CONFLICT'
+        ? this.$t('editConflict.message')
+        : this.$t('editConflict.saveFailed')
     }
   },
   methods: {

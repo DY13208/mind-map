@@ -19,13 +19,19 @@ RUN cd simple-mind-map && npm ci --omit=dev --omit=optional
 FROM deps AS build
 COPY web ./web
 COPY simple-mind-map ./simple-mind-map
+# headerMapping.js imports shared excel form rules from the file-kb service.
+# The frontend bundle needs that file at build time; it is not copied into the runtime image.
+COPY services/file-kb/src/shared ./services/file-kb/src/shared
 RUN rm -rf /src/web/node_modules/simple-mind-map \
   && cp -R /src/simple-mind-map /src/web/node_modules/simple-mind-map \
   && rm -rf /src/web/node_modules/simple-mind-map/node_modules
 WORKDIR /src/web
 ENV NODE_ENV=production
 ENV PUBLIC_PATH=/
-ENV NODE_OPTIONS=--openssl-legacy-provider
+# vue-cli treats CI as "fail on webpack warnings" (missing export, asset size).
+# Compose/CI hosts often inject CI=1 into the build; that must not fail the image.
+ENV CI=""
+ENV NODE_OPTIONS="--openssl-legacy-provider --max-old-space-size=4096"
 RUN npx vue-cli-service build --dest /out/web
 
 FROM node:20-bookworm-slim

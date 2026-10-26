@@ -56,6 +56,7 @@ import {
 import historyClipboard from '../../utils/historyClipboard'
 import remoteRenderScheduler from '../../utils/remoteRenderScheduler'
 import edgeGeometryModule from '../../utils/edgeGeometry'
+import { markCommand, markRemote } from '../../layouts/logicalPartialLayout'
 const edgeGeometry = edgeGeometryModule.boundsFromPath
   ? edgeGeometryModule
   : edgeGeometryModule.default
@@ -179,6 +180,10 @@ class Render {
     // 布局
     this.setLayout()
     // 绑定事件
+    // P3 局部布局：记录两次布局之间的脏节点；无法归类的命令使脏集失效
+    this.mindMap.on('beforeExecCommand', (name, ...args) =>
+      markCommand(this, name, args)
+    )
     this.bindEvent()
     // 注册命令
     this.registerCommands()
@@ -801,6 +806,7 @@ class Render {
   requestRemoteRender(uid, callback, source) {
     this.addRenderParams(callback, source)
     const uids = Array.isArray(uid) ? uid : uid == null ? [] : [uid]
+    markRemote(this, uids)
     uids.forEach(item => {
       if (item != null && String(item)) this._remoteRenderDirtyUids.add(String(item))
     })
@@ -978,8 +984,18 @@ class Render {
     return false
   }
 
-  rememberConnectorSpecs(node) {
-    if (!node || (node.getData && node.getData('expand') === false)) return
+  rememberConnectorSpecs(node, refreshGeometry = false) {
+    if (!node) return
+    if (node.getData && node.getData('expand') === false) {
+      if (refreshGeometry) node.removeLine()
+      node._connectorSpecs = []
+      return
+    }
+    // A structural edit can move a previously painted branch offscreen.
+    // Skipping its node DOM must not let the viewport index reuse old paths.
+    // Update existing connector slots only; unpainted branches still use
+    // geometry specs without allocating offscreen SVG paths.
+    if (refreshGeometry && (node._lines || []).length) node.renderLine()
     const live = node._lines || []
     if (live.length) {
       node._connectorSpecs = live
@@ -992,7 +1008,7 @@ class Render {
         .filter(Boolean)
       return
     }
-    if (node._connectorSpecs && node._connectorSpecs.length) return
+    if (!refreshGeometry && node._connectorSpecs && node._connectorSpecs.length) return
     const captured = edgeGeometry.captureNodeConnectors(node)
     node._connectorSpecs = captured.map(item => ({
       d: item.d,
@@ -1024,7 +1040,7 @@ class Render {
     const pinned = lazy ? this.collectPinnedViewportNodes() : null
     walkLayoutInSlices([this.root, null, node => {
       if (lazy && !this.shouldPaintNodeNow(node, viewport, pinned)) {
-        this.rememberConnectorSpecs(node)
+        this.rememberConnectorSpecs(node, true)
         return node.getData('expand') === false
       }
       node.render(() => {}, forceRender, false, true)
@@ -1565,6 +1581,23 @@ class Render {
     return true
   }
 
+  // Tab 和 Enter 共用子节点写入逻辑；index 未指定时追加到末尾。
+  insertChildNodeData(parent, newNode, index) {
+    if (!parent.nodeData.children) parent.nodeData.children = []
+    const children = parent.nodeData.children
+    if (index === undefined) children.push(newNode)
+    else children.splice(index, 0, newNode)
+    this.mindMap.command.recordContentChange?.({
+      added: [newNode],
+      countable: this.mindMap.command.isCountableNode(parent)
+    })
+    const prev = Number(parent.getData && parent.getData('childCount')) || 0
+    parent.setData({
+      expand: true,
+      childCount: Math.max(children.length, prev + 1)
+    })
+  }
+
   //  插入同级节点
   insertNode(
     openEdit = true,
@@ -1576,13 +1609,17 @@ class Render {
     if (this.activeNodeList.length <= 0 && appointNodes.length <= 0) {
       return
     }
-    const list = appointNodes.length > 0 ? appointNodes : this.activeNodeList
+    // 协同刷新和懒加载可能替换节点实例，按稳定 UID 定位当前节点。
+    const list = (appointNodes.length > 0 ? appointNodes : this.activeNodeList)
+      .map(node => node && this.findNodeByUid(getNodeUid(node)))
+      .filter(Boolean)
+    if (!list.length) return
     const parents = list.map(node => node && node.parent).filter(Boolean)
     if (
       this.runAfterHydrate(
         parents,
         () =>
-          this.insertNode(openEdit, appointNodes, appointData, appointChildren),
+          this.insertNode(openEdit, list, appointData, appointChildren),
         'INSERT_NODE'
       )
     ) {
@@ -1622,6 +1659,8 @@ class Render {
         : defaultInsertBelowSecondLevelNodeText
       // 计算插入位置
       const index = getNodeDataIndex(node)
+      // 定位失败不能把 -1 + 1 当作 0，否则新节点会被插到最上方。
+      if (index < 0) return
       // 如果指定的数据就是富文本格式，那么不需要重新创建
       if (alreadyIsRichText && params.resetRichText) {
         delete params.resetRichText
@@ -1637,8 +1676,7 @@ class Render {
         children: [...createUidForAppointNodes(appointChildren, createNewId)]
       }
       createNewId = true
-      parent.nodeData.children.splice(index + 1, 0, newNodeData)
-      this.mindMap.command.recordContentChange?.({ added: [newNodeData], countable: this.mindMap.command.isCountableNode(parent) })
+      this.insertChildNodeData(parent, newNodeData, index + 1)
     })
     // 如果同时对多个节点插入子节点，需要清除原来激活的节点
     if (focusNewNode) {
@@ -1761,14 +1799,7 @@ class Render {
         children: [...createUidForAppointNodes(appointChildren, createNewId)]
       }
       createNewId = true
-      node.nodeData.children.push(newNode)
-      this.mindMap.command.recordContentChange?.({ added: [newNode], countable: this.mindMap.command.isCountableNode(node) })
-      const live = node.nodeData.children.length
-      const prev = Number(node.getData && node.getData('childCount')) || 0
-      node.setData({
-        expand: true,
-        childCount: Math.max(live, prev + 1)
-      })
+      this.insertChildNodeData(node, newNode)
       if (node.isGeneralization && node.generalizationBelongNode) {
         node.generalizationBelongNode.createGeneralizationNode()
       }

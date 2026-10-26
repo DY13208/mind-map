@@ -474,7 +474,7 @@ export default class TextEdit {
     if (!uid) return
     const session = cooperate.beginEditSession({
       uid,
-      fields: ['text'],
+      fields: ['text', 'textMentions'],
       kind: 'text',
       initialDraft: { text: this.getEditText() }
     })
@@ -566,6 +566,9 @@ export default class TextEdit {
     if (this.mindMap.richText) {
       return this.mindMap.richText.hideEditText()
     }
+    // svg_mousedown / before_node_active / body_click can end the same edit
+    // before its asynchronous ACK arrives. Submit that edit only once.
+    if (this._hideEditTextPromise) return this._hideEditTextPromise
     if (!this.showTextEdit) {
       return
     }
@@ -574,6 +577,8 @@ export default class TextEdit {
     const text = trimNodeEditText(this.getEditText(), false)
     const cooperate = this.mindMap && this.mindMap.cooperate
     const sessionId = this.editSessionId
+    const patch = { text }
+    this.mindMap.emit('before_node_text_edit_commit', currentNode, patch)
     const finish = editSessionSaved => {
       this.currentNode = null
       this.editSessionId = null
@@ -587,6 +592,7 @@ export default class TextEdit {
       this.setIsShowTextEdit(false)
       if (!editSessionSaved) {
         this.mindMap.execCommand('SET_NODE_TEXT', currentNode, text)
+        if (Object.prototype.hasOwnProperty.call(patch, 'textMentions')) this.mindMap.execCommand('SET_NODE_DATA', currentNode, { textMentions: patch.textMentions })
         this.mindMap.render()
       }
       this.mindMap.emit(
@@ -618,10 +624,12 @@ export default class TextEdit {
         return Promise.resolve(false)
       }
       this.syncEditSessionDraft()
-      return cooperate
-        .commitEditSession(sessionId, { text })
+      this._hideEditTextPromise = cooperate
+        .commitEditSession(sessionId, patch)
         .then(result => result && result.draftSaved === false ? false : finish(true))
         .catch(() => false)
+        .finally(() => { this._hideEditTextPromise = null })
+      return this._hideEditTextPromise
     }
     return finish(false)
   }

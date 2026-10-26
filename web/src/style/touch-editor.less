@@ -66,6 +66,15 @@ body:has(.container.isTouchEditor) {
     }
     .authSection { margin: 0; padding: 0; border: 0; display: flex; justify-content: center; }
     .notificationBadge { margin: 0; }
+    .notificationButton { min-height: 44px; padding: 4px; }
+    // Keep the avatar's unread ring circular when enlarging its touch target.
+    .notificationBadge--avatar {
+      width: 44px; height: 44px; flex: 0 0 auto;
+      .notificationButton {
+        box-sizing: border-box; width: 44px; height: 44px; min-width: 44px;
+        padding: 6px;
+      }
+    }
     .notificationBadge--avatar { width: 32px; }
     .notificationBadge--avatar .notificationButton {
       width: 32px; min-width: 32px; min-height: 32px; height: 32px; padding: 0; box-sizing: border-box;
