@@ -687,7 +687,12 @@ export default {
       'Sub-map inserted: node should become a gray card with a purple icon; double-click to open editor (F2 to rename)',
     mirrorSavedTip:
       'Node located and subtree mirrored: expand and edit here; changes sync both ways with the source map',
-    mirrorLoading: 'Fetching target node subtree…',
+    mirrorSavedWithAttachments:
+      'Node located and subtree mirrored; also copied {n} artifact attachment(s)',
+    mirrorLoading: 'Fetching target node subtree and artifacts…',
+    mirrorCopyAttachments: 'Copying artifact attachments into this map…',
+    mirrorAttachmentFailed:
+      'Subtree synced, but artifact attachment copy failed: {err}',
     mirrorTruncated:
       'Target subtree is too large; synced the first {n} nodes (max depth 12); the rest were skipped',
     applyFailed: 'Insert failed; select the node and try again',

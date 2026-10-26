@@ -7,6 +7,7 @@ import {
   patchFileNode,
   deleteFileNode
 } from '@/utils/fileApi'
+import { copyNodeAttachments } from '@/utils/copyNodeAttachments'
 
 const MAX_MIRROR_NODES = 2000
 const POLL_MS = 2500
@@ -82,15 +83,9 @@ function ensureHostActive(mindMap, node) {
   }
 }
 
+// 保留 attachment*：引用子节点时要把产物附件一起带过来（跨房再物理复制）
 const STRIP_DATA_KEYS = [
   'mapRef',
-  'attachment',
-  'attachmentId',
-  'attachmentName',
-  'attachmentMime',
-  'attachmentSize',
-  'attachmentUrl',
-  'attachmentError',
   'comments',
   'comment',
   'imgMap',
@@ -98,6 +93,107 @@ const STRIP_DATA_KEYS = [
   'hasMore',
   '_mirrorOrigin'
 ]
+
+const ATTACHMENT_META_KEYS = [
+  'attachmentId',
+  'attachmentUrl',
+  'attachmentName',
+  'attachmentMime',
+  'attachmentMimeType',
+  'attachmentSize',
+  'attachmentStatus',
+  'attachmentError',
+  'attachmentExtractedText',
+  'attachmentProgress',
+  'attachmentErrorIgnored',
+  'attachment'
+]
+
+function pickAttachmentMeta(data) {
+  const src = data && typeof data === 'object' ? data : {}
+  const out = {}
+  ATTACHMENT_META_KEYS.forEach(key => {
+    if (src[key] != null && src[key] !== '') out[key] = src[key]
+  })
+  return out
+}
+
+function stripAttachmentMetaDeep(trees) {
+  const walk = list => {
+    ;(list || []).forEach(node => {
+      if (!node || !node.data) return
+      ATTACHMENT_META_KEYS.forEach(key => {
+        delete node.data[key]
+      })
+      if (node.children && node.children.length) walk(node.children)
+    })
+  }
+  walk(trees)
+  return trees
+}
+
+function countAttachmentNodes(trees) {
+  let n = 0
+  const walk = list => {
+    ;(list || []).forEach(node => {
+      if (!node || !node.data) return
+      if (node.data.attachmentId) n += 1
+      if (node.children && node.children.length) walk(node.children)
+    })
+  }
+  walk(trees)
+  return n
+}
+
+function currentRoomKey(mindMap) {
+  return String(
+    (mindMap && mindMap.cooperate && mindMap.cooperate.httpRoomKey) ||
+      (mindMap && mindMap.opt && (mindMap.opt.roomKey || mindMap.opt.room_key)) ||
+      ''
+  ).trim()
+}
+
+/**
+ * 把源房附件复制到当前房，并改写树上的 attachmentId。
+ * 失败时剥掉附件字段，避免指向源房失效 ID。
+ */
+async function transferTreeAttachments(
+  trees,
+  sourceRoom,
+  destRoom,
+  onTransferStart
+) {
+  const list = Array.isArray(trees) ? trees : trees ? [trees] : []
+  if (!list.length) {
+    return { trees: list, copied: 0, error: '' }
+  }
+  const src = String(sourceRoom || '').trim()
+  const dest = String(destRoom || '').trim()
+  if (!src || !dest || src === dest) {
+    return { trees: list, copied: countAttachmentNodes(list), error: '' }
+  }
+  const before = countAttachmentNodes(list)
+  if (!before) return { trees: list, copied: 0, error: '' }
+  try {
+    const copiedTrees = await copyNodeAttachments(
+      { data: list, sourceRoom: src },
+      dest,
+      onTransferStart
+    )
+    return {
+      trees: copiedTrees,
+      copied: countAttachmentNodes(copiedTrees),
+      error: ''
+    }
+  } catch (err) {
+    stripAttachmentMetaDeep(list)
+    return {
+      trees: list,
+      copied: 0,
+      error: (err && err.message) || '附件复制失败'
+    }
+  }
+}
 
 function stripHtml(text) {
   return String(text || '')
@@ -186,7 +282,13 @@ export function buildRemappedChildren(peerTree, hostUid, peerRootUid) {
   ).trim()
   const host = String(hostUid || '').trim()
   if (!host || !rootPeerUid || !peerTree) {
-    return { children: [], uidMap, rootText: '', rootNote: '' }
+    return {
+      children: [],
+      uidMap,
+      rootText: '',
+      rootNote: '',
+      rootAttachment: {}
+    }
   }
   uidMap[host] = rootPeerUid
 
@@ -217,7 +319,8 @@ export function buildRemappedChildren(peerTree, hostUid, peerRootUid) {
     children,
     uidMap,
     rootText: stripHtml(peerTree.data && peerTree.data.text) || '',
-    rootNote: String((peerTree.data && peerTree.data.note) || '')
+    rootNote: String((peerTree.data && peerTree.data.note) || ''),
+    rootAttachment: pickAttachmentMeta(peerTree.data)
   }
 }
 
@@ -321,11 +424,49 @@ export async function implantMirrorSubtree({
 
   if (typeof onProgress === 'function') onProgress('fetch')
   const fetched = await fetchMirrorTree(ref.mapId, ref.nodeId)
-  const { children, uidMap, rootText, rootNote } = buildRemappedChildren(
-    fetched.tree,
-    hostUid,
-    ref.nodeId
-  )
+  let {
+    children,
+    uidMap,
+    rootText,
+    rootNote,
+    rootAttachment
+  } = buildRemappedChildren(fetched.tree, hostUid, ref.nodeId)
+
+  const destRoom = currentRoomKey(mindMap)
+  let attachmentCopied = 0
+  let attachmentError = ''
+  if (typeof onProgress === 'function') onProgress('attachments')
+  // 子树产物：跨房复制附件文件，改写为当前房 attachmentId
+  {
+    const transferred = await transferTreeAttachments(
+      children,
+      ref.mapId,
+      destRoom,
+      () => typeof onProgress === 'function' && onProgress('attachments')
+    )
+    children = transferred.trees
+    attachmentCopied += transferred.copied
+    if (transferred.error) attachmentError = transferred.error
+  }
+  // 定位根自身若挂了产物，一并复制到宿主节点
+  if (rootAttachment && rootAttachment.attachmentId) {
+    const rootShell = [{ data: { ...rootAttachment }, children: [] }]
+    const transferred = await transferTreeAttachments(
+      rootShell,
+      ref.mapId,
+      destRoom,
+      () => typeof onProgress === 'function' && onProgress('attachments')
+    )
+    rootAttachment = pickAttachmentMeta(
+      transferred.trees[0] && transferred.trees[0].data
+    )
+    attachmentCopied += transferred.copied
+    if (transferred.error && !attachmentError) {
+      attachmentError = transferred.error
+    }
+  } else {
+    rootAttachment = {}
+  }
 
   const nextRef = {
     mapId: ref.mapId,
@@ -362,9 +503,19 @@ export async function implantMirrorSubtree({
       fontWeight: 'normal',
       paddingX: 10,
       paddingY: 8,
-      expand: true
+      expand: true,
+      ...rootAttachment
     })
     mindMap.execCommand('SET_NODE_MAP_REF', node, nextRef)
+    if (rootAttachment && rootAttachment.attachmentId) {
+      mindMap.execCommand(
+        'SET_NODE_ATTACHMENT',
+        node,
+        rootAttachment.attachmentUrl || '',
+        rootAttachment.attachmentName || '',
+        rootAttachment
+      )
+    }
 
     if (children.length) {
       if (typeof onProgress === 'function') onProgress('insert')
@@ -391,7 +542,9 @@ export async function implantMirrorSubtree({
       mapRef: nextRef,
       truncated: fetched.truncated,
       nodeCount: fetched.nodeCount,
-      childCount: children.length
+      childCount: children.length,
+      attachmentCopied,
+      attachmentError
     }
   })
 }
@@ -853,8 +1006,15 @@ export class MapRefMirrorSync {
       }
 
       if (!localNode) {
-        const tree = this._remapPeerSubtree(peerChild, reverse, host, 0)
+        let tree = this._remapPeerSubtree(peerChild, reverse, host, 0)
         if (!tree) continue
+        // poll 拉到的新节点若带产物，同样复制到当前房
+        const transferred = await transferTreeAttachments(
+          [tree],
+          host.ref && host.ref.mapId,
+          currentRoomKey(this.mindMap)
+        )
+        tree = (transferred.trees && transferred.trees[0]) || tree
         ensureHostActive(this.mindMap, localParent)
         markInsertingTree([tree])
         this.mindMap.execCommand(
