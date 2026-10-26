@@ -106,3 +106,5 @@ output/*.py
 !/simple-mind-map/test/roomAclStartup.pg.test.js
 !/services/file-kb/test/direct-links.test.js
 !/web/tests/kbDirectLink.test.cjs
+!/services/file-kb/test/download-url.test.js
+!/services/file-kb-mcp/test/download-url.test.mjs

@@ -69,12 +69,15 @@ export function createSessionAuth(queryable) {
         try {
           await query('update kb.mcp_tokens set last_used_at = now() where token_hash = $1 and revoked_at is null', [tokenHash])
         } catch (_) { /* last-used is informational */ }
-        // The MCP server is read-only: write/admin scopes are dropped, geekcloud:read is kept.
+        // File mutations stay unavailable. kb:read also permits short-lived
+        // original-file download links; write/admin scopes are dropped.
         return {
           id: String(tokenRow.user_id),
           corpId: tokenRow.corp_id || '',
           name: tokenRow.name || String(tokenRow.user_id),
           via: 'token',
+          tokenHash,
+          tokenExpiresAt: tokenRow.expires_at || null,
           scopes: scopes.filter(s => s === 'kb:read' || s === 'geekcloud:read'),
           scopeFolderIds: tokenRow.scope_folder_ids || null
         }

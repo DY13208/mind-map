@@ -4,6 +4,7 @@ name: mind-map
 x-file-kb-env: &file-kb-env
   FILE_KB_ENABLED: ${FILE_KB_ENABLED:-false}
   FILE_KB_PORT: "18800"
+  FILE_KB_PUBLIC_BASE_URL: ${FILE_KB_PUBLIC_BASE_URL:-}
   PGHOST: postgres
   PGPORT: "5432"
   PGDATABASE: ${PGDATABASE:-mind_map}
@@ -456,6 +457,7 @@ services:
       <<: *file-kb-geekcloud-env
       FILE_KB_ENABLED: ${FILE_KB_ENABLED:-false}
       FILE_KB_MCP_PORT: "18801"
+      FILE_KB_PUBLIC_BASE_URL: ${FILE_KB_PUBLIC_BASE_URL:-}
       PGHOST: postgres
       PGPORT: "5432"
       PGDATABASE: ${PGDATABASE:-mind_map}
