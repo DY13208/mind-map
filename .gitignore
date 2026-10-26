@@ -112,6 +112,9 @@ output/*.py
 !/web/tests/kbDirectLink.test.cjs
 /output/
 
+!/web/tests/kbBatchPermissions.test.cjs
+!/services/file-kb/test/download-url.test.js
+!/services/file-kb-mcp/test/download-url.test.mjs
 
 # 环境配置与备份
 .env

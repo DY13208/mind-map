@@ -52,6 +52,7 @@ const TOOL_FIELDS = {
     pageSize: z.number().int().optional()
   },
   get_knowledge_document: { fileId: z.string() },
+  get_knowledge_download_url: { fileId: z.string().uuid() },
   read_knowledge_document: {
     fileId: z.string(),
     cursor: z.string().optional(),
@@ -86,7 +87,7 @@ function toolFail(err) {
   return { isError: true, content: [{ type: 'text', text: JSON.stringify(body) }], structuredContent: body }
 }
 
-export function createFileKbMcpServer({ query, callTool = callToolImpl, geekcloud = null, smartQuery = smartQueryImpl } = {}) {
+export function createFileKbMcpServer({ query, callTool = callToolImpl, geekcloud = null, smartQuery = smartQueryImpl, publicBaseUrl = process.env.FILE_KB_PUBLIC_BASE_URL } = {}) {
   const server = new McpServer({ name: 'file-kb', version: '0.1.0' })
   for (const tool of TOOLS) {
     const shape = TOOL_FIELDS[tool.name]
@@ -95,7 +96,7 @@ export function createFileKbMcpServer({ query, callTool = callToolImpl, geekclou
       const user = requestUser.getStore()
       if (!user) return toolFail(Object.assign(new Error('unauthorized'), { code: 'unauthorized' }))
       try {
-        return toolOk(await callTool({ query }, user, tool.name, args || {}))
+        return toolOk(await callTool({ query }, user, tool.name, args || {}, { publicBaseUrl }))
       } catch (err) {
         return toolFail(err)
       }
@@ -153,7 +154,7 @@ function readJson(req, limit = 1024 * 1024) {
   })
 }
 
-export function createMcpHttpServer({ enabled = true, authenticate, query, callTool, geekcloud = null, smartQuery } = {}) {
+export function createMcpHttpServer({ enabled = true, authenticate, query, callTool, geekcloud = null, smartQuery, publicBaseUrl = process.env.FILE_KB_PUBLIC_BASE_URL } = {}) {
   const sessions = new Map()
   return http.createServer(async (req, res) => {
     setCors(res)
@@ -203,7 +204,7 @@ export function createMcpHttpServer({ enabled = true, authenticate, query, callT
           transport.onclose = () => {
             if (transport.sessionId) sessions.delete(transport.sessionId)
           }
-          const server = createFileKbMcpServer({ query, callTool, geekcloud, smartQuery })
+          const server = createFileKbMcpServer({ query, callTool, geekcloud, smartQuery, publicBaseUrl })
           await server.connect(transport)
         }
         if (!entry) {

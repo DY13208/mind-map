@@ -129,6 +129,8 @@ function createAuthenticator({ query, ttlMs = 0, maxEntries = 5000, superAdminId
       corpId: row.corp_id || '',
       name: row.name || String(row.user_id),
       via: 'token',
+      tokenHash: sha256(raw),
+      tokenExpiresAt: row.expires_at || null,
       scopes,
       scopeFolderIds: row.scope_folder_ids || null
     }

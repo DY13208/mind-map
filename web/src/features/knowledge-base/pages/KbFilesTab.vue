@@ -3,7 +3,7 @@
     <button v-if="isMobileViewport && foldersOpen" class="kb-folder-backdrop" aria-label="关闭文件夹面板" tabindex="-1" @click="closeFolders" />
     <aside v-show="!isMobileViewport || foldersOpen" class="kb-card kb-files-side" :role="isMobileViewport ? 'dialog' : null" :aria-modal="isMobileViewport ? 'true' : null" aria-label="文件夹导航" @keydown="onFolderKeydown">
       <button v-if="isMobileViewport" class="kb-folder-close" aria-label="关闭文件夹面板" @click="closeFolders"><i class="el-icon-close" /></button>
-      <KbFolderTree ref="tree" v-model="folderId" @path="onFolderPath" @acl="openAcl" />
+      <KbFolderTree ref="tree" v-model="folderId" @path="onFolderPath" @acl="openAcl" @batch-acl="openBatchAcl('folder', $event)" />
     </aside>
     <section class="kb-files-main">
       <div class="kb-card">
@@ -50,6 +50,7 @@
             @acl="f => openAcl({ type: 'file', id: f.id, name: f.name || f.fileName })"
             @batch-reparse="reparse"
             @batch-delete="remove"
+            @batch-acl="openBatchAcl('file', $event)"
           />
           <KbCursorPager
             v-if="!isMobileViewport || mobileShowAll"
@@ -66,6 +67,7 @@
       </div>
     </section>
     <KbPermissionDialog :visible.sync="aclVisible" :target="aclTarget" />
+    <KbBatchPermissionDialog :visible.sync="batchAclVisible" :targets="batchAclTargets" />
     <KbBatchDrawer
       ref="drawer"
       :visible="batchesVisible"
@@ -90,6 +92,7 @@ import KbFileTable from '../components/KbFileTable.vue'
 import KbStateBlock from '../components/KbStateBlock.vue'
 import KbCursorPager from '../components/KbCursorPager.vue'
 import KbPermissionDialog from '../components/KbPermissionDialog.vue'
+import KbBatchPermissionDialog from '../components/KbBatchPermissionDialog.vue'
 import KbBatchDrawer from '../components/KbBatchDrawer.vue'
 import mobileViewport from '@/utils/mobileViewport'
 // 大数据量策略：服务端 keyset 分页（每页固定 50 条，DOM 只渲染当前页）；
@@ -97,12 +100,13 @@ import mobileViewport from '@/utils/mobileViewport'
 export default {
   name: 'KbFilesTab',
   mixins: [mobileViewport],
-  components: { KbFolderTree, KbUploadPanel, KbFileTable, KbStateBlock, KbCursorPager, KbPermissionDialog, KbBatchDrawer },
+  components: { KbFolderTree, KbUploadPanel, KbFileTable, KbStateBlock, KbCursorPager, KbPermissionDialog, KbBatchPermissionDialog, KbBatchDrawer },
   data() {
     return {
       folderId: '', folderPath: [], files: [], total: null, limit: DEFAULT_LIMIT, q: '', status: '',
       cursor: createCursorState(), loading: false, loaded: false, error: null, showUpload: false,
       aclVisible: false, aclTarget: null, statuses: FILE_STATUS, reqSeq: 0, localActiveBatches: [],
+      batchAclVisible: false, batchAclTargets: [],
       foldersOpen: false, mobileShowAll: false
     }
   },
@@ -221,6 +225,11 @@ export default {
     openAcl(t) {
       this.aclTarget = t
       this.aclVisible = true
+    },
+    openBatchAcl(type, rows) {
+      if (!rows.length) return
+      this.batchAclTargets = rows.map(row => ({ type, id: row.id, name: row.name || row.fileName }))
+      this.batchAclVisible = true
     },
     async reparse(list) {
       const results = await Promise.allSettled(list.map(f => kbApi.reparseFile(f.id)))
