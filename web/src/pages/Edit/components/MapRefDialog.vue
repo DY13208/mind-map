@@ -73,11 +73,21 @@
         >
           <div class="title">{{ $t('mapRef.wholeMap') }}</div>
         </div>
+        <div v-if="nodesLoading" class="empty">{{ $t('other.loading') }}</div>
+        <div
+          v-else-if="!nodeHits.length && !nodeQuery"
+          class="empty"
+        >{{ $t('mapRef.emptyNodes') }}</div>
+        <div
+          v-else-if="!nodeHits.length && nodeQuery"
+          class="empty"
+        >{{ $t('mapRef.emptyNodeSearch', { q: nodeQuery }) }}</div>
         <div
           v-for="hit in nodeHits"
           :key="hit.uid"
-          class="fileItem"
+          class="fileItem nodeItem"
           :class="{ active: selectedNode && selectedNode.uid === hit.uid }"
+          :style="{ paddingLeft: 12 + (hit.depth || 0) * 14 + 'px' }"
           @click.stop="selectedNode = hit"
           @dblclick.stop.prevent="pickNodeAndConfirm(hit)"
         >
@@ -97,9 +107,36 @@
 
 <script>
 import { mapState } from 'vuex'
-import { listFiles, searchFile } from '@/utils/fileApi'
+import { getFilePreview, listFiles, searchFile } from '@/utils/fileApi'
 import { roomFromLocation } from '@/utils/roomLocation'
 import { normalizeMapRef } from '@/utils/mapRefNav'
+
+const NODE_PREVIEW_DEPTH = 4
+const NODE_PREVIEW_MAX = 400
+
+/** 预览树 → 可选扁平列表（跳过根，从一级主题开始） */
+function flattenPreviewTree(tree, depth = 0, out = [], limit = NODE_PREVIEW_MAX, skipSelf = false) {
+  if (!tree || !tree.data || out.length >= limit) return out
+  const children = Array.isArray(tree.children) ? tree.children : []
+  if (skipSelf || tree.data.isRoot) {
+    children.forEach(child =>
+      flattenPreviewTree(child, 0, out, limit, false)
+    )
+    return out
+  }
+  const uid = String(tree.data.uid || '').trim()
+  if (uid) {
+    out.push({
+      uid,
+      text: stripHtml(tree.data.text) || uid,
+      depth
+    })
+  }
+  children.forEach(child =>
+    flattenPreviewTree(child, depth + 1, out, limit, false)
+  )
+  return out
+}
 
 function stripHtml(text) {
   return String(text || '')
@@ -148,6 +185,9 @@ export default {
       bindMode: 'map',
       nodeQuery: '',
       nodeHits: [],
+      nodeBrowse: [],
+      nodesLoading: false,
+      nodeLoadGen: 0,
       selectedNode: null,
       fileTimer: null,
       nodeTimer: null,
@@ -178,6 +218,13 @@ export default {
     fileQuery() {
       if (this.fileTimer) clearTimeout(this.fileTimer)
       this.fileTimer = setTimeout(this.loadFiles, 200)
+    },
+    bindMode(mode) {
+      if (mode === 'node' && this.selected) this.ensureNodeBrowse()
+      if (mode !== 'node') {
+        this.nodeQuery = ''
+        this.nodeHits = []
+      }
     }
   },
   methods: {
@@ -230,6 +277,8 @@ export default {
       this.fileQuery = ''
       this.nodeQuery = ''
       this.nodeHits = []
+      this.nodeBrowse = []
+      this.nodesLoading = false
       this.selected = null
       this.loadFiles().then(() => {
         if (existing) {
@@ -239,6 +288,7 @@ export default {
               room_key: existing.mapId,
               title: existing.mapId
             })
+          if (this.bindMode === 'node') this.ensureNodeBrowse()
         }
       })
     },
@@ -264,7 +314,9 @@ export default {
       this.selected = normalizeFileItem(item)
       this.selectedNode = null
       this.nodeHits = []
+      this.nodeBrowse = []
       this.nodeQuery = ''
+      if (this.bindMode === 'node') this.ensureNodeBrowse()
     },
     confirmMap(item) {
       this.selectMap(item)
@@ -278,19 +330,73 @@ export default {
       if (this.nodeTimer) clearTimeout(this.nodeTimer)
       this.nodeTimer = setTimeout(this.searchNodes, 250)
     },
+    async ensureNodeBrowse() {
+      if (!this.selected || this.bindMode !== 'node') return
+      const roomKey = fileKey(this.selected)
+      if (!roomKey) return
+      const gen = ++this.nodeLoadGen
+      this.nodesLoading = true
+      if (!this.nodeQuery) this.nodeHits = []
+      try {
+        const data = await getFilePreview(roomKey, NODE_PREVIEW_DEPTH, {
+          timeoutMs: 12000
+        })
+        if (gen !== this.nodeLoadGen) return
+        this.nodeBrowse = flattenPreviewTree(
+          data && data.tree,
+          0,
+          [],
+          NODE_PREVIEW_MAX,
+          true
+        )
+        if (!this.nodeQuery) this.nodeHits = this.nodeBrowse.slice()
+      } catch (err) {
+        if (gen !== this.nodeLoadGen) return
+        this.nodeBrowse = []
+        if (!this.nodeQuery) this.nodeHits = []
+      } finally {
+        if (gen === this.nodeLoadGen) this.nodesLoading = false
+      }
+    },
     async searchNodes() {
-      if (!this.selected || !this.nodeQuery) {
+      if (!this.selected) {
         this.nodeHits = []
         return
       }
+      const q = String(this.nodeQuery || '').trim()
+      if (!q) {
+        // 清空搜索：回到已加载的节点树
+        this.nodeHits = this.nodeBrowse.slice()
+        if (!this.nodeBrowse.length && !this.nodesLoading) this.ensureNodeBrowse()
+        return
+      }
+      // 先本地过滤已加载树，立刻可见；再补一次服务端搜索兜底深节点
+      const lower = q.toLowerCase()
+      const local = this.nodeBrowse.filter(
+        hit =>
+          String(hit.text || '')
+            .toLowerCase()
+            .includes(lower) ||
+          String(hit.uid || '')
+            .toLowerCase()
+            .includes(lower)
+      )
+      this.nodeHits = local
       try {
-        const data = await searchFile(fileKey(this.selected), this.nodeQuery, 20)
-        this.nodeHits = (data.matches || []).map(hit => ({
-          ...hit,
-          text: stripHtml(hit.text) || hit.uid
-        }))
+        const data = await searchFile(fileKey(this.selected), q, 40)
+        if (String(this.nodeQuery || '').trim() !== q) return
+        const seen = new Set(local.map(hit => hit.uid))
+        const remote = (data.matches || [])
+          .map(hit => ({
+            uid: hit.uid,
+            text: stripHtml(hit.text) || hit.uid,
+            depth: 0
+          }))
+          .filter(hit => hit.uid && !seen.has(hit.uid))
+        this.nodeHits = local.concat(remote)
       } catch (err) {
-        this.nodeHits = []
+        if (String(this.nodeQuery || '').trim() !== q) return
+        if (!local.length) this.nodeHits = []
       }
     },
     async confirm() {
@@ -374,6 +480,14 @@ export default {
     border: 1px solid #dcdfe6;
     border-radius: 8px;
     background: #fff;
+  }
+
+  .nodeList {
+    max-height: 320px;
+  }
+
+  .nodeItem .title {
+    font-weight: 400;
   }
 
   .fileItem {
