@@ -29,6 +29,7 @@
           <el-dropdown-menu slot="dropdown">
             <el-dropdown-item command="open" icon="el-icon-document">查看解析</el-dropdown-item>
             <el-dropdown-item command="data" icon="el-icon-s-grid">查看数据</el-dropdown-item>
+            <el-dropdown-item command="direct-link" icon="el-icon-link">免登录直链</el-dropdown-item>
             <el-dropdown-item command="select" icon="el-icon-check">{{ selection.some(f => f.id === row.id) ? '取消选择' : '选择文件' }}</el-dropdown-item>
             <el-dropdown-item command="reparse">重新解析</el-dropdown-item><el-dropdown-item command="acl">权限设置</el-dropdown-item><el-dropdown-item command="delete" divided>删除</el-dropdown-item>
           </el-dropdown-menu>
@@ -65,9 +66,10 @@
         <template slot-scope="{ row }">
           <el-button type="text" size="mini" icon="el-icon-document" @click="$emit('open', row)">解析</el-button>
           <el-button type="text" size="mini" icon="el-icon-s-grid" @click="$emit('data', row)">数据</el-button>
-          <el-dropdown trigger="click" size="small" @command="c => $emit(c, row)">
+          <el-dropdown trigger="click" size="small" @command="c => mobileCommand(c, row)">
             <el-button type="text" size="mini" icon="el-icon-more" aria-label="更多" />
             <el-dropdown-menu slot="dropdown" :visible-arrow="false">
+              <el-dropdown-item command="direct-link" icon="el-icon-link">免登录直链</el-dropdown-item>
               <el-dropdown-item command="reparse" icon="el-icon-refresh-right">重新解析</el-dropdown-item>
               <el-dropdown-item command="acl" icon="el-icon-lock">权限设置</el-dropdown-item>
               <el-dropdown-item command="delete" icon="el-icon-delete">删除</el-dropdown-item>
@@ -76,20 +78,22 @@
         </template>
       </el-table-column>
     </el-table>
+    <KbDirectLinkDialog :visible.sync="linkVisible" :file="linkFile" />
   </div>
 </template>
 <script>
 import BatchActionBar from '@/pages/ProductShell/components/BatchActionBar.vue'
 import mobileViewport from '@/utils/mobileViewport'
 import KbStatusTag from './KbStatusTag.vue'
+import KbDirectLinkDialog from './KbDirectLinkDialog.vue'
 import { formatSize, formatTime, fileKind } from '../utils/format'
 export default {
   name: 'KbFileTable',
   mixins: [mobileViewport],
-  components: { BatchActionBar, KbStatusTag },
+  components: { BatchActionBar, KbStatusTag, KbDirectLinkDialog },
   props: { files: { type: Array, default: () => [] } },
   data() {
-    return { selection: [] }
+    return { selection: [], linkVisible: false, linkFile: null }
   },
   methods: {
     badgeOf(row) {
@@ -102,6 +106,7 @@ export default {
     },
     mobileCommand(command, row) {
       if (command === 'select') this.toggleMobile(row, !this.selection.some(f => f.id === row.id))
+      else if (command === 'direct-link') { this.linkFile = row; this.linkVisible = true }
       else this.$emit(command, row)
     },
     toggleMobile(row, selected) { this.selection = this.selection.filter(f => f.id !== row.id); if (selected) this.selection.push(row) },

@@ -54,6 +54,10 @@
 | POST | /files/:id/structure | restructureFile | `{sheets:[{sheet,headerRows,dataStartRow,columnOverrides}]}`，前端只发 `columnOverrides`（只含用户明确改过的列 `{index,name}`），不再发旧的 `columns` 快照 | 202 `{id,status,runId,jobId}`。只重新结构化，不调用 Docling，不改原始文件。表头行必须早于数据起始行，否则 400 `bad_layout`。低置信度的自动结果不会替换当前有效版本 |
 | GET | /files/:id/blocks | getBlocks | `limit&cursor` | `{items:[{id,seq,type,text,page,bbox,sheet,row,cell,headingPath}],next_cursor,runId,status?}`。`bbox` 为 0–1 的 `[x0,y0,x1,y1]` |
 | GET | /files/:id/raw | rawUrl / getRaw | – | 原文件字节。无权限 404 `missing`。对象丢失 410 `object_missing` |
+| POST | /files/:id/direct-links | createDirectLink | `{expiresInDays?:0..365}` | 有文件查看权限即可生成，不要求 manager。默认 7 天，0 为永久。201 `{id,url,createdAt,expiresAt,revokedAt}`；完整 URL 路径仅生成时返回，前端用当前访问源拼绝对地址 |
+| GET | /files/:id/direct-links | listDirectLinks | – | `{items:[{id,createdAt,expiresAt,revokedAt}]}`，只返回当前用户为该文件生成的链接，不返回令牌或哈希；保留全部记录以便撤销旧链接 |
+| DELETE | /files/:id/direct-links/:linkId | revokeDirectLink | – | 仅生成者可撤销自己的链接，`{id,revoked:true}`。允许生成者在失去文件查看权限后撤销 |
+| GET / HEAD | /public/files/:token/:filename | – | – | 唯一免登录文件接口，直接返回原文件字节。每次验证令牌、有效期、撤销状态以及生成者当前查看权限和原文件夹范围。失效或文件删除均返回 404 `missing`。其它接口仍要求登录 |
 | GET | /fields | listFields | `file_id` 必填 | `{fields:[{key,label,type,sheet,column,colIndex,inferredType,headerRow,confidence,confirmed,tableIndex}]}`。未选文件时前端不请求 |
 | GET | /records | listRecords | `file_id?&limit&cursor&filters` | `{items:[{id,fileId,fileName,sheet,row,data,sku,price,stock,recordDate,source}],next_cursor,total}`。`row` 为表格行号 |
 | GET | /search | search | `q` 必填，`mode=hybrid\|keyword\|semantic`，`folder_id?&limit&cursor` | `{items:[{fileId,fileName,blockId,page,sheet,row,snippet,score,source}],next_cursor,total}`。`semantic` 为 501 `not_implemented`，不返回假命中 |
