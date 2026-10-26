@@ -176,6 +176,24 @@ body:has(.container.isTouchEditor) {
   .searchContainer { left: 8px; max-width: calc(100vw - 16px); transform: translateX(calc(-100% - 24px)); &.show { transform: none; } }
   .contextmenuContainer .item, .contextmenuContainer .submenu .item { min-height: 44px; height: auto; }
   .contextmenuContainer .desc { display: none; }
+  .contextmenuContainer .menuScroll,
+  .contextmenuContainer .submenu {
+    touch-action: pan-y;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    &::-webkit-scrollbar { display: none; width: 0; height: 0; }
+  }
+}
+.container.isTouchEditor {
+  .contextmenuContainer .menuScroll,
+  .contextmenuContainer .submenu {
+    touch-action: pan-y;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    &::-webkit-scrollbar { display: none; width: 0; height: 0; }
+  }
 }
 .mobileEditorMenu {
   position: fixed; right: max(12px, env(safe-area-inset-right)); bottom: calc(100vh - var(--mm-viewport-height) - var(--mm-viewport-top) + max(12px, env(safe-area-inset-bottom)));
