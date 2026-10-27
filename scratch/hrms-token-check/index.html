@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>换票试验</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <main class="sheet">
+    <div class="kicker">
+      <span>01 / 临时试验台</span>
+      <span class="stamp">用完即弃</span>
+    </div>
+    <h1>换一张人事令牌</h1>
+    <p class="lede">这一页不在脑图里。它用你填的交换密钥和当前浏览器里的人事系统 sid，直接请求 <code>issue_token</code>。令牌只留在这个浏览器标签，不写进脑图。</p>
+    <form id="form">
+      <label>
+        <span>HRMS_API_BASE</span>
+        <input name="base" value="https://xx.stillgroup.net:8088" autocomplete="off" required />
+      </label>
+      <div class="row">
+        <label>
+          <span>EXTERNAL_API_EXCHANGE_KEY</span>
+          <input name="exchangeKey" type="password" autocomplete="off" placeholder="对方给的 32–512 字符密钥" required />
+        </label>
+        <label>
+          <span>client_name</span>
+          <input name="clientName" value="WCPD" required />
+        </label>
+      </div>
+      <label>
+        <span>Cookie sid</span>
+        <input name="sid" autocomplete="off" placeholder="登录人事系统后，从 Cookie 里复制 sid" required />
+      </label>
+      <div class="actions">
+        <button type="submit" id="go">换票</button>
+        <a class="link secondary" href="/call.html">去调用接口</a>
+      </div>
+    </form>
+    <section class="result">
+      <div id="badge" class="badge wait">还没请求</div>
+      <pre id="out">等待换票。</pre>
+    </section>
+  </main>
+  <script>
+    const form = document.querySelector('#form')
+    const badge = document.querySelector('#badge')
+    const out = document.querySelector('#out')
+    const button = document.querySelector('#go')
+    const saved = JSON.parse(sessionStorage.getItem('hrmsProbe') || '{}')
+    if (saved.base) form.base.value = saved.base
+    if (saved.clientName) form.clientName.value = saved.clientName
+
+    form.addEventListener('submit', async event => {
+      event.preventDefault()
+      button.disabled = true
+      badge.className = 'badge wait'
+      badge.textContent = '正在换票'
+      out.textContent = '已发出 issue_token，等待人事系统。'
+      const input = Object.fromEntries(new FormData(form))
+      try {
+        const response = await fetch('/exchange', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(input)
+        })
+        const data = await response.json()
+        if (!response.ok || !data.ok || !data.token) {
+          badge.className = 'badge bad'
+          badge.textContent = '换票失败 ' + (data.status || response.status)
+          out.textContent = data.detail || data.error || JSON.stringify(data, null, 2)
+          return
+        }
+        sessionStorage.setItem('hrmsProbe', JSON.stringify({
+          base: input.base,
+          clientName: input.clientName,
+          accessToken: data.token.access_token,
+          tokenId: data.token.token_id,
+          user: data.token.user,
+          scope: data.token.scope,
+          expiresAt: data.token.expires_at
+        }))
+        badge.className = 'badge ok'
+        badge.textContent = '已签发 ' + data.token.token_id
+        out.textContent = JSON.stringify({
+          user: data.token.user,
+          token_id: data.token.token_id,
+          token_type: data.token.token_type,
+          scope: data.token.scope,
+          expires_at: data.token.expires_at
+        }, null, 2)
+        location.href = '/call.html'
+      } catch (err) {
+        badge.className = 'badge bad'
+        badge.textContent = '试验台没有连上'
+        out.textContent = err.message
+      } finally {
+        button.disabled = false
+      }
+    })
+  </script>
+</body>
+</html>
