@@ -23,7 +23,7 @@ export async function prepareBatchTargets(api, targets) {
 export async function applyBatchPermissions(api, targets, members, { mode, role } = {}) {
   if (!['grant', 'revoke'].includes(mode) || (mode === 'grant' && !['viewer', 'editor', 'manager'].includes(role))) throw new Error('无效的权限操作')
   const users = Array.from(new Map((members || []).filter(m => m && m.id).map(m => [String(m.id), { ...m, id: String(m.id) }])).values())
-  if (!targets.length || targets.length > 100 || !users.length || users.length > 20) throw new Error('每次选择 1–100 个资源及 1–20 位成员')
+  if (!targets.length || targets.length > 100 || !users.length || users.length > 500 || targets.length * users.length > 5000) throw new Error('每次选择 1–100 个资源及 1–500 位成员，最多 5000 项授权操作')
   const results = await mapLimited(targets, async target => {
     const rows = []
     for (const member of users) {
