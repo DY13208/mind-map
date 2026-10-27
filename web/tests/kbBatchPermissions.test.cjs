@@ -64,3 +64,12 @@ test('invalid modes, owner role and oversized batches fail before mutation', asy
   await assert.rejects(applyBatchPermissions({}, [], [{ id: 'u' }], { mode: 'grant', role: 'owner' }))
   await assert.rejects(applyBatchPermissions({}, [], [{ id: 'u' }], { mode: 'replace', role: 'viewer' }))
 })
+
+test('a department with more than 20 current members can be authorized', async () => {
+  const { applyBatchPermissions } = load()
+  let granted = 0
+  const members = Array.from({ length: 25 }, (_, i) => ({ id: 'member-' + i }))
+  const rows = await applyBatchPermissions({ putGrant: async () => { granted++ } }, [{ type: 'folder', id: 'dept', ready: true, acl: {} }], members, { mode: 'grant', role: 'viewer' })
+  assert.equal(granted, 25)
+  assert.equal(rows.filter(r => r.status === 'success').length, 25)
+})

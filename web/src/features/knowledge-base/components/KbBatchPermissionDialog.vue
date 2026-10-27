@@ -1,5 +1,5 @@
 <template>
-  <el-dialog title="批量设置权限" :visible="visible" width="680px" append-to-body custom-class="kb-batch-permission-dialog" :close-on-click-modal="false" :before-close="close" @open="open">
+  <el-dialog title="批量设置权限" :visible="visible" width="840px" append-to-body custom-class="kb-batch-permission-dialog" :close-on-click-modal="false" :before-close="close" @open="open">
     <div v-loading="loading">
       <p>已选择 {{ prepared.length }} 个资源，可管理 {{ prepared.filter(t => t.ready).length }} 个。</p>
       <div class="kb-permission-targets">
@@ -10,11 +10,8 @@
         <el-form-item label="操作">
           <el-radio-group v-model="mode"><el-radio label="grant">添加或调整授权</el-radio><el-radio label="revoke">移除直接授权</el-radio></el-radio-group>
         </el-form-item>
-        <el-form-item label="选择成员（最多 20 人）">
-          <el-select v-model="memberIds" multiple filterable remote reserve-keyword :remote-method="searchMembers" :loading="searching" :multiple-limit="20" placeholder="输入姓名或账号搜索" style="width: 100%">
-            <el-option v-for="member in contacts" :key="member.id" :value="member.id" :label="member.name + '（' + member.id + '）'" />
-          </el-select>
-          <small v-if="searchError" class="kb-permission-error" role="alert">{{ searchError }}</small>
+        <el-form-item label="按组织架构选择部门或成员">
+          <KbOrganizationPicker v-if="visible" v-model="members" :disabled="busy || loading" @loading="selectionLoading = $event" @error="selectionError = $event" />
         </el-form-item>
         <el-form-item v-if="mode === 'grant'" label="统一设置为">
           <el-select v-model="role"><el-option label="可查看 · 查看与下载" value="viewer" /><el-option label="可编辑" value="editor" /><el-option label="可管理 · 管理成员权限" value="manager" /></el-select>
@@ -30,22 +27,24 @@
         </el-table>
       </div>
     </div>
-    <span slot="footer"><el-button :disabled="busy" @click="close">关闭</el-button><el-button type="primary" :loading="busy" :disabled="loading || !memberIds.length || !prepared.some(t => t.ready)" @click="submit">应用权限</el-button></span>
+    <p v-if="members.length" class="kb-permission-hint">本次将处理 {{ prepared.length }} 个资源 × {{ members.length }} 位成员；每次最多 500 人、5000 项授权操作。</p>
+    <span slot="footer"><el-button :disabled="busy" @click="close">关闭</el-button><el-button type="primary" :loading="busy" :disabled="loading || selectionLoading || !!selectionError || !members.length || members.length > 500 || prepared.length * members.length > 5000 || !prepared.some(t => t.ready)" @click="submit">应用权限</el-button></span>
   </el-dialog>
 </template>
 <script>
 import kbApi from '../services/kbApi'
-import teamService from '@/services/teamService'
+import KbOrganizationPicker from './KbOrganizationPicker.vue'
 import { prepareBatchTargets, applyBatchPermissions } from '../services/kbBatchPermissions'
 
 export default {
   name: 'KbBatchPermissionDialog',
+  components: { KbOrganizationPicker },
   props: { visible: Boolean, targets: { type: Array, default: () => [] } },
-  data() { return { prepared: [], results: [], memberIds: [], contacts: [], mode: 'grant', role: 'viewer', loading: false, busy: false, searching: false, searchError: '', searchSeq: 0, openSeq: 0 } },
+  data() { return { prepared: [], results: [], members: [], mode: 'grant', role: 'viewer', loading: false, busy: false, selectionLoading: true, selectionError: '', openSeq: 0 } },
   methods: {
     async open() {
       const seq = ++this.openSeq
-      this.results = []; this.memberIds = []; this.contacts = []; this.prepared = []; this.mode = 'grant'; this.role = 'viewer'; this.searchError = ''; this.searching = false; this.searchSeq++
+      this.results = []; this.members = []; this.prepared = []; this.mode = 'grant'; this.role = 'viewer'
       this.loading = true
       try {
         const prepared = await prepareBatchTargets(kbApi, this.targets)
@@ -55,31 +54,17 @@ export default {
     },
     close() {
       if (this.busy) return
-      this.openSeq++; this.searchSeq++
+      this.openSeq++
       this.$emit('update:visible', false)
     },
-    async searchMembers(query) {
-      const seq = ++this.searchSeq
-      this.searchError = ''
-      if (!String(query || '').trim()) { this.searching = false; return }
-      this.searching = true
-      try {
-        const result = await teamService.listContacts({ search: query.trim(), limit: 30 })
-        if (seq !== this.searchSeq || !this.visible) return
-        const selected = this.contacts.filter(c => this.memberIds.includes(c.id))
-        const found = (result.list || []).map(c => ({ id: String(c.userId || c.id), name: c.name || c.userId || c.id }))
-        this.contacts = Array.from(new Map(selected.concat(found).map(c => [c.id, c])).values())
-      } catch (e) { if (seq === this.searchSeq) this.searchError = e.message || '搜索成员失败，请重试' }
-      finally { if (seq === this.searchSeq) this.searching = false }
-    },
     async submit() {
-      if (this.busy || this.loading || !this.memberIds.length) return
+      if (this.busy || this.loading || this.selectionLoading || this.selectionError || !this.members.length) return
       this.busy = true
+      const members = this.members.slice()
       try {
         // Re-read capabilities and direct grants at apply time; backend checks
         // authorization again on each mutation, including concurrent changes.
         this.prepared = await prepareBatchTargets(kbApi, this.targets)
-        const members = this.memberIds.map(id => this.contacts.find(c => c.id === id) || { id })
         this.results = await applyBatchPermissions(kbApi, this.prepared, members, { mode: this.mode, role: this.role })
         this.$emit('changed')
       } catch (e) { this.$message.error(e.message || '批量设置失败') }
