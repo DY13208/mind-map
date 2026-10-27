@@ -442,7 +442,9 @@
           class="item"
           v-for="(item, index) in expandList"
           :key="item"
-          @click="exec('UNEXPAND_TO_LEVEL', false, index + 1)"
+          :class="{ disabled: index + 1 > expandDepthLimit }"
+          :aria-disabled="index + 1 > expandDepthLimit ? 'true' : 'false'"
+          @click="exec('UNEXPAND_TO_LEVEL', index + 1 > expandDepthLimit, index + 1)"
         >
           <span class="name">{{ item }}</span>
         </div>
@@ -546,6 +548,31 @@ export default {
         clipboard: this.$t('contextmenu.copyToClipboard')
       }
       return titles[this.activeSubmenu] || '返回'
+    },
+    expandDepthLimit() {
+      const renderer = this.mindMap && this.mindMap.renderer
+      const uid = this.type === 'node' && this.node ? this.node.uid : ''
+      const root = renderer && typeof renderer.findExpandStartNode === 'function'
+        ? renderer.findExpandStartNode(uid)
+        : this.type === 'node' && this.node ? this.node.nodeData : renderer && renderer.renderTree
+      if (!root) return 0
+      const pending = [{ node: root, depth: 0 }]
+      let maxDepth = 0
+      while (pending.length) {
+        const { node, depth } = pending.pop()
+        if (!node) continue
+        maxDepth = Math.max(maxDepth, depth)
+        if (maxDepth >= 6) return 6
+        const children = node.children || []
+        const data = node.data || node
+        // Unloaded descendants have unknown depth; keep them reachable.
+        if (Number(data.childCount) > children.length) return 6
+        children.forEach(child => pending.push({ node: child, depth: depth + 1 }))
+        if (renderer && typeof renderer.getGeneralizationTrees === 'function') {
+          renderer.getGeneralizationTrees(node).forEach(child => pending.push({ node: child, depth }))
+        }
+      }
+      return maxDepth
     },
     expandList() {
       return [
@@ -781,7 +808,7 @@ export default {
       const reference = this.getNodeAiReference()
       this.hide()
       if (!reference) return
-      await this.copyAiInstruction(`执行这个SOP：${reference}`, '指令已复制，可粘贴给 AI 使用')
+      await this.copyAiInstruction(reference, '指令已复制，可粘贴给 AI 使用')
     },
 
     async distillNodeSkill() {

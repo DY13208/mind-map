@@ -87,51 +87,33 @@
         </button>
       </div>
       <ProductNavigation :file-nav="fileNav" :kb-enabled="kbEnabled" />
-      <div class="sidebarModeSwitch">
-        <button
-          type="button"
-          title="进入专注模式"
-          aria-label="进入专注模式"
-          data-testid="shell-focus-mode"
-          @click="switchShellMode('focus')"
-        >
-          <i class="el-icon-full-screen" aria-hidden="true"></i>
-          <span>专注模式</span>
-        </button>
-      </div>
-      <AccessNotificationTrigger v-if="profile" :key="profile.id" :collapsed="sidebarCollapsed" class="sidebarNotifications" />
-      <div class="sidebarFooter" v-if="profile">
-        <div
-          class="accountInfo"
-          role="link"
-          tabindex="0"
-          data-testid="sidebar-profile"
-          aria-label="打开个人主页"
-          :title="`个人主页 · ${profile.name}（${profile.id}）`"
-          @click="openProfile"
-          @keydown.enter.prevent="openProfile"
-          @keydown.space.prevent="openProfile"
-        >
-          <UserAvatar :person="profile" size="small" fallback="依" />
-          <div class="accountMeta">
-            <strong>{{ profile.name }}</strong
-            ><span>{{ profile.id }}</span>
-          </div>
-        </div>
-        <button
-          class="accountLogout"
-          type="button"
-          title="退出登录"
-          aria-label="退出登录"
-          data-testid="sidebar-logout"
-          :disabled="loggingOut"
-          @click="signOut"
-        >
-          <i class="el-icon-switch-button" aria-hidden="true"></i>
-          <span class="accountLogoutText">{{
-            loggingOut ? '退出中…' : '退出'
-          }}</span>
-        </button>
+      <div v-if="profile" class="sidebarUtilities">
+        <AccessNotificationTrigger v-if="profile" :key="profile.id" :collapsed="sidebarCollapsed" label="消息" class="sidebarNotifications" />
+        <el-dropdown v-if="profile" trigger="click" placement="right-end" @command="handleAccountCommand">
+            <button
+              class="accountInfo"
+              type="button"
+              data-testid="sidebar-profile"
+              aria-label="个人账户菜单"
+              aria-haspopup="menu"
+            >
+              <UserAvatar :person="profile" :size="22" fallback="依" />
+              <span class="accountLabel">我的</span>
+            </button>
+          <el-dropdown-menu slot="dropdown" class="sidebarAccountMenu" :class="{ 'sidebarAccountMenu--dark': isDarkTheme }">
+            <el-dropdown-item command="profile" class="accountMenuHeader" aria-label="打开个人主页">
+              <UserAvatar :person="profile" :size="26" fallback="依" />
+              <div class="accountMenuIdentity">
+                <strong>{{ profile.name || profile.id }}</strong>
+                <span>{{ profile.id }}</span>
+              </div>
+              <i class="el-icon-arrow-right accountMenuChevron" aria-hidden="true" />
+            </el-dropdown-item>
+            <el-dropdown-item command="logout" icon="el-icon-switch-button" class="accountMenuLogout" :disabled="loggingOut">
+              {{ loggingOut ? '退出中…' : '退出登录' }}
+            </el-dropdown-item>
+          </el-dropdown-menu>
+        </el-dropdown>
       </div>
     </aside>
     <header v-if="shellMode !== 'embed'" class="mobileShellHeader">
@@ -157,36 +139,12 @@
       <router-link to="/profile" aria-label="我的" title="我的"><i class="el-icon-user" aria-hidden="true" /></router-link>
     </nav>
     <main class="productMain">
-      <div v-if="shellMode === 'focus'" class="shellModeToolbar" role="group" aria-label="页面导航模式">
-        <button
-          ref="navigationTrigger"
-          type="button"
-          class="shellModeButton shellModeButton--navigation"
-          aria-label="打开导航菜单"
-          aria-haspopup="dialog"
-          :aria-expanded="navigationOpen ? 'true' : 'false'"
-          @click="openNavigation"
-        >
-          <i class="el-icon-menu" aria-hidden="true"></i>
-          <span>导航</span>
-        </button>
-        <button
-          type="button"
-          class="shellModeButton"
-          title="恢复完整侧栏"
-          data-testid="shell-full-mode"
-          @click="switchShellMode('full')"
-        >
-          <i class="el-icon-s-fold" aria-hidden="true"></i>
-          <span>完整模式</span>
-        </button>
-      </div>
       <router-view />
     </main>
     <el-drawer
       v-if="navigationDrawerEnabled"
       :visible.sync="navigationOpen"
-      size="288px"
+      size="224px"
       direction="ltr"
       :with-header="false"
       :wrapper-closable="true"
@@ -204,7 +162,7 @@
         tabindex="-1"
       >
         <div class="navigationDrawerHeader">
-          <div class="navigationDrawerBrand"><WcpdLogoMark class="wcpdLogoImage" aria-hidden="true" /><div><strong>WCPD</strong><span>全部功能与设置</span></div></div>
+          <div class="navigationDrawerBrand"><WcpdLogoMark class="wcpdLogoImage" aria-hidden="true" /><div><strong>WCPD</strong></div></div>
           <button
             type="button"
             class="shellModeButton"
@@ -221,13 +179,34 @@
           @navigate="closeNavigation"
         />
         <div v-if="profile" class="navigationDrawerFooter">
-          <div @click.capture="closeNavigation"><AccessNotificationTrigger :key="'drawer-' + profile.id" /></div>
-          <div class="navigationDrawerAccount">
-            <button type="button" class="navigationDrawerProfile" aria-label="打开个人主页" @click="openProfile(); closeNavigation()">
-              <UserAvatar :person="profile" size="small" fallback="依" /><span><strong>{{ profile.name }}</strong><small>{{ profile.id }}</small></span>
+      <div v-if="profile" class="navigationDrawerUtilities">
+        <AccessNotificationTrigger v-if="profile" :key="profile.id" :collapsed="false" label="消息" class="drawerNotifications" @click.native="closeNavigation" />
+        <el-dropdown v-if="profile" trigger="click" placement="right-end" @command="handleAccountCommand">
+            <button
+              class="accountInfo"
+              type="button"
+              data-testid="drawer-profile"
+              aria-label="个人账户菜单"
+              aria-haspopup="menu"
+            >
+              <UserAvatar :person="profile" :size="22" fallback="依" />
+              <span class="accountLabel">我的</span>
             </button>
-            <button type="button" class="shellModeButton" aria-label="退出登录" :disabled="loggingOut" @click="closeNavigation(); signOut()"><i class="el-icon-switch-button" aria-hidden="true" /></button>
-          </div>
+          <el-dropdown-menu slot="dropdown" class="sidebarAccountMenu" :class="{ 'sidebarAccountMenu--dark': isDarkTheme }">
+            <el-dropdown-item command="profile" class="accountMenuHeader" aria-label="打开个人主页">
+              <UserAvatar :person="profile" :size="26" fallback="依" />
+              <div class="accountMenuIdentity">
+                <strong>{{ profile.name || profile.id }}</strong>
+                <span>{{ profile.id }}</span>
+              </div>
+              <i class="el-icon-arrow-right accountMenuChevron" aria-hidden="true" />
+            </el-dropdown-item>
+            <el-dropdown-item command="logout" icon="el-icon-switch-button" class="accountMenuLogout" :disabled="loggingOut">
+              {{ loggingOut ? '退出中…' : '退出登录' }}
+            </el-dropdown-item>
+          </el-dropdown-menu>
+        </el-dropdown>
+      </div>
         </div>
       </div>
     </el-drawer>
@@ -259,6 +238,9 @@ export default {
   name: 'ProductShellLayout',
   mixins: [mobileViewport],
   components: { UserAvatar, WcpdLogoMark, AccessNotificationTrigger, ProductNavigation },
+  provide() {
+    return { showProductSidebar: this.showProductSidebar }
+  },
   data() {
     const preference = readSidebarPreference()
     return {
@@ -326,6 +308,9 @@ export default {
     }
   },
   methods: {
+    showProductSidebar(event) {
+      this.openNavigation(event)
+    },
     updateTabletNavigation() { this.isTabletNavigation = this._tabletNavigationQuery.matches },
     openSidebar(event) {
       if (this.isTabletNavigation) this.openNavigation(event)
@@ -340,6 +325,10 @@ export default {
     },
     updateAutoSidebar() {
       if (!this.hasSidebarPreference) this.sidebarCollapsed = isSmallScreen()
+    },
+    handleAccountCommand(command) {
+      if (command === 'profile') this.openProfile()
+      else if (command === 'logout' && !this.loggingOut) this.signOut()
     },
     openProfile() {
       if (this.$route.path !== '/profile') this.$router.push(withShell('/profile', this.$route))
@@ -569,6 +558,43 @@ export default {
     }
     i { font-size: 16px; }
   }
+}
+.productShell .sidebarUtilities {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 8px;
+  padding: 8px 0;
+  border-top: 1px solid var(--ui-border);
+  .sidebarModeSwitch {
+    flex: 0 0 36px;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+  }
+  .sidebarNotifications { width: 36px; margin: 0; }
+  .sidebarModeSwitch button,
+  .notificationButton {
+    min-height: 36px;
+    justify-content: center;
+    padding: 0 4px;
+    gap: 4px;
+    font-size: 12px;
+    white-space: nowrap;
+    i { width: 16px; font-size: 16px; }
+  }
+  .notificationCount {
+    min-width: 18px;
+    height: 18px;
+    padding: 0 4px;
+    font-size: 10px;
+    line-height: 18px;
+  }
+}
+.productShell--collapsed .sidebarUtilities {
+  flex-direction: column;
+  width: 100%;
+  .sidebarModeSwitch { flex: none; }
 }
 .productShell .shellModeToolbar {
   min-height: 44px;
@@ -1053,7 +1079,7 @@ export default {
   }
 }
 .productNavigationDrawer {
-  max-width: min(288px, calc(100vw - 32px));
+  max-width: min(224px, calc(100vw - 40px));
   background: var(--ui-surface);
   color: var(--ui-text);
   .el-drawer__body {
@@ -1343,7 +1369,212 @@ export default {
     .mobileShellHeader i { font-size: 23px; }
   }
 }
+.el-dropdown-menu.el-popper.sidebarAccountMenu {
+  // This menu is mounted under body, outside the shell theme token scope.
+  --account-menu-bg: #fff;
+  --account-menu-border: #e7ece9;
+  --account-menu-text: #52645b;
+  --account-menu-hover: #edf5f0;
+  --account-menu-accent: #087854;
+  --account-menu-danger: #b8433a;
+  --account-menu-danger-bg: #fdf1ef;
+  &.sidebarAccountMenu--dark {
+    --account-menu-bg: #232c34;
+    --account-menu-border: #3a4652;
+    --account-menu-text: #d5e2ec;
+    --account-menu-hover: #2b3d3b;
+    --account-menu-accent: #71c6a6;
+    --account-menu-danger: #f5a69c;
+    --account-menu-danger-bg: #422f31;
+  }
+  box-sizing: border-box;
+  width: 184px;
+  max-width: calc(100vw - 24px);
+  padding: 5px;
+  border: 1px solid var(--account-menu-border);
+  border-radius: 10px;
+  background: var(--account-menu-bg);
+  box-shadow: 0 8px 28px rgba(17, 30, 23, 0.1), 0 2px 6px rgba(17, 30, 23, 0.04);
+  > .popper__arrow { display: none; }
+  .accountMenuIdentity {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    flex: 1;
+    min-width: 0;
+    color: var(--account-menu-text);
+    strong, span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    strong { font-size: 13px; font-weight: 600; line-height: 18px; }
+    span { font-size: 11px; line-height: 16px; opacity: 0.7; }
+  }
+  .el-dropdown-menu__item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    box-sizing: border-box;
+    height: 32px;
+    min-height: 32px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: 7px;
+    color: var(--account-menu-text);
+    font-size: 13px;
+    line-height: 20px;
+    i { width: 16px; margin: 0; font-size: 16px; text-align: center; }
+    &:not(.is-disabled):hover, &:focus {
+      background: var(--account-menu-hover);
+      color: var(--account-menu-accent);
+    }
+    &.is-disabled { opacity: 0.5; cursor: not-allowed; }
+  }
+  .accountMenuLogout {
+    position: relative;
+    margin-top: 7px;
+    &::before {
+      content: '';
+      position: absolute;
+      top: -4px;
+      left: 8px;
+      right: 8px;
+      height: 1px;
+      background: var(--account-menu-border);
+    }
+    &:not(.is-disabled):hover, &:focus {
+      color: var(--account-menu-danger);
+      background: var(--account-menu-danger-bg);
+    }
+  }
+  .el-dropdown-menu__item.accountMenuHeader {
+    height: 50px;
+    min-height: 50px;
+    padding: 6px 8px;
+    .userAvatar { flex-shrink: 0; }
+    .accountMenuChevron { flex-shrink: 0; width: 12px; font-size: 12px; opacity: 0.5; }
+    &:hover .accountMenuIdentity, &:focus .accountMenuIdentity { color: inherit; }
+  }
+}
+.productShell .productNavigationDrawer {
+  .navigationDrawerContent { padding: max(10px, env(safe-area-inset-top)) 8px max(10px, env(safe-area-inset-bottom)); }
+  .navigationDrawerHeader { min-height: 40px; padding: 0 6px 8px; margin-bottom: 6px; }
+  .navigationDrawerBrand {
+    gap: 8px;
+    > svg.wcpdLogoImage { width: 24px; height: 24px; flex: 0 0 24px; }
+    strong { font-size: 15px; font-weight: 600; }
+  }
+  .navLabel { margin-top: 8px; margin-bottom: 4px; font-size: 11px; }
+  .navLabel--space { margin-top: 12px; }
+  .productNavigation { gap: 2px; }
+  .productNavigation a { min-height: 36px; padding: 0 10px; border-radius: 7px; font-size: 13px; gap: 9px; }
+  &.touchNavigationDrawer .productNavigation a { min-height: 44px; }
+  .navigationDrawerFooter { padding-top: 8px; margin-top: 8px; }
+  .navigationDrawerUtilities {
+    display: flex;
+    align-items: center;
+    position: relative;
+    gap: 8px;
+    &::after {
+      content: ''; position: absolute; left: 50%; top: 50%;
+      width: 1px; height: 16px; transform: translate(-50%, -50%);
+      background: var(--ui-border); pointer-events: none;
+    }
+    > .el-dropdown, > .drawerNotifications {
+      flex: 1 1 0; min-width: 0; width: 0; margin: 0;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .accountInfo, .notificationButton {
+      display: flex; align-items: center; justify-content: center;
+      box-sizing: border-box; width: 100%; min-height: 40px;
+      padding: 0 6px; margin: 0; gap: 6px; border: 0; border-radius: 8px;
+      background: transparent; color: var(--ui-text-secondary);
+      font-family: inherit; font-size: 13px; cursor: pointer;
+      &:hover { background: var(--ui-surface-muted); color: var(--ui-primary); }
+      &:focus-visible { outline: 2px solid var(--ui-focus); outline-offset: -2px; }
+    }
+    .accountLabel { display: inline; }
+    .notificationCount { margin-left: 0; }
+  }
+}
 // Override the legacy filled placeholders in every compact brand entry.
+.productShell .productSidebar .sidebarUtilities {
+  justify-content: flex-start;
+  .accountInfo,
+  .accountLogout {
+    flex: 0 0 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    width: 36px;
+    min-width: 36px;
+    height: 36px;
+    min-height: 36px;
+    padding: 0;
+    margin: 0;
+    gap: 0;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    i { font-size: 16px; }
+  }
+  .accountInfo:hover { background: var(--ui-surface-muted); }
+  .accountLogout:hover:not(:disabled) {
+    background: var(--ui-danger-soft);
+    color: var(--ui-danger);
+  }
+}
+.productShell:not(.productShell--collapsed) .productSidebar .sidebarUtilities {
+  position: relative;
+  &::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 1px;
+    height: 16px;
+    transform: translate(-50%, -50%);
+    background: var(--ui-border, #e7ece9);
+    pointer-events: none;
+  }
+  > .el-dropdown,
+  > .sidebarNotifications {
+    flex: 1 1 0;
+    min-width: 0;
+    width: 0;
+  }
+  > .el-dropdown,
+  > .sidebarNotifications {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .accountInfo,
+  .notificationButton {
+    flex: 0 1 auto;
+    width: 100%;
+    min-width: 0;
+    height: 36px;
+    min-height: 36px;
+    padding: 0 4px;
+    gap: 4px;
+    border-radius: 8px;
+    font-family: inherit;
+    font-size: 12px;
+    color: var(--ui-text-secondary);
+    i { font-size: 18px; }
+  }
+  .notificationCount { margin-left: 0; }
+  .accountLabel { white-space: nowrap; line-height: 20px; }
+
+}
+.productShell--collapsed .productSidebar .sidebarUtilities {
+  justify-content: flex-start;
+  .accountLabel { display: none; }
+  .accountInfo, .accountLogout {
+    flex-basis: var(--rail-item);
+    width: var(--rail-item);
+    height: var(--rail-item);
+  }
+}
 .productShell .collapsedLogoTrigger svg.wcpdLogoImage,
 .productShell .mobileShellHeader svg.wcpdLogoImage,
 .productShell .navigationDrawerBrand svg.wcpdLogoImage {
