@@ -141,22 +141,29 @@ export default {
       operationEpochs: {},
       operationSequence: 0,
       navigationEpoch: 0,
-      destroyed: false
+      attachmentTargetGeneration: 0,
+      destroyed: false,
+      isMounted: false
     }
   },
   watch: {
     $route() {
       this.navigationEpoch += 1
-      this.pendingNodes = []
-      this.knowledgeVisible = false
-      this.knowledgeTargets = []
-      Object.keys(this.inflight).forEach(uid => this.abortInflight(uid))
+      this.invalidateAttachmentTargets()
     },
-    mindMap() {
+    mindMap(next, previous) {
+      if (next === previous) return
+      this.unbindMindMapLocalFileEvents()
+      this.invalidateAttachmentTargets()
       this.bindMindMapLocalFileEvents()
+      if (this.isMounted) this.hydrateExistingAttachments()
     }
   },
   created() {
+    this._boundMindMap = null
+    this._onAttachLocalFiles = null
+    this._onLocalFileHyperlinkBlocked = null
+    this._onBeforeMindMapSetData = null
     this.$bus.$on('selectAttachment', this.onSelectAttachment)
     this.$bus.$on('selectKnowledgeFile', this.onSelectKnowledgeFile)
     this.$bus.$on('viewKnowledgeFiles', this.onViewKnowledgeFiles)
@@ -164,20 +171,21 @@ export default {
     this.$bus.$on('attachLocalFiles', this.onAttachLocalFiles)
   },
   mounted() {
-    this.hydrateExistingAttachments()
+    this.isMounted = true
     this.bindMindMapLocalFileEvents()
+    this.hydrateExistingAttachments()
   },
   beforeDestroy() {
     this.destroyed = true
     this.navigationEpoch += 1
-    this.pendingNodes = []
+    this.isMounted = false
     this.unbindMindMapLocalFileEvents()
     this.$bus.$off('selectAttachment', this.onSelectAttachment)
     this.$bus.$off('selectKnowledgeFile', this.onSelectKnowledgeFile)
     this.$bus.$off('viewKnowledgeFiles', this.onViewKnowledgeFiles)
     this.$bus.$off('manageNodeAttachment', this.onManageAttachment)
     this.$bus.$off('attachLocalFiles', this.onAttachLocalFiles)
-    Object.keys(this.inflight).forEach(uid => this.abortInflight(uid))
+    this.invalidateAttachmentTargets()
   },
   methods: {
     onViewKnowledgeFiles(node) { this.openKnowledgePicker([node], true) },
@@ -214,6 +222,7 @@ export default {
         this.$message.warning('目标节点或附件已发生变化，请重新选择节点')
         return
       }
+      const requestGeneration = this.attachmentTargetGeneration
       this.knowledgeBusy = true
       this.knowledgeError = ''
       try {
@@ -233,8 +242,15 @@ export default {
         this.knowledgeTargets = []
         this.$message.success(references.length ? `已挂载 ${references.length} 个知识库文件，可查看解析信息` : '已清除知识库文件挂载')
       } catch (error) {
-        if (!this.destroyed) this.knowledgeError = error.message || '读取知识库解析信息失败，请重试'
-      } finally { this.knowledgeBusy = false }
+        if (!this.destroyed && requestGeneration === this.attachmentTargetGeneration) {
+          this.knowledgeError = error.message || '读取知识库解析信息失败，请重试'
+        }
+      } finally {
+        // A stale request must not clear the busy state of a newer selection.
+        if (requestGeneration === this.attachmentTargetGeneration) {
+          this.knowledgeBusy = false
+        }
+      }
     },
     abortInflight(uid, expectedAttachmentId = '') {
       const job = this.inflight[uid]
@@ -277,6 +293,10 @@ export default {
           expected.navigationEpoch != null
             ? expected.navigationEpoch
             : this.navigationEpoch,
+        attachmentTargetGeneration:
+          expected.attachmentTargetGeneration != null
+            ? expected.attachmentTargetGeneration
+            : this.attachmentTargetGeneration,
         expectedAttachmentId:
           expected.expectedAttachmentId != null
             ? String(expected.expectedAttachmentId)
@@ -302,6 +322,7 @@ export default {
     targetIsCurrent(target) {
       if (
         !target ||
+        target.attachmentTargetGeneration !== this.attachmentTargetGeneration ||
         !this.roomIsCurrent(target.roomKey, target.navigationEpoch)
       ) {
         return false
@@ -334,6 +355,17 @@ export default {
         this.operationEpochs[uid] === token
       )
     },
+    invalidateAttachmentTargets() {
+      this.attachmentTargetGeneration += 1
+      this.operationEpochs = {}
+      this.pendingNodes = []
+      this.knowledgeTargets = []
+      this.knowledgeFiles = []
+      this.knowledgeVisible = false
+      this.knowledgeBusy = false
+      this.knowledgeError = ''
+      Object.keys(this.inflight).forEach(uid => this.abortInflight(uid))
+    },
     resolveNode(item) {
       const renderer = this.mindMap && this.mindMap.renderer
       const uid = (item && item.uid) || (item && item.getData && item.getData('uid'))
@@ -365,7 +397,11 @@ export default {
       }
     },
     applyDetachedResponse(target, result) {
-      if (!this.roomIsCurrent(target.roomKey, target.navigationEpoch)) return false
+      if (
+        !target ||
+        target.attachmentTargetGeneration !== this.attachmentTargetGeneration ||
+        !this.roomIsCurrent(target.roomKey, target.navigationEpoch)
+      ) return false
       const node = this.liveNode(target.uid)
       if (!node) return false
       const current = (node.getData && node.getData()) || {}
@@ -556,12 +592,18 @@ export default {
         ;(node.children || []).forEach(visit)
       }
       visit(root)
+      const attachmentTargetGeneration = this.attachmentTargetGeneration
       for (let index = 0; index < nodes.length; index += 1) {
+        if (
+          attachmentTargetGeneration !== this.attachmentTargetGeneration ||
+          this.destroyed
+        ) return
         const initialNode = nodes[index]
         const initialData = initialNode.getData() || {}
         const target = this.captureTarget(initialNode, roomKey, {
           expectedAttachmentId: initialData.attachmentId,
-          navigationEpoch
+          navigationEpoch,
+          attachmentTargetGeneration
         })
         if (
           !target ||
@@ -573,6 +615,10 @@ export default {
             roomKey,
             target.expectedAttachmentId
           )
+          if (
+            attachmentTargetGeneration !== this.attachmentTargetGeneration ||
+            this.destroyed
+          ) return
           if (!this.targetIsCurrent(target)) continue
           const node = this.liveNode(target.uid)
           const data = (node && node.getData && node.getData()) || {}
@@ -677,26 +723,48 @@ export default {
     },
     bindMindMapLocalFileEvents() {
       this.unbindMindMapLocalFileEvents()
-      if (!this.mindMap || typeof this.mindMap.on !== 'function') return
+      const mindMap = this.mindMap
+      if (
+        !mindMap ||
+        typeof mindMap.on !== 'function' ||
+        typeof mindMap.off !== 'function'
+      ) return
+      this._boundMindMap = mindMap
       this._onAttachLocalFiles = payload => this.onAttachLocalFiles(payload)
       this._onLocalFileHyperlinkBlocked = payload =>
         this.onLocalFileHyperlinkBlocked(payload)
-      this.mindMap.on('attach_local_files', this._onAttachLocalFiles)
-      this.mindMap.on('local_file_hyperlink_blocked', this._onLocalFileHyperlinkBlocked)
+      this._onBeforeMindMapSetData = () => {
+        this.invalidateAttachmentTargets()
+      }
+      mindMap.on('attach_local_files', this._onAttachLocalFiles)
+      mindMap.on('local_file_hyperlink_blocked', this._onLocalFileHyperlinkBlocked)
+      mindMap.on('before_set_data', this._onBeforeMindMapSetData)
     },
     unbindMindMapLocalFileEvents() {
-      if (!this.mindMap || typeof this.mindMap.off !== 'function') return
+      const mindMap = this._boundMindMap
+      if (!mindMap || typeof mindMap.off !== 'function') {
+        this._boundMindMap = null
+        this._onAttachLocalFiles = null
+        this._onLocalFileHyperlinkBlocked = null
+        this._onBeforeMindMapSetData = null
+        return
+      }
       if (this._onAttachLocalFiles) {
-        this.mindMap.off('attach_local_files', this._onAttachLocalFiles)
+        mindMap.off('attach_local_files', this._onAttachLocalFiles)
         this._onAttachLocalFiles = null
       }
       if (this._onLocalFileHyperlinkBlocked) {
-        this.mindMap.off(
+        mindMap.off(
           'local_file_hyperlink_blocked',
           this._onLocalFileHyperlinkBlocked
         )
         this._onLocalFileHyperlinkBlocked = null
       }
+      if (this._onBeforeMindMapSetData) {
+        mindMap.off('before_set_data', this._onBeforeMindMapSetData)
+        this._onBeforeMindMapSetData = null
+      }
+      this._boundMindMap = null
     },
     onLocalFileHyperlinkBlocked(payload = {}) {
       const node = payload.node
@@ -859,6 +927,10 @@ export default {
             target.uid,
             { confirmSopChange: true, baseVersion }
           )
+          if (
+            target.attachmentTargetGeneration !== this.attachmentTargetGeneration ||
+            !this.roomIsCurrent(target.roomKey, target.navigationEpoch)
+          ) return
           const updatedLocally = this.applyDetachedResponse(target, result)
           this.abortInflight(target.uid, target.expectedAttachmentId)
           if (result && result.already_detached) {
@@ -885,6 +957,10 @@ export default {
           this.$message.success('已解除当前节点的附件引用')
         }
       } catch (err) {
+        if (
+          target.attachmentTargetGeneration !== this.attachmentTargetGeneration ||
+          !this.roomIsCurrent(target.roomKey, target.navigationEpoch)
+        ) return
         if (err && (err.code === 'ATTACHMENT_MISMATCH' || err.statusCode === 409)) {
           this.$message.warning('节点附件已被其他操作更新，请刷新后重试')
           return
@@ -928,6 +1004,7 @@ export default {
         target,
         token: this.beginOperation(target)
       }))
+      const batchGeneration = this.attachmentTargetGeneration
       let uploadNotice = null
       if (typeof this.$message === 'function') {
         uploadNotice = this.$message({
@@ -949,7 +1026,11 @@ export default {
         })
         const attachment = (res && (res.attachment || (res.data && res.data.attachment))) || {}
         if (!attachment.id) {
-          this.$message.error('上传已完成，但服务端未返回附件 ID；原附件保持不变')
+          if (batchGeneration !== this.attachmentTargetGeneration) {
+            this.$message.warning('目标版本已变化，附件未挂载到当前版本')
+          } else {
+            this.$message.error('上传已完成，但服务端未返回附件 ID；原附件保持不变')
+          }
           return
         }
         let applied = 0
@@ -958,6 +1039,7 @@ export default {
         for (const { target, token } of operations) {
           if (!this.operationIsCurrent(target, token)) {
             failedTargets.push({
+              stale: true,
               preserved: false,
               error: new Error('目标节点或附件已变化，未执行挂载')
             })
@@ -969,6 +1051,17 @@ export default {
             attachment,
             file
           )
+          if (
+            target.attachmentTargetGeneration !== this.attachmentTargetGeneration ||
+            !this.operationTokenIsCurrent(target.uid, token)
+          ) {
+            failedTargets.push({
+              stale: true,
+              preserved: false,
+              error: new Error('目标节点或附件已变化，未挂载到当前版本')
+            })
+            continue
+          }
           if (!result || !result.applied) {
             failedTargets.push({
               ...(result || {}),
@@ -987,7 +1080,15 @@ export default {
           applied += 1
           attachedTargets.push({ uid: target.uid, token })
         }
+        if (batchGeneration !== this.attachmentTargetGeneration) {
+          this.$message.warning('目标版本已变化，附件已上传到服务器，未挂载到当前版本')
+          return
+        }
         if (!applied) {
+          if (failedTargets.length && failedTargets.every(target => target.stale)) {
+            this.$message.warning('目标节点或附件已变化，附件未挂载到当前版本')
+            return
+          }
           const reason =
             (failedTargets[0].error && failedTargets[0].error.message) ||
             '附件写入命令未生效'
@@ -1033,6 +1134,7 @@ export default {
           })
         }
       } catch (err) {
+        if (batchGeneration !== this.attachmentTargetGeneration) return
         console.error('[attachment] upload failed', err)
         this.$message.error((err && err.message) || '附件上传失败')
       } finally {
