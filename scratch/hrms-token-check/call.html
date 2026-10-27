@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>接口试验</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <main class="sheet">
+    <div class="kicker">
+      <span>02 / 临时试验台</span>
+      <span class="stamp">用完即弃</span>
+    </div>
+    <h1>打一个人事接口</h1>
+    <p class="lede">这一页调用人事系统的 <code>/api/method/ping</code>。它不需要令牌，用来确认地址和线路。换票成功后，令牌会填进下面的输入框，再把路径改成对方已经开放的接口。</p>
+    <nav class="nav">
+      <a href="/">返回换票</a>
+    </nav>
+    <form id="form">
+      <label>
+        <span>HRMS_API_BASE</span>
+        <input name="base" value="https://xx.stillgroup.net:8088" required />
+      </label>
+      <div class="row">
+        <label>
+          <span>path</span>
+          <input name="path" value="/api/method/ping" required />
+        </label>
+        <label>
+          <span>method</span>
+          <select name="method">
+            <option>GET</option>
+            <option>POST</option>
+          </select>
+        </label>
+      </div>
+      <label>
+        <span>Authorization Bearer，留空表示匿名</span>
+        <input name="token" autocomplete="off" placeholder="换票成功后会自动填入" />
+      </label>
+      <div class="actions">
+        <button type="submit" id="go">调用</button>
+        <button type="button" class="secondary" id="ping">再测 ping</button>
+      </div>
+    </form>
+    <section class="result">
+      <div id="badge" class="badge wait">打开页面后会自动测 ping</div>
+      <pre id="out">等待。</pre>
+    </section>
+  </main>
+  <script>
+    const form = document.querySelector('#form')
+    const badge = document.querySelector('#badge')
+    const out = document.querySelector('#out')
+    const button = document.querySelector('#go')
+    const saved = JSON.parse(sessionStorage.getItem('hrmsProbe') || '{}')
+    if (saved.base) form.base.value = saved.base
+    if (saved.accessToken) form.token.value = saved.accessToken
+
+    async function callApi(path, method) {
+      if (path) form.path.value = path
+      if (method) form.method.value = method
+      button.disabled = true
+      badge.className = 'badge wait'
+      badge.textContent = '请求中 ' + form.path.value
+      out.textContent = '已发往人事系统。'
+      const input = Object.fromEntries(new FormData(form))
+      try {
+        const response = await fetch('/call', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(input)
+        })
+        const data = await response.json()
+        badge.className = data.ok ? 'badge ok' : 'badge bad'
+        badge.textContent = (data.ok ? '通了 ' : '失败 ') + (data.status || response.status)
+        const view = data.data || { error: data.error || data.detail, raw: data.raw }
+        out.textContent = JSON.stringify(view, null, 2)
+      } catch (err) {
+        badge.className = 'badge bad'
+        badge.textContent = '试验台没有连上'
+        out.textContent = err.message
+      } finally {
+        button.disabled = false
+      }
+    }
+
+    form.addEventListener('submit', event => {
+      event.preventDefault()
+      callApi()
+    })
+    document.querySelector('#ping').addEventListener('click', () => callApi('/api/method/ping', 'GET'))
+    callApi('/api/method/ping', 'GET')
+  </script>
+</body>
+</html>
