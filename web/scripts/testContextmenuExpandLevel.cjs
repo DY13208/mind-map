@@ -18,6 +18,23 @@ new Function('require', 'module', 'exports', code)(name => {
 const component = mod.exports.default
 
 async function main() {
+  const depthLimit = (root, type = 'node') => component.computed.expandDepthLimit.call({
+    type, node: { uid: 'branch', nodeData: root },
+    mindMap: { renderer: { renderTree: root, findExpandStartNode: () => root } }
+  })
+  const leaf = { data: {}, children: [] }
+  assert.equal(depthLimit(leaf), 0, 'leaf nodes have no expandable levels')
+  const branch = { data: { expand: false }, children: [{ data: { expand: false }, children: [leaf] }] }
+  assert.equal(depthLimit(branch), 2, 'collapsed descendants still count toward available depth')
+  assert.equal(depthLimit(branch, 'svg'), 2, 'canvas levels use the entire raw tree')
+  assert.equal(depthLimit({ data: { childCount: 2 }, children: [] }), 6, 'unknown lazy depth stays accessible')
+  const blockedCalls = []
+  await component.methods.exec.call({
+    submenuClickGate: false,
+    canExecuteCommand: () => { blockedCalls.push('permission'); return true },
+    hide: () => blockedCalls.push('hide')
+  }, 'UNEXPAND_TO_LEVEL', true, 3)
+  assert.deepEqual(blockedCalls, [], 'disabled levels do not execute or close the menu')
   for (const editable of [true, false]) {
     const nodeTemplate = parsed.template.content.split(`<template v-if="type === 'node' && ${editable ? 'editable' : '!editable'}">`)[1].split('</template>')[0]
     const expandAll = nodeTemplate.indexOf("exec('EXPAND_ALL')")
