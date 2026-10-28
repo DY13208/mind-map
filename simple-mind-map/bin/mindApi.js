@@ -2399,6 +2399,20 @@ async function handleApi(req, res) {
     }
   }
 
+  if (req.method === 'GET' && pathname === '/api/automation/d-nodes') {
+    try {
+      const result = await require('./automaticDNodes').listAutomaticDNodes(
+        getPool(), roomAcl.actorFromReq(req), {
+          limit: url.searchParams.get('limit'), cursor: url.searchParams.get('cursor')
+        }
+      )
+      sendJson(res, 200, result)
+    } catch (err) {
+      sendJson(res, err.statusCode || 500, { error: err.statusCode ? err.message : '自动 D 节点查询失败', code: err.code || 'AUTOMATIC_D_QUERY_FAILED' })
+    }
+    return true
+  }
+
   if (req.method === 'GET' && pathname === '/api/files') {
     const limit = Number(url.searchParams.get('limit') || 0)
     const offset = Number(url.searchParams.get('offset') || 0)

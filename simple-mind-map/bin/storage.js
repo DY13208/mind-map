@@ -1872,6 +1872,7 @@ async function initSchemaOnce() {
   await fileSystemSchema.initFileSystemSchema(pool)
   const roomAcl = require('./roomAcl')
   await roomAcl.initSchema(pool)
+  await pool.query(require('./automaticDNodes').INDEX_SQL)
   await require('./accessRequests').initSchema(pool)
   await require('./leaveWorkflow/service').initSchema(pool)
   // 「@我的」提及索引 / 已读状态（幂等建表，新表建索引很快）

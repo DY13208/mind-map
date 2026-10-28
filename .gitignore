@@ -130,3 +130,6 @@ output/*.py
 
 # Wiki 数据备份
 /tmp/wiki-backup/
+
+# Read-only cross-map automatic D discovery regression.
+!/simple-mind-map/test/automaticDNodes.pg.test.cjs

@@ -19,6 +19,7 @@
     "test:clipboard": "node ../web/scripts/nodeClipboardCheck.cjs && node ../web/scripts/copyNodeAttachmentsCheck.cjs && node ../web/scripts/clipboardAttachmentKnowledgeCheck.cjs",
     "test:clipboard:browser": "node ../web/scripts/nodeClipboardBrowserCheck.cjs",
     "test:mcp:history": "node ./test/mcpHistory.test.js",
+    "test:mcp:automatic-d": "node ./test/automaticDNodes.pg.test.cjs",
     "test:knowledge:pg": "node ./test/knowledge.pg.test.js",
     "lint": "eslint src/",
     "format": "prettier --write .",
