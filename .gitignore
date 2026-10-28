@@ -91,6 +91,9 @@ output/*.py
 !/simple-mind-map/test/directHttpParity.pg.test.js
 !/simple-mind-map/test/cardPreview.pg.test.js
 !/simple-mind-map/test/teamRoomsPaging.pg.test.js
+!/simple-mind-map/test/historyTreeCounts.test.js
+!/simple-mind-map/test/historyTreeCounts.engine.test.js
+!/simple-mind-map/test/historyTreeCounts.pg.test.js
 !/web/tests/
 /web/tests/*
 !/web/tests/helpers/

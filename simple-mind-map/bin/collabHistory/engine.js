@@ -12,6 +12,11 @@ const { replayOperations } = require('./replayer')
 const { historyError } = require('./errors')
 const { createTreeCache } = require('./treeCache')
 const { formatVersionTime } = require('./versionTime')
+const { normalizeHistoryGraph } = require('../../src/utils/historyTreeCounts')
+
+// Include the projection rules in the cache namespace. A deploy that changes
+// derived history counts must not serve a payload produced by the old rules.
+const HISTORY_TREE_PROJECTION_VERSION = 'history-counts-v1'
 
 function genesisEmptyTree() {
   return {
@@ -900,6 +905,9 @@ function createHistoryEngine(options = {}) {
     const historical = isLegacy
       ? await getLegacyState(roomKey, version)
       : await getRoomStateAtRevision(roomKey, targetRevision)
+    // The snapshot and operation log are checksummed in their original form.
+    // Normalize only the restore candidate after those checks have succeeded.
+    const restoreTree = normalizeHistoryGraph(historical.tree)
 
     const result = await store.withRoomLock(roomKey, async tx => {
       const capture = typeof store.capture === 'function' ? store.capture() : null
@@ -953,7 +961,7 @@ function createHistoryEngine(options = {}) {
         const newRevision = currentRevision + 1
         await tx.setLiveState(roomKey, {
           revision: newRevision,
-          nodes: historical.tree,
+          nodes: restoreTree,
           metadata: historical.metadata,
           restoreEpochRevision: newRevision
         })
@@ -987,11 +995,11 @@ function createHistoryEngine(options = {}) {
         await tx.appendOperation(restoreOp)
         const post = await createCheckpoint(roomKey, {
           revision: newRevision,
-          tree: historical.tree,
+          tree: restoreTree,
           metadata: historical.metadata,
           state: {
             revision: newRevision,
-            nodes: historical.tree,
+            nodes: restoreTree,
             metadata: historical.metadata
           },
           createdBy: input.userId || '',
@@ -1032,7 +1040,7 @@ function createHistoryEngine(options = {}) {
           preRestoreVersionId: preVersion.id,
           restoreVersionId: restoreVersionRow.id,
           operation: restoreOp,
-          tree: historical.tree,
+          tree: restoreTree,
           metadata: historical.metadata,
           earliestAvailableRevision: coverage.earliestAvailableRevision,
           currentRevision: newRevision,
@@ -1311,34 +1319,36 @@ function createHistoryEngine(options = {}) {
     const [row] = await presentVersions(roomKey, [storedRow])
     const isLegacy =
       String(row.type).toUpperCase() === 'LEGACY' || row.revision == null
-    const cacheKey = row.id
+    const cacheKey = `${row.id}:${HISTORY_TREE_PROJECTION_VERSION}`
     const knownChecksum = versionChecksums.get(cacheKey)
     if (knownChecksum) {
       const cached = treeCache.get(cacheKey, knownChecksum)
       if (cached) {
-        return {
+        return cloneJson({
           ...cached,
           version: row,
           summary: row.summary || cached.summary
-        }
+        })
       }
     }
     const historical = isLegacy
       ? await getLegacyState(roomKey, row)
       : await getRoomStateAtRevision(roomKey, row.revision)
-    const checksum = historical.checksum
+    const tree = normalizeHistoryGraph(historical.tree)
+    const checksum = historyChecksum(tree, historical.metadata)
     versionChecksums.set(cacheKey, checksum)
     const hit = treeCache.get(cacheKey, checksum)
-    if (hit) return hit
+    if (hit) return cloneJson(hit)
     const summary = row.summary || {}
     const payload = {
       ...historical,
+      tree,
       version: row,
       summary,
       checksum
     }
     treeCache.set(cacheKey, checksum, payload, nodeCount(historical.tree))
-    return payload
+    return cloneJson(payload)
   }
 
   return {

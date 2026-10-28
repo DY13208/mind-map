@@ -12,6 +12,18 @@ const collabPaste = require(path.resolve(
   __dirname,
   '../../simple-mind-map/src/utils/collabPaste.js'
 ))
+const edgeGeometryModule = require(path.resolve(
+  __dirname,
+  '../../simple-mind-map/src/utils/edgeGeometry.js'
+))
+const localFileLink = require(path.resolve(
+  __dirname,
+  '../../simple-mind-map/src/utils/localFileLink.js'
+))
+const copyOutline = require(path.resolve(
+  __dirname,
+  '../../simple-mind-map/src/utils/copyOutline.js'
+))
 const renderSource = fs.readFileSync(
   path.resolve(__dirname, '../../simple-mind-map/src/core/render/Render.js'),
   'utf8'
@@ -67,7 +79,12 @@ const globals = {
   destroyStaleLayoutNodes: noop,
   inspectLayoutRenderer: noop,
   historyClipboard,
-  collabPaste
+  collabPaste,
+  edgeGeometryModule,
+  readSmmClipboardHtml: copyOutline.readSmmClipboardHtml,
+  nodesToTabOutline: copyOutline.nodesToTabOutline,
+  isLocalFileReference: localFileLink.isLocalFileReference,
+  localFileDisplayName: localFileLink.localFileDisplayName
 }
 
 const moduleRef = { exports: {} }
