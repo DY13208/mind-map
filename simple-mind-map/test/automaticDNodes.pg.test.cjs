@@ -67,7 +67,8 @@ async function main() {
     ['g', '<p>&nbsp;D&nbsp;:&nbsp;自动&amp;邮件</p>']
   ]
   await seedRoom('visible', [...positive, ['step', 'D1：自动步骤'], ['step2', 'D2: 自动步骤'], ['ordinary', '自动任务'],
-    ['a-role', 'A：自动任务'], ['note-only', 'D：普通目标', false, '自动'], ['deleted', 'D：自动已删除', true]], reader.id)
+    ['a-role', 'A：自动任务'], ['c-role', 'C：自动验收'], ['p-role', 'P：自动计划'],
+    ['note-only', 'D：普通目标', false, '自动'], ['deleted', 'D：自动已删除', true]], reader.id)
   await seedRoom('private', [['secret', 'D：自动私密']], prefix + '-other')
   await seedRoom('trash', [['t', 'D：自动回收站']], reader.id, { trash: true })
   await seedRoom('tomb', [['t', 'D：自动永久删除']], reader.id)
@@ -153,11 +154,62 @@ async function main() {
   const next = JSON.parse(continued.content[0].text)
   assert(!next.items.some(x => x.room_key === room('private')))
   assert(!next.items.some(x => x.room_key === page.items[0].room_key && x.uid === page.items[0].uid))
+  const mcpItems = []
+  let mcpCursor, mcpPage
+  do {
+    const result = await rpc(url, bound, 'tools/call', { name: 'list_automatic_d_nodes', arguments: { limit: 2, ...(mcpCursor ? { cursor: mcpCursor } : {}) } }, session)
+    assert(!result.isError, JSON.stringify(result))
+    mcpPage = JSON.parse(result.content[0].text)
+    mcpItems.push(...mcpPage.items)
+    mcpCursor = mcpPage.next_cursor
+  } while (mcpPage.has_more)
+  const identity = item => JSON.stringify([item.room_key, item.uid])
+  assert.deepEqual(mcpItems.map(identity).sort(), (await collect(reader)).items.map(identity).sort())
+  assert.equal(new Set(mcpItems.map(identity)).size, mcpItems.length)
+  assert.equal(mcpPage.complete, true)
   const badCursor = await rpc(url, bound, 'tools/call', { name: 'list_automatic_d_nodes', arguments: { cursor: 'tampered-cursor' } }, session)
   assert.equal(badCursor.isError, true)
   assert.equal(badCursor.structuredContent.code, 'INVALID_CURSOR')
   assert.equal(badCursor.structuredContent.restart_from_first_page, true)
   console.log('PASS real HTTP and MCP discovery, user credentials, continuation and permission isolation')
+
+  const otherToken = issueMcpUserToken(prefix + '-other', token)
+  for (const credential of [otherToken, token]) {
+    for (const method of ['POST', 'GET', 'DELETE']) {
+      const crossedSession = await fetch(url, { method, signal: AbortSignal.timeout(5000), headers: {
+        'Content-Type': 'application/json', Accept: 'application/json, text/event-stream',
+        Authorization: `Bearer ${credential}`, 'mcp-session-id': session.id
+      }, ...(method === 'POST' ? { body: JSON.stringify({ jsonrpc: '2.0', id: 9001, method: 'tools/call', params: { name: 'list_automatic_d_nodes', arguments: { limit: 2 } } }) } : {}) })
+      const body = await crossedSession.json()
+      assert.equal(crossedSession.status, 403, `${method}: MCP session must reject another caller credential`)
+      assert.equal(body.code, 'MCP_SESSION_AUTH_CHANGED')
+    }
+  }
+  const normalizedHeader = await fetch(url, { method: 'POST', headers: {
+    'Content-Type': 'application/json', Accept: 'application/json, text/event-stream',
+    Authorization: `bearer   ${bound}`, 'mcp-session-id': session.id
+  }, body: JSON.stringify({ jsonrpc: '2.0', id: 9002, method: 'tools/list', params: {} }) })
+  await normalizedHeader.text()
+  assert.equal(normalizedHeader.status, 200, 'Equivalent bearer syntax keeps the original session usable')
+  const stillValid = await rpc(url, bound, 'tools/call', { name: 'list_automatic_d_nodes', arguments: { limit: 1 } }, session)
+  assert(!stillValid.isError, 'Rejected foreign DELETE must not destroy the original session')
+  const otherSession = {}
+  await rpc(url, otherToken, 'initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'other-reader', version: '1' } }, otherSession)
+  const otherListed = await rpc(url, otherToken, 'tools/call', { name: 'list_automatic_d_nodes', arguments: { limit: 50 } }, otherSession)
+  assert(!otherListed.isError)
+  assert.deepEqual(JSON.parse(otherListed.content[0].text).items.map(identity), [JSON.stringify([room('private'), 'secret'])])
+  const otherCursor = await rpc(url, otherToken, 'tools/call', { name: 'list_automatic_d_nodes', arguments: { cursor: page.next_cursor } }, otherSession)
+  assert.equal(otherCursor.isError, true)
+  assert.equal(otherCursor.structuredContent.code, 'INVALID_CURSOR')
+  const closed = await fetch(url, { method: 'DELETE', headers: { Authorization: `Bearer ${bound}`, 'mcp-session-id': session.id } })
+  await closed.text()
+  assert.equal(closed.status, 200)
+  const expiredSession = await fetch(url, { method: 'POST', headers: {
+    'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', Authorization: `Bearer ${bound}`, 'mcp-session-id': session.id
+  }, body: JSON.stringify({ jsonrpc: '2.0', id: 9003, method: 'tools/list', params: {} }) })
+  await expiredSession.text()
+  assert.equal(expiredSession.status, 404)
+  console.log('PASS cross-account/service session isolation, all HTTP verbs, independent credentials/cursors, original-session survival and cleanup')
 
   await seedRoom('large', [], reader.id)
   await pool.query(`insert into room_nodes(room_key,uid,parent_uid,data,node_version)

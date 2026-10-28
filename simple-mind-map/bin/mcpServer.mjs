@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import http from 'node:http'
-import { randomUUID } from 'node:crypto'
+import { randomUUID, createHash, timingSafeEqual } from 'node:crypto'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
@@ -2246,6 +2246,7 @@ function readJson(req) {
 
 async function startHttp() {
   const transports = new Map()
+  const sessionAuthorizations = new Map()
 
   const httpServer = http.createServer(async (req, res) => {
     setCors(res)
@@ -2283,6 +2284,18 @@ async function startHttp() {
 
     try {
       const sessionId = req.headers['mcp-session-id']
+      const authorizationDigest = createHash('sha256').update(bearerToken(authorization)).digest()
+      const sessionAuthorization = sessionId ? sessionAuthorizations.get(sessionId) : null
+      // Tool callbacks retain the credential used at initialization. Never let
+      // another valid credential dispatch through that existing connection.
+      if (sessionAuthorization && !timingSafeEqual(sessionAuthorization, authorizationDigest)) {
+        res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' })
+        res.end(JSON.stringify({
+          error: 'MCP session credential changed; initialize a new session',
+          code: 'MCP_SESSION_AUTH_CHANGED'
+        }))
+        return
+      }
       if (req.method === 'POST') {
         const body = await readJson(req)
         httpLifecycle?.markBodyParsed(body)
@@ -2292,10 +2305,14 @@ async function startHttp() {
             sessionIdGenerator: () => randomUUID(),
             onsessioninitialized: id => {
               transports.set(id, transport)
+              sessionAuthorizations.set(id, authorizationDigest)
             }
           })
           transport.onclose = () => {
-            if (transport.sessionId) transports.delete(transport.sessionId)
+            if (transport.sessionId) {
+              transports.delete(transport.sessionId)
+              sessionAuthorizations.delete(transport.sessionId)
+            }
           }
           const server = createServer(authorization)
           await server.connect(transport)
