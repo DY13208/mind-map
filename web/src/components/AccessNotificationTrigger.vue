@@ -20,7 +20,9 @@
       :aria-expanded="state.visible ? 'true' : 'false'"
       @click="open"
     >
-      <UserAvatar v-if="avatar" :person="person" :size="28" />
+      <span v-if="avatar" class="notificationAvatarFrame">
+        <UserAvatar :person="person" :size="28" />
+      </span>
       <template v-else
         ><i :class="icon" /><span v-if="!collapsed"
           >{{ label }}</span
@@ -144,15 +146,26 @@ export default {
   width: 34px;
 }
 .notificationBadge--avatar .notificationButton {
-  padding: 1px;
+  padding: 0;
   width: 34px;
   min-height: 34px;
   border-radius: 50%;
   justify-content: center;
+}
+.notificationAvatarFrame {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  padding: 1px;
   border: 2px solid transparent;
+  border-radius: 50%;
   transition: border-color 0.18s, box-shadow 0.18s;
 }
-.notificationBadge--avatar .notificationButton.hasMessages {
+.notificationButton.hasMessages .notificationAvatarFrame {
   border-color: #e64b57;
   box-shadow: 0 0 0 3px rgba(230, 75, 87, 0.2);
 }
@@ -164,6 +177,7 @@ export default {
   background-color: #e64b57;
   border: 2px solid #fff;
   transform: translate(50%, -50%);
+  pointer-events: none;
 }
 </style>
 <style lang="less">

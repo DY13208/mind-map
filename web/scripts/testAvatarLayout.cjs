@@ -40,6 +40,59 @@ async function checkAvatar(avatar, size, image) {
   else assert.equal(box.image, null)
 }
 
+async function checkFrame(button, touch, unread) {
+  const frame = await button.locator('.notificationAvatarFrame').boundingBox()
+  near(frame.width, 34, 'Visual frame width')
+  near(frame.height, frame.width, 'Circular visual frame')
+  if (!touch) return
+  const geometry = await button.evaluate(e => {
+    const rail = e.closest('.trigger'), r = rail.getBoundingClientRect()
+    const dot = e.parentNode.querySelector('.el-badge__content').getBoundingClientRect()
+    return { left: r.left + rail.clientLeft, right: r.left + rail.clientLeft + rail.clientWidth,
+      top: r.top + rail.clientTop, bottom: r.top + rail.clientTop + rail.clientHeight,
+      width: rail.clientWidth, scrollWidth: rail.scrollWidth,
+      dot: { left: dot.left, right: dot.right, top: dot.top, bottom: dot.bottom } }
+  })
+  near(geometry.width, 44, 'Scrollbar must not consume the touch target')
+  assert(geometry.scrollWidth <= geometry.width, 'No content extends beyond the scroll viewport')
+  const halo = unread ? 3 : 0
+  assert(frame.x - halo >= geometry.left - 0.1 && frame.x + frame.width + halo <= geometry.right + 0.1, 'Unread ring and halo must fit horizontally')
+  assert(frame.y - halo >= geometry.top - 0.1 && frame.y + frame.height + halo <= geometry.bottom + 0.1, 'Unread ring and halo must fit vertically')
+  if (unread) {
+    assert(geometry.dot.left >= geometry.left && geometry.dot.right <= geometry.right && geometry.dot.top >= geometry.top && geometry.dot.bottom <= geometry.bottom, 'Unread dot must be fully visible')
+    assert.equal(await button.locator('.notificationAvatarFrame').evaluate(e => getComputedStyle(e).borderTopColor), 'rgb(230, 75, 87)')
+  }
+}
+
+async function checkRailScroll(page, context, engineName, mobile) {
+  await page.bringToFront()
+  const rail = page.locator('.sidebarTriggerContainer .trigger'), r = await rail.boundingBox()
+  assert(await rail.evaluate(e => e.scrollHeight > e.clientHeight), 'Short viewport exercises an overflowing rail')
+  if (engineName === 'chromium') {
+    const cdp = await context.newCDPSession(page), x = r.x + r.width / 2, start = r.y + r.height - 24
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y: start }] })
+    for (let step = 1; step <= 6; step++) {
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: start - step * 20 }] })
+      await page.waitForTimeout(20)
+    }
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    // Chromium clears touch emulation on detach; context teardown owns this session.
+  } else if (!mobile) {
+    await page.mouse.move(r.x + r.width / 2, r.y + r.height / 2)
+    await page.mouse.wheel(0, 240)
+  } else {
+    // Playwright mobile WebKit exposes neither native swipe nor wheel input.
+    await rail.evaluate(e => { e.scrollTop += 240 })
+  }
+  await page.waitForFunction(() => document.querySelector('.sidebarTriggerContainer .trigger').scrollTop > 10)
+  const collapse = page.getByRole('button', { name: '收起侧栏', exact: true })
+  await collapse.scrollIntoViewIfNeeded()
+  await collapse.tap()
+  await page.getByRole('button', { name: '展开侧栏', exact: true }).tap()
+  await rail.evaluate(e => { e.scrollTop = 0 })
+  await page.waitForFunction(() => document.querySelector('.sidebarTriggerContainer .trigger').scrollTop === 0)
+}
+
 async function run(name, engine) {
   const browser = await engine.launch()
   const results = []
@@ -47,17 +100,21 @@ async function run(name, engine) {
     for (const [label, width, height, touch, desktopUA] of [
       ['ipad', 820, 1180, true], ['ipad-landscape', 1194, 834, true],
       ['ipad-pro', 1024, 1366, true], ['ipad-pro-landscape', 1366, 1024, true],
+      ['ipad-short', 1278, 608, true], ['ipad-short-desktop-ua', 1278, 608, true, true],
       ['ipad-desktop-ua', 820, 1180, true, true], ['split-screen', 744, 1133, true],
       ['phone', 393, 852, true], ['desktop', 1440, 900, false]
     ]) {
+      if (process.env.AVATAR_QA_VIEWPORT && label !== process.env.AVATAR_QA_VIEWPORT) continue
       const context = await browser.newContext({ storageState, viewport: { width, height }, hasTouch: touch, isMobile: touch && !desktopUA,
         ...(desktopUA ? { userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15' } : {}) })
       const page = await context.newPage(), errors = []
       page.setDefaultTimeout(20000)
       page.on('pageerror', error => errors.push(error.message))
+      // Geometry tests use the local fallback font instead of an external CDN.
+      await page.route('https://fonts.googleapis.com/**', route => route.fulfill({ contentType: 'text/css', body: '' }))
       await page.route('**/__avatar_qa_missing__.png', route => route.abort())
       try {
-        await page.goto(`${base}/?room=${encodeURIComponent(room)}&shell=focus`)
+        await page.goto(`${base}/?room=${encodeURIComponent(room)}&shell=focus`, { waitUntil: 'domcontentloaded' })
         await page.waitForFunction(() => {
           function find(vm) { if (vm && vm.mindMap && vm.mindMap.renderer) return vm; for (const child of (vm && vm.$children) || []) { const match = find(child); if (match) return match } }
           const vm = find(document.querySelector('#app').__vue__)
@@ -79,14 +136,27 @@ async function run(name, engine) {
                 state.announcementUnread = value ? 1 : 0
               }, unread)
               await page.waitForFunction(expected => document.querySelector('.notificationBadge--avatar button').classList.contains('hasMessages') === expected, unread)
+              if (unread) await page.waitForFunction(() => getComputedStyle(document.querySelector('.notificationAvatarFrame')).borderTopColor === 'rgb(230, 75, 87)')
               const r = await button.boundingBox(), a = await badge.locator('.userAvatar').boundingBox()
               near(r.width, touch ? 44 : 34, 'Avatar target width')
               near(r.height, r.width, `${label}: avatar ring must be circular`)
               assert(Math.abs(a.x + a.width / 2 - r.x - r.width / 2) < 1, 'Avatar centered horizontally')
               assert(Math.abs(a.y + a.height / 2 - r.y - r.height / 2) < 1, 'Avatar centered vertically')
+              await checkFrame(button, touch, unread)
             }
           }
-          if (touch) await button.tap(); else await button.click()
+          if (label.startsWith('ipad-short')) {
+            const rail = await page.locator('.sidebarTriggerContainer').boundingBox(), zoom = await page.locator('.mobileCanvasControls').boundingBox()
+            assert(rail.y + rail.height <= zoom.y, 'Scrolling menu and zoom controls must not overlap')
+            await page.screenshot({ path: path.join(out, `${name}-${label}-unread.png`), scale: 'css' })
+            await checkRailScroll(page, context, name, touch && !desktopUA)
+            await checkFrame(button, true, true)
+          }
+          if (touch) {
+            // The decorative unread dot must forward taps to the avatar button.
+            const dot = await badge.locator('.el-badge__content.is-dot').boundingBox(), target = await button.boundingBox()
+            await button.tap({ position: { x: dot.x + dot.width / 2 - target.x, y: dot.y + dot.height / 2 - target.y } })
+          } else await button.click()
           const closeMessages = page.getByRole('button', { name: '关闭消息中心', exact: true })
           await closeMessages.click()
           await closeMessages.waitFor({ state: 'hidden' })
@@ -123,6 +193,9 @@ async function run(name, engine) {
         assert.deepEqual(errors.filter(e => !resizeWarnings.includes(e)), [])
         results.push({ viewport: label, editorAvatarVisible: visible, resizeWarnings: resizeWarnings.length, passed: true })
         console.log('PASS', name, label)
+      } catch (error) {
+        await page.screenshot({ path: path.join(out, `${name}-${label}-failure.png`), scale: 'css', timeout: 3000 }).catch(() => {})
+        throw error
       } finally { await context.close() }
     }
   } finally { await browser.close() }
@@ -130,7 +203,11 @@ async function run(name, engine) {
 }
 
 async function main() {
-  const report = { chromium: await run('chromium', chromium), webkit: await run('webkit', webkit) }
+  const report = {}
+  for (const [name, engine] of [['chromium', chromium], ['webkit', webkit]]) {
+    if (!process.env.AVATAR_QA_ENGINE || process.env.AVATAR_QA_ENGINE === name) report[name] = await run(name, engine)
+  }
+  assert(Object.values(report).some(results => results.length), 'No matching engine or viewport')
   fs.writeFileSync(path.join(out, 'regression-report.json'), JSON.stringify(report, null, 2))
 }
 main().catch(error => { console.error(error); process.exitCode = 1 })
