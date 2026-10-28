@@ -586,7 +586,7 @@ function createServer(authorization) {
 
   server.tool(
     'list_automatic_d_nodes',
-    '跨当前身份有权读取的全部脑图，快速分页提取标题含“自动”的 D 节点。D：/D: 与富文本标题均支持，排除 D1/D2；不搜索备注或后代。返回 room_key（roomid）、uid（节点id）、标题及版本。默认50条，最多200；has_more=true 时原样传 next_cursor 继续，不能凭一页判断总数。complete=false 且 has_more=false 表示有未索引脑图，查看 incomplete_reason。只读候选列表，不创建定时任务、不执行或修改节点；“非自动”等标题也属于字面匹配，执行前必须通过 query_nodes 读取当前节点/子树并判断任务、C/P及授权。跨页为实时键集而非固定快照，定时任务每轮从首页扫描，以 room_key+uid 去重。',
+    '跨当前身份有权读取的全部脑图，快速分页定位同时满足以下两项的节点：①是 D（Do，做）节点，标题以 D：或 D: 开头；②该 D 节点自己的标题包含“自动”。只返回这些 D 节点的标识与标题预览，供后续定向读取；C/P/A 节点及普通节点即使含“自动”也不返回。兼容富文本，排除 D1/D2；不搜索备注或后代。返回 room_key（roomid）、uid（节点id）、标题及版本。默认50条，最多200；has_more=true 时原样传 next_cursor 继续，不能凭一页判断总数。complete=false 且 has_more=false 表示有未索引脑图，查看 incomplete_reason。只读候选列表，不创建定时任务、不执行或修改节点；“非自动”等标题也属于字面匹配，执行前必须通过 query_nodes 读取当前节点/子树并判断任务、C/P及授权。跨页为实时键集而非固定快照，定时任务每轮从首页扫描，以 room_key+uid 去重。',
     {
       limit: z.number().int().min(1).max(200).default(50).describe('每页候选数，默认50，最大200'),
       cursor: z.string().min(1).max(4096).describe('上一页返回的 next_cursor，必须原样传回').optional()
