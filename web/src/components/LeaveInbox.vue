@@ -28,7 +28,7 @@
             >{{ item.requester_name }}的{{ item.title || '请假申请' }}</strong
           >
           <p>
-            第{{ item.round }}轮 · {{ status(item.status)
+            第{{ item.round }}轮 · {{ status(item.status,item.notification_only)
             }}<span v-if="item.status === 'pending'">
               · {{ item.steps[item.current_step].role }}</span
             >
@@ -90,7 +90,8 @@ export default {
     window.removeEventListener('mindmap:leave-refresh', this.load)
   },
   methods: {
-    status(s) {
+    status(s,notificationOnly=false) {
+      if(s==='approved'&&notificationOnly)return '已完成'
       return (
         {
           draft: '待填写',
@@ -106,6 +107,7 @@ export default {
       return (
         {
           todo: '有审批待办需要你审核',
+          notification: '有新的登记／抄送记录',
           approved: '申请已通过',
           returned: '申请被退回补充',
           rejected: '申请未通过',

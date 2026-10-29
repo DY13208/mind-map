@@ -65,8 +65,22 @@ function compile(nodes, rootUid, kind = 'generic') {
   const flowNode = top.find(n => label(n.text) === '审批流程')
   const ruleGroup = text => /^(默认同意|以下情况拒绝|须确认)$/.test(label(text))
   const implicitSteps = requirementsNode ? top.filter(n => children(n.uid).some(c => ruleGroup(c.text))) : []
+  const ccNode = top.find(n => /^抄送/.test(label(n.text)))
+  const ccRoles = ccNode
+    ? label(ccNode.text) === '抄送'
+      ? children(ccNode.uid).map(n => label(n.text))
+      : label(ccNode.text).replace(/^抄送/, '').replace(/^[:：\s]+/, '').split(/[、,，]/).map(role => role.trim()).filter(Boolean)
+    : []
+  const config = top.find(n => /^(审批配置|审批人员配置|人员配置)$/.test(label(n.text)))
+  const aliasNode = top.find(n => label(n.text) === '触发词')
   const autoRules = top.filter(n => label(n.text) === '发起后全部流程默认同意')
-  const autoApprove = autoRules.length === 1
+  // A form plus CC is a registration/notification flow. An empty explicit
+  // approval flow, unfinished reviewer node, or manual-review instruction must
+  // never silently become notification-only.
+  const notificationOnly = !!fieldsNode && ccRoles.length > 0 && !flowNode && !implicitSteps.length && !autoRules.length &&
+    (!config || children(config.uid).every(n=>label(n.text)==='抄送')) &&
+    top.every(n => n === fieldsNode || n === ccNode || n === config || n === aliasNode || markers.includes(n))
+  const autoApprove = autoRules.length === 1 || notificationOnly
   // 「AI预审」显式开启；「人工审批」显式关闭（AI 预审默认对全部流程生效）。
   const aiReviewNode = top.find(n => /^AI预审$/.test(label(n.text)))
   const aiReview = !!aiReviewNode
@@ -78,10 +92,6 @@ function compile(nodes, rootUid, kind = 'generic') {
   if (autoApprove && implicitSteps.some(n => descendants(n.uid).some(c => /^(以下情况拒绝|须确认)$/.test(label(c.text)))))
     errors.push('全流程默认同意与角色的拒绝或须确认条件冲突，请先明确规则')
   if (autoRules.length > 1) errors.push('默认同意规则重复，请合并后重新发布')
-  const config = top.find(n =>
-    /^(审批配置|审批人员配置|人员配置)$/.test(label(n.text))
-  )
-  const aliasNode = top.find(n => label(n.text) === '触发词')
   const title = label(root.text),
     flowId = markers.length ? marker(markers[0].text)[1].trim() : 'node:' + rootUid
   const materialUids = new Set()
@@ -212,17 +222,6 @@ function compile(nodes, rootUid, kind = 'generic') {
   if (steps.length > 20) errors.push('审批步骤超过20步')
   if (new Set(steps.map(s => s.role)).size !== steps.length)
     errors.push('审批步骤名称重复，请使用明确的角色名称')
-  const ccNode = top.find(n => /^抄送/.test(label(n.text)))
-  const ccRoles = ccNode
-    ? label(ccNode.text) === '抄送'
-      ? children(ccNode.uid).map(n => label(n.text))
-      : label(ccNode.text)
-          .replace(/^抄送/, '')
-          .replace(/^[:：\s]+/, '')
-          .split(/[、,，]/)
-          .map(role => role.trim())
-          .filter(Boolean)
-    : []
   const ccBindings = ccRoles.map(role => ({ role, ...binding(role, true) }))
   const aliases = [
     ...new Set(
@@ -241,8 +240,9 @@ function compile(nodes, rootUid, kind = 'generic') {
     rootUid,
     markerUid: markers.length ? markers[0].uid : null,
     requirementsNodeUid: requirementsNode ? requirementsNode.uid : null,
+    notificationOnly,
     autoApprove,
-    autoApproveRule: autoApprove ? { uid: autoRules[0].uid, text: autoRules[0].text } : null,
+    autoApproveRule: notificationOnly ? {uid:ccNode.uid,text:'仅抄送，无需审批'} : autoApprove ? { uid: autoRules[0].uid, text: autoRules[0].text } : null,
     aiReview,
     aiReviewNodeUid: aiReviewNode ? aiReviewNode.uid : null,
     humanOnly,
@@ -263,7 +263,7 @@ function compile(nodes, rootUid, kind = 'generic') {
         parent: n.parent_uid,
         position: n.position,
         text: n.text
-      })).concat(requirementsNode ? [{ fieldSchema: fields.map(f => ({uid:f.uid,type:f.type,required:f.required,options:f.options,min:f.min,max:f.max})) }] : [])
+      })).concat(requirementsNode ? [{ fieldSchema: fields.map(f => ({uid:f.uid,type:f.type,required:f.required,options:f.options,min:f.min,max:f.max})) }] : []).concat(notificationOnly ? [{workflowMode:'notification_only'}] : [])
     )
   }
 }

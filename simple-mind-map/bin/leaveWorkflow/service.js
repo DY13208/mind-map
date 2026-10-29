@@ -1170,7 +1170,8 @@ async function mutate(pool, req, id, action, body) {
               fingerprint: row.template.fingerprint
             }
           } : {}),
-          ...(row.template.autoApprove ? {
+          ...(row.template.notificationOnly ? {completion:{kind:'notification_only',description:'材料完整并确认提交，完成登记并抄送，无审核步骤'}} : {}),
+          ...(row.template.autoApprove && !row.template.notificationOnly ? {
             automaticDecision: {
               decision: 'approve',
               rule: row.template.autoApproveRule,
@@ -1282,7 +1283,7 @@ async function mutate(pool, req, id, action, body) {
     row.revision++
     const saved = await update(db, row)
     await event(db, saved, who, action, replay, detail)
-    if (saved.status === 'approved') await require('./hrmsSync').enqueue(db, saved)
+    if (saved.status === 'approved' && !saved.template.notificationOnly) await require('./hrmsSync').enqueue(db, saved)
     if (
       (action === 'submit' && saved.status === 'pending') ||
       (action === 'decide' && saved.status === 'pending')
@@ -1299,7 +1300,7 @@ async function mutate(pool, req, id, action, body) {
         db,
         saved,
         [saved.requester_id, ...(saved.status === 'approved' ? saved.cc : [])],
-        saved.status
+        saved.template.notificationOnly ? 'notification' : saved.status
       )
     if (action === 'withdraw')
       await notify(
@@ -1326,7 +1327,7 @@ async function list(pool, req, filters = {}) {
   }[scope]
   const rows = (
     await pool.query(
-      `select r.id,r.status,r.revision,r.round,r.current_step,r.steps,r.created_at,r.updated_at,coalesce(u.name,r.requester_id) requester_name,case when r.template->>'kind'='generic' then r.template->>'title' else '请假申请' end title from leave_requests r left join wecom_users u on u.user_id=r.requester_id and u.corp_id=r.corp_id where r.corp_id=$1 and ${condition} order by r.updated_at desc,r.id limit $3 offset $4`,
+      `select r.id,r.status,r.revision,r.round,r.current_step,r.steps,r.created_at,r.updated_at,(r.template->>'notificationOnly')='true' notification_only,coalesce(u.name,r.requester_id) requester_name,case when r.template->>'kind'='generic' then r.template->>'title' else '请假申请' end title from leave_requests r left join wecom_users u on u.user_id=r.requester_id and u.corp_id=r.corp_id where r.corp_id=$1 and ${condition} order by r.updated_at desc,r.id limit $3 offset $4`,
       [who.corp_id, who.user_id, limit, offset]
     )
   ).rows

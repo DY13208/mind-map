@@ -2,6 +2,8 @@
 
 脑图节点定义字段、审核要点、审批人与抄送人；执行以当前已发布的版本为准。
 
+只有提交要求和抄送、没有审核步骤或其他审核指令的节点，识别为“仅抄送，无需审批”。发布页会明确显示该类型；材料齐全并经本人确认提交后完成登记，通知抄送人，不生成审核待办、人工决定或HRMS审批通过凭证。空的显式审批流程、未完成的审核角色或人工审批指令不会被自动降级为仅抄送。
+
 ## 脑图入口
 
 `approval_request prepare`使用`input_mode=node`、`use_source_node=true`、原节点room_key/node_uid及template_source。材料填写在原流程的提交要求中，随后import核对。提交携带expected_node_hash、expected_revision、operation_id、expected_definition_version及confirm_submission。

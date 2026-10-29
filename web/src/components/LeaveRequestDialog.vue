@@ -134,7 +134,7 @@
           <el-tab-pane label="审批流程与依据" name="flow">
             <el-alert
               v-if="row.template.autoApprove"
-              title="本流程按“发起后全部流程默认同意”规则执行：提交要求填写完整并确认提交后，自动同意并通知已配置的抄送人。"
+              :title="row.template.notificationOnly ? '本流程仅抄送，无需审批：材料填写完整并确认提交后完成登记，通知抄送人，不生成审核待办。' : '本流程按“发起后全部流程默认同意”规则执行：提交要求填写完整并确认提交后，自动同意并通知已配置的抄送人。'"
               type="info"
               :closable="false"
               show-icon
@@ -400,6 +400,7 @@ export default {
   },
   methods: {
     statusLabel(s) {
+      if(s==='approved'&&this.row&&this.row.template.notificationOnly)return '已完成'
       return (
         {
           draft: '待填写',
