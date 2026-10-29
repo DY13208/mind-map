@@ -1,0 +1,2035 @@
+[
+  {
+    "id": "employee_roster.hr_roster.api.contract.cancel_contract",
+    "module": "employee_roster.hr_roster.api.contract",
+    "name": "cancel_contract",
+    "params": [
+      "name",
+      "reason"
+    ],
+    "http": "POST",
+    "policy": "manual",
+    "reason": "合同及签署操作需在专用流程中办理"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.contract.configure_fadada_template",
+    "module": "employee_roster.hr_roster.api.contract",
+    "name": "configure_fadada_template",
+    "params": [
+      "template",
+      "seal_id",
+      "business_id"
+    ],
+    "http": "POST",
+    "policy": "manual",
+    "reason": "合同及签署操作需在专用流程中办理"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.contract.create_contract_signing",
+    "module": "employee_roster.hr_roster.api.contract",
+    "name": "create_contract_signing",
+    "params": [
+      "template",
+      "employee",
+      "trans_reference",
+      "contract_fields"
+    ],
+    "http": "POST",
+    "policy": "manual",
+    "reason": "合同及签署操作需在专用流程中办理"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.contract.download_signed_contract",
+    "module": "employee_roster.hr_roster.api.contract",
+    "name": "download_signed_contract",
+    "params": [
+      "name"
+    ],
+    "http": "POST",
+    "policy": "manual",
+    "reason": "合同及签署操作需在专用流程中办理"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.contract.get_contract_editor_preview",
+    "module": "employee_roster.hr_roster.api.contract",
+    "name": "get_contract_editor_preview",
+    "params": [
+      "template",
+      "employee",
+      "contract_fields",
+      "force_refresh"
+    ],
+    "http": "POST",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.contract.get_contract_signing",
+    "module": "employee_roster.hr_roster.api.contract",
+    "name": "get_contract_signing",
+    "params": [
+      "name"
+    ],
+    "http": "GET",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.contract.get_fadada_seal_authorization_url",
+    "module": "employee_roster.hr_roster.api.contract",
+    "name": "get_fadada_seal_authorization_url",
+    "params": [
+      "seal_id",
+      "business_id",
+      "redirect_url"
+    ],
+    "http": "POST",
+    "policy": "manual",
+    "reason": "合同及签署操作需在专用流程中办理"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.contract.get_fadada_seal_status",
+    "module": "employee_roster.hr_roster.api.contract",
+    "name": "get_fadada_seal_status",
+    "params": [
+      "seal_id"
+    ],
+    "http": "GET",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.contract.get_fadada_seals",
+    "module": "employee_roster.hr_roster.api.contract",
+    "name": "get_fadada_seals",
+    "params": [],
+    "http": "GET",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.contract.get_fadada_template_edit_url",
+    "module": "employee_roster.hr_roster.api.contract",
+    "name": "get_fadada_template_edit_url",
+    "params": [
+      "template"
+    ],
+    "http": "POST",
+    "policy": "manual",
+    "reason": "合同及签署操作需在专用流程中办理"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.contract.get_sign_url",
+    "module": "employee_roster.hr_roster.api.contract",
+    "name": "get_sign_url",
+    "params": [
+      "name",
+      "jump_url",
+      "expired_on",
+      "actor_type"
+    ],
+    "http": "POST",
+    "policy": "manual",
+    "reason": "合同及签署操作需在专用流程中办理"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.contract.get_templates",
+    "module": "employee_roster.hr_roster.api.contract",
+    "name": "get_templates",
+    "params": [],
+    "http": "GET",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.contract.handle_fadada_callback",
+    "module": "employee_roster.hr_roster.api.contract",
+    "name": "handle_fadada_callback",
+    "params": [],
+    "http": "POST",
+    "policy": "manual",
+    "reason": "合同及签署操作需在专用流程中办理"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.contract.handle_tencent_callback",
+    "module": "employee_roster.hr_roster.api.contract",
+    "name": "handle_tencent_callback",
+    "params": [],
+    "http": "POST",
+    "policy": "manual",
+    "reason": "合同及签署操作需在专用流程中办理"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.contract.list_contract_signings",
+    "module": "employee_roster.hr_roster.api.contract",
+    "name": "list_contract_signings",
+    "params": [
+      "employee",
+      "status",
+      "start",
+      "page_length"
+    ],
+    "http": "GET",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.contract.preview_contract",
+    "module": "employee_roster.hr_roster.api.contract",
+    "name": "preview_contract",
+    "params": [
+      "template",
+      "employee",
+      "contract_fields",
+      "trans_reference"
+    ],
+    "http": "POST",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.contract.retry_contract",
+    "module": "employee_roster.hr_roster.api.contract",
+    "name": "retry_contract",
+    "params": [
+      "name"
+    ],
+    "http": "POST",
+    "policy": "manual",
+    "reason": "合同及签署操作需在专用流程中办理"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.contract.sync_contract_status",
+    "module": "employee_roster.hr_roster.api.contract",
+    "name": "sync_contract_status",
+    "params": [
+      "name"
+    ],
+    "http": "POST",
+    "policy": "manual",
+    "reason": "合同及签署操作需在专用流程中办理"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.contract.urge_contract",
+    "module": "employee_roster.hr_roster.api.contract",
+    "name": "urge_contract",
+    "params": [
+      "name"
+    ],
+    "http": "POST",
+    "policy": "manual",
+    "reason": "合同及签署操作需在专用流程中办理"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.employee_account.create_employee_account",
+    "module": "employee_roster.hr_roster.api.employee_account",
+    "name": "create_employee_account",
+    "params": [
+      "login_account",
+      "company"
+    ],
+    "http": "POST",
+    "policy": "manual",
+    "reason": "涉及人工审批、主档、权限、签署、删除、工资或文件传输，保留人工或专用工具入口"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.employee_account.delete_roster_employee",
+    "module": "employee_roster.hr_roster.api.employee_account",
+    "name": "delete_roster_employee",
+    "params": [
+      "name"
+    ],
+    "http": "POST",
+    "policy": "manual",
+    "reason": "涉及人工审批、主档、权限、签署、删除、工资或文件传输，保留人工或专用工具入口"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.employee_center.delete_draft",
+    "module": "employee_roster.hr_roster.api.employee_center",
+    "name": "delete_draft",
+    "params": [
+      "instance_name"
+    ],
+    "http": "POST",
+    "policy": "manual",
+    "reason": "涉及人工审批、主档、权限、签署、删除、工资或文件传输，保留人工或专用工具入口"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.employee_center.get_application_setup",
+    "module": "employee_roster.hr_roster.api.employee_center",
+    "name": "get_application_setup",
+    "params": [
+      "application_type",
+      "instance_name",
+      "on_behalf_employee"
+    ],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.employee_center.get_context",
+    "module": "employee_roster.hr_roster.api.employee_center",
+    "name": "get_context",
+    "params": [],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.employee_center.get_employee_center_attachment_info",
+    "module": "employee_roster.hr_roster.api.employee_center",
+    "name": "get_employee_center_attachment_info",
+    "params": [
+      "file_url"
+    ],
+    "http": "GET/POST",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.employee_center.list_my_applications",
+    "module": "employee_roster.hr_roster.api.employee_center",
+    "name": "list_my_applications",
+    "params": [
+      "status",
+      "application_type",
+      "date_from",
+      "date_to",
+      "keyword",
+      "limit_start",
+      "page_length"
+    ],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.employee_center.preview_application_process",
+    "module": "employee_roster.hr_roster.api.employee_center",
+    "name": "preview_application_process",
+    "params": [
+      "application_type",
+      "payload",
+      "on_behalf_employee"
+    ],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.employee_center.preview_employee_center_attachment",
+    "module": "employee_roster.hr_roster.api.employee_center",
+    "name": "preview_employee_center_attachment",
+    "params": [
+      "file_url"
+    ],
+    "http": "GET/POST",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.employee_center.save_application",
+    "module": "employee_roster.hr_roster.api.employee_center",
+    "name": "save_application",
+    "params": [
+      "application_type",
+      "payload",
+      "instance_name",
+      "submit",
+      "on_behalf_employee"
+    ],
+    "http": "POST",
+    "policy": "write",
+    "reason": "先展示本次参数，用户明确确认后执行"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.employee_center.upload_employee_center_attachment",
+    "module": "employee_roster.hr_roster.api.employee_center",
+    "name": "upload_employee_center_attachment",
+    "params": [],
+    "http": "POST",
+    "policy": "manual",
+    "reason": "涉及人工审批、主档、权限、签署、删除、工资或文件传输，保留人工或专用工具入口"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.employee_checkin_dashboard.get_checkin_dashboard",
+    "module": "employee_roster.hr_roster.api.employee_checkin_dashboard",
+    "name": "get_checkin_dashboard",
+    "params": [
+      "timespan",
+      "from_date",
+      "to_date"
+    ],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.employee_checkin_dashboard.get_default_checkin_date",
+    "module": "employee_roster.hr_roster.api.employee_checkin_dashboard",
+    "name": "get_default_checkin_date",
+    "params": [],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.employee_relations.cancel_onboarding",
+    "module": "employee_roster.hr_roster.api.employee_relations",
+    "name": "cancel_onboarding",
+    "params": [
+      "name",
+      "names"
+    ],
+    "http": "POST",
+    "policy": "write",
+    "reason": "先展示本次参数，用户明确确认后执行"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.employee_relations.confirm_offboarding",
+    "module": "employee_roster.hr_roster.api.employee_relations",
+    "name": "confirm_offboarding",
+    "params": [
+      "name",
+      "actual_relieving_date"
+    ],
+    "http": "POST",
+    "policy": "manual",
+    "reason": "涉及人工审批、主档、权限、签署、删除、工资或文件传输，保留人工或专用工具入口"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.employee_relations.confirm_onboarding",
+    "module": "employee_roster.hr_roster.api.employee_relations",
+    "name": "confirm_onboarding",
+    "params": [
+      "name",
+      "actual_joining_date"
+    ],
+    "http": "POST",
+    "policy": "manual",
+    "reason": "涉及人工审批、主档、权限、签署、删除、工资或文件传输，保留人工或专用工具入口"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.employee_relations.confirm_probation",
+    "module": "employee_roster.hr_roster.api.employee_relations",
+    "name": "confirm_probation",
+    "params": [
+      "name",
+      "actual_confirmation_date"
+    ],
+    "http": "POST",
+    "policy": "manual",
+    "reason": "涉及人工审批、主档、权限、签署、删除、工资或文件传输，保留人工或专用工具入口"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.employee_relations.create_onboarding",
+    "module": "employee_roster.hr_roster.api.employee_relations",
+    "name": "create_onboarding",
+    "params": [
+      "employee_name",
+      "cell_number",
+      "company",
+      "department",
+      "designation",
+      "expected_joining_date",
+      "personal_email",
+      "reports_to",
+      "remark"
+    ],
+    "http": "POST",
+    "policy": "write",
+    "reason": "先展示本次参数，用户明确确认后执行"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.employee_relations.export_offboarding",
+    "module": "employee_roster.hr_roster.api.employee_relations",
+    "name": "export_offboarding",
+    "params": [
+      "status",
+      "keyword",
+      "department",
+      "designation",
+      "company",
+      "resignation_type",
+      "approval_status",
+      "order"
+    ],
+    "http": "POST",
+    "policy": "manual",
+    "reason": "需在页面人工办理或使用专用业务工具"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.employee_relations.get_record",
+    "module": "employee_roster.hr_roster.api.employee_relations",
+    "name": "get_record",
+    "params": [
+      "kind",
+      "name"
+    ],
+    "http": "GET/POST",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.employee_relations.import_offboarding",
+    "module": "employee_roster.hr_roster.api.employee_relations",
+    "name": "import_offboarding",
+    "params": [
+      "content",
+      "company"
+    ],
+    "http": "POST",
+    "policy": "manual",
+    "reason": "涉及人事批量写入、个人凭据或文件，保留人工或专用流程入口"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.employee_relations.list_records",
+    "module": "employee_roster.hr_roster.api.employee_relations",
+    "name": "list_records",
+    "params": [
+      "kind",
+      "status",
+      "keyword",
+      "department",
+      "designation",
+      "company",
+      "order",
+      "page",
+      "page_size",
+      "resignation_type",
+      "approval_status"
+    ],
+    "http": "GET/POST",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.employee_relations.search_employees",
+    "module": "employee_roster.hr_roster.api.employee_relations",
+    "name": "search_employees",
+    "params": [
+      "keyword",
+      "company",
+      "limit"
+    ],
+    "http": "GET/POST",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.employee_relations.start_offboarding",
+    "module": "employee_roster.hr_roster.api.employee_relations",
+    "name": "start_offboarding",
+    "params": [
+      "name",
+      "resignation_type",
+      "resignation_reason",
+      "planned_resignation_date",
+      "handover_employee",
+      "reason_description",
+      "signature_base64",
+      "remark"
+    ],
+    "http": "POST",
+    "policy": "manual",
+    "reason": "涉及人工审批、主档、权限、签署、删除、工资或文件传输，保留人工或专用工具入口"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.employee_relations.start_probation",
+    "module": "employee_roster.hr_roster.api.employee_relations",
+    "name": "start_probation",
+    "params": [
+      "name",
+      "confirm_date",
+      "opinion",
+      "remark"
+    ],
+    "http": "POST",
+    "policy": "write",
+    "reason": "先展示本次参数，用户明确确认后执行"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.employee_relations.update_onboarding",
+    "module": "employee_roster.hr_roster.api.employee_relations",
+    "name": "update_onboarding",
+    "params": [
+      "name",
+      "employee_name",
+      "department",
+      "designation",
+      "expected_joining_date",
+      "personal_email",
+      "reports_to",
+      "remark"
+    ],
+    "http": "POST",
+    "policy": "write",
+    "reason": "先展示本次参数，用户明确确认后执行"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.hr_home.get_hr_dashboard",
+    "module": "employee_roster.hr_roster.api.hr_home",
+    "name": "get_hr_dashboard",
+    "params": [
+      "company"
+    ],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.hr_home.get_hr_workplace",
+    "module": "employee_roster.hr_roster.api.hr_home",
+    "name": "get_hr_workplace",
+    "params": [
+      "company"
+    ],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.personal_center.bind_my_wecom",
+    "module": "employee_roster.hr_roster.api.personal_center",
+    "name": "bind_my_wecom",
+    "params": [],
+    "http": "POST",
+    "policy": "internal",
+    "reason": "登录、凭据、回调或基础设施接口，不供Agent直接调用"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.personal_center.change_my_password",
+    "module": "employee_roster.hr_roster.api.personal_center",
+    "name": "change_my_password",
+    "params": [
+      "current_password",
+      "new_password",
+      "confirm_password"
+    ],
+    "http": "POST",
+    "policy": "internal",
+    "reason": "登录、凭据、回调或基础设施接口，不供Agent直接调用"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.personal_center.get_context",
+    "module": "employee_roster.hr_roster.api.personal_center",
+    "name": "get_context",
+    "params": [],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.personal_center.update_my_email",
+    "module": "employee_roster.hr_roster.api.personal_center",
+    "name": "update_my_email",
+    "params": [
+      "email"
+    ],
+    "http": "POST",
+    "policy": "manual",
+    "reason": "涉及人事批量写入、个人凭据或文件，保留人工或专用流程入口"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.personal_center.update_my_login",
+    "module": "employee_roster.hr_roster.api.personal_center",
+    "name": "update_my_login",
+    "params": [
+      "current_password",
+      "username",
+      "new_password",
+      "confirm_password"
+    ],
+    "http": "POST",
+    "policy": "internal",
+    "reason": "登录、凭据、回调或基础设施接口，不供Agent直接调用"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.position_distribution.create_position",
+    "module": "employee_roster.hr_roster.api.position_distribution",
+    "name": "create_position",
+    "params": [
+      "data"
+    ],
+    "http": "POST",
+    "policy": "write",
+    "reason": "先展示本次参数，用户明确确认后执行"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.position_distribution.delete_position",
+    "module": "employee_roster.hr_roster.api.position_distribution",
+    "name": "delete_position",
+    "params": [
+      "name",
+      "company"
+    ],
+    "http": "POST",
+    "policy": "manual",
+    "reason": "涉及人工审批、主档、权限、签署、删除、工资或文件传输，保留人工或专用工具入口"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.position_distribution.get_position",
+    "module": "employee_roster.hr_roster.api.position_distribution",
+    "name": "get_position",
+    "params": [
+      "name",
+      "company"
+    ],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.position_distribution.get_position_options",
+    "module": "employee_roster.hr_roster.api.position_distribution",
+    "name": "get_position_options",
+    "params": [
+      "company"
+    ],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.position_distribution.list_position_employees",
+    "module": "employee_roster.hr_roster.api.position_distribution",
+    "name": "list_position_employees",
+    "params": [
+      "name",
+      "company",
+      "page",
+      "page_size"
+    ],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.position_distribution.list_positions",
+    "module": "employee_roster.hr_roster.api.position_distribution",
+    "name": "list_positions",
+    "params": [
+      "company",
+      "keyword",
+      "department",
+      "grade",
+      "category",
+      "management",
+      "critical",
+      "page",
+      "page_size"
+    ],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.position_distribution.update_position",
+    "module": "employee_roster.hr_roster.api.position_distribution",
+    "name": "update_position",
+    "params": [
+      "name",
+      "data"
+    ],
+    "http": "POST",
+    "policy": "write",
+    "reason": "先展示本次参数，用户明确确认后执行"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.signature.delete_my_signature",
+    "module": "employee_roster.hr_roster.api.signature",
+    "name": "delete_my_signature",
+    "params": [],
+    "http": "POST",
+    "policy": "manual",
+    "reason": "涉及人工审批、主档、权限、签署、删除、工资或文件传输，保留人工或专用工具入口"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.signature.get_my_signature",
+    "module": "employee_roster.hr_roster.api.signature",
+    "name": "get_my_signature",
+    "params": [],
+    "http": "GET/POST",
+    "policy": "manual",
+    "reason": "涉及人事批量写入、个人凭据或文件，保留人工或专用流程入口"
+  },
+  {
+    "id": "employee_roster.hr_roster.api.signature.save_my_signature",
+    "module": "employee_roster.hr_roster.api.signature",
+    "name": "save_my_signature",
+    "params": [
+      "signature_base64"
+    ],
+    "http": "POST",
+    "policy": "manual",
+    "reason": "涉及人工审批、主档、权限、签署、删除、工资或文件传输，保留人工或专用工具入口"
+  },
+  {
+    "id": "employee_roster.hr_roster.approval_admin.delete_approval_forms",
+    "module": "employee_roster.hr_roster.approval_admin",
+    "name": "delete_approval_forms",
+    "params": [
+      "names"
+    ],
+    "http": "ANY",
+    "policy": "manual",
+    "reason": "涉及人工审批、主档、权限、签署、删除、工资或文件传输，保留人工或专用工具入口"
+  },
+  {
+    "id": "employee_roster.hr_roster.approval_admin.delete_approval_group",
+    "module": "employee_roster.hr_roster.approval_admin",
+    "name": "delete_approval_group",
+    "params": [
+      "name"
+    ],
+    "http": "ANY",
+    "policy": "manual",
+    "reason": "涉及人工审批、主档、权限、签署、删除、工资或文件传输，保留人工或专用工具入口"
+  },
+  {
+    "id": "employee_roster.hr_roster.approval_admin.list_approval_forms",
+    "module": "employee_roster.hr_roster.approval_admin",
+    "name": "list_approval_forms",
+    "params": [
+      "group",
+      "keyword"
+    ],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.approval_admin.list_approval_groups",
+    "module": "employee_roster.hr_roster.approval_admin",
+    "name": "list_approval_groups",
+    "params": [],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.approval_admin.list_approval_templates",
+    "module": "employee_roster.hr_roster.approval_admin",
+    "name": "list_approval_templates",
+    "params": [
+      "category",
+      "keyword"
+    ],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.approval_admin.save_approval_form",
+    "module": "employee_roster.hr_roster.approval_admin",
+    "name": "save_approval_form",
+    "params": [
+      "payload"
+    ],
+    "http": "ANY",
+    "policy": "manual",
+    "reason": "涉及人工审批、主档、权限、签署、删除、工资或文件传输，保留人工或专用工具入口"
+  },
+  {
+    "id": "employee_roster.hr_roster.approval_admin.save_approval_group",
+    "module": "employee_roster.hr_roster.approval_admin",
+    "name": "save_approval_group",
+    "params": [
+      "payload"
+    ],
+    "http": "ANY",
+    "policy": "manual",
+    "reason": "涉及人工审批、主档、权限、签署、删除、工资或文件传输，保留人工或专用工具入口"
+  },
+  {
+    "id": "employee_roster.hr_roster.approval_admin.search_assignable_users",
+    "module": "employee_roster.hr_roster.approval_admin",
+    "name": "search_assignable_users",
+    "params": [
+      "txt",
+      "users"
+    ],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.approval_admin.use_approval_template",
+    "module": "employee_roster.hr_roster.approval_admin",
+    "name": "use_approval_template",
+    "params": [
+      "template_name",
+      "group"
+    ],
+    "http": "ANY",
+    "policy": "manual",
+    "reason": "涉及人工审批、主档、权限、签署、删除、工资或文件传输，保留人工或专用工具入口"
+  },
+  {
+    "id": "employee_roster.hr_roster.approval_engine.notifications.get_desk_notifications",
+    "module": "employee_roster.hr_roster.approval_engine.notifications",
+    "name": "get_desk_notifications",
+    "params": [
+      "limit"
+    ],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.approval_engine.notifications.get_unread_notification_count",
+    "module": "employee_roster.hr_roster.approval_engine.notifications",
+    "name": "get_unread_notification_count",
+    "params": [],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.approval_engine.notifications.mark_all_notifications_read",
+    "module": "employee_roster.hr_roster.approval_engine.notifications",
+    "name": "mark_all_notifications_read",
+    "params": [],
+    "http": "ANY",
+    "policy": "write",
+    "reason": "先展示本次参数，用户明确确认后执行"
+  },
+  {
+    "id": "employee_roster.hr_roster.approval_engine.notifications.mark_notification_read",
+    "module": "employee_roster.hr_roster.approval_engine.notifications",
+    "name": "mark_notification_read",
+    "params": [
+      "name"
+    ],
+    "http": "ANY",
+    "policy": "write",
+    "reason": "先展示本次参数，用户明确确认后执行"
+  },
+  {
+    "id": "employee_roster.hr_roster.approval_runtime.cancel_approval",
+    "module": "employee_roster.hr_roster.approval_runtime",
+    "name": "cancel_approval",
+    "params": [
+      "instance_name",
+      "comment"
+    ],
+    "http": "ANY",
+    "policy": "write",
+    "reason": "先展示本次参数，用户明确确认后执行"
+  },
+  {
+    "id": "employee_roster.hr_roster.approval_runtime.complete_approval_task",
+    "module": "employee_roster.hr_roster.approval_runtime",
+    "name": "complete_approval_task",
+    "params": [
+      "task_name",
+      "action",
+      "comment",
+      "form_data"
+    ],
+    "http": "ANY",
+    "policy": "manual",
+    "reason": "涉及人工审批、主档、权限、签署、删除、工资或文件传输，保留人工或专用工具入口"
+  },
+  {
+    "id": "employee_roster.hr_roster.approval_runtime.get_form_design",
+    "module": "employee_roster.hr_roster.approval_runtime",
+    "name": "get_form_design",
+    "params": [
+      "name"
+    ],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.approval_runtime.get_start_form",
+    "module": "employee_roster.hr_roster.approval_runtime",
+    "name": "get_start_form",
+    "params": [
+      "name",
+      "form_data"
+    ],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.approval_runtime.get_template_design",
+    "module": "employee_roster.hr_roster.approval_runtime",
+    "name": "get_template_design",
+    "params": [
+      "name"
+    ],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.approval_runtime.get_workspace_detail",
+    "module": "employee_roster.hr_roster.approval_runtime",
+    "name": "get_workspace_detail",
+    "params": [
+      "instance_name",
+      "task_name"
+    ],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.approval_runtime.list_approval_positions",
+    "module": "employee_roster.hr_roster.approval_runtime",
+    "name": "list_approval_positions",
+    "params": [
+      "company"
+    ],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.approval_runtime.list_startable_forms",
+    "module": "employee_roster.hr_roster.approval_runtime",
+    "name": "list_startable_forms",
+    "params": [
+      "keyword"
+    ],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.approval_runtime.list_workspace_items",
+    "module": "employee_roster.hr_roster.approval_runtime",
+    "name": "list_workspace_items",
+    "params": [
+      "view",
+      "keyword",
+      "limit"
+    ],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.approval_runtime.preview_start_process",
+    "module": "employee_roster.hr_roster.approval_runtime",
+    "name": "preview_start_process",
+    "params": [
+      "form_name",
+      "form_data"
+    ],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.approval_runtime.save_form_design",
+    "module": "employee_roster.hr_roster.approval_runtime",
+    "name": "save_form_design",
+    "params": [
+      "payload"
+    ],
+    "http": "ANY",
+    "policy": "manual",
+    "reason": "涉及人工审批、主档、权限、签署、删除、工资或文件传输，保留人工或专用工具入口"
+  },
+  {
+    "id": "employee_roster.hr_roster.approval_runtime.save_template_design",
+    "module": "employee_roster.hr_roster.approval_runtime",
+    "name": "save_template_design",
+    "params": [
+      "payload"
+    ],
+    "http": "ANY",
+    "policy": "manual",
+    "reason": "涉及人工审批、主档、权限、签署、删除、工资或文件传输，保留人工或专用工具入口"
+  },
+  {
+    "id": "employee_roster.hr_roster.approval_runtime.start_approval",
+    "module": "employee_roster.hr_roster.approval_runtime",
+    "name": "start_approval",
+    "params": [
+      "form_name",
+      "form_data"
+    ],
+    "http": "ANY",
+    "policy": "write",
+    "reason": "先展示本次参数，用户明确确认后执行"
+  },
+  {
+    "id": "employee_roster.hr_roster.approval_runtime.transfer_approval_task",
+    "module": "employee_roster.hr_roster.approval_runtime",
+    "name": "transfer_approval_task",
+    "params": [
+      "task_name",
+      "to_user",
+      "comment"
+    ],
+    "http": "ANY",
+    "policy": "manual",
+    "reason": "需在页面人工办理或使用专用业务工具"
+  },
+  {
+    "id": "employee_roster.hr_roster.approval_runtime.workspace_stats",
+    "module": "employee_roster.hr_roster.approval_runtime",
+    "name": "workspace_stats",
+    "params": [],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.attendance_deduction.engine.preview_deduction",
+    "module": "employee_roster.hr_roster.attendance_deduction.engine",
+    "name": "preview_deduction",
+    "params": [
+      "employee",
+      "start_date",
+      "end_date"
+    ],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.attendance_deduction.payroll_integration.create_attendance_deduction_summaries",
+    "module": "employee_roster.hr_roster.attendance_deduction.payroll_integration",
+    "name": "create_attendance_deduction_summaries",
+    "params": [
+      "payroll_entry"
+    ],
+    "http": "ANY",
+    "policy": "manual",
+    "reason": "涉及人工审批、主档、权限、签署、删除、工资或文件传输，保留人工或专用工具入口"
+  },
+  {
+    "id": "employee_roster.hr_roster.auth.request_password_reset",
+    "module": "employee_roster.hr_roster.auth",
+    "name": "request_password_reset",
+    "params": [
+      "login_id"
+    ],
+    "http": "POST",
+    "policy": "internal",
+    "reason": "登录、凭据、回调或基础设施接口，不供Agent直接调用"
+  },
+  {
+    "id": "employee_roster.hr_roster.employee_detail.get_employee_archive",
+    "module": "employee_roster.hr_roster.employee_detail",
+    "name": "get_employee_archive",
+    "params": [
+      "employee"
+    ],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.employee_detail.get_employee_overview",
+    "module": "employee_roster.hr_roster.employee_detail",
+    "name": "get_employee_overview",
+    "params": [
+      "employee"
+    ],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.employee_detail.save_contract_attachment",
+    "module": "employee_roster.hr_roster.employee_detail",
+    "name": "save_contract_attachment",
+    "params": [
+      "employee",
+      "file_key",
+      "file_url"
+    ],
+    "http": "ANY",
+    "policy": "manual",
+    "reason": "涉及人事批量写入、个人凭据或文件，保留人工或专用流程入口"
+  },
+  {
+    "id": "employee_roster.hr_roster.employee_detail.save_employee_child_row",
+    "module": "employee_roster.hr_roster.employee_detail",
+    "name": "save_employee_child_row",
+    "params": [
+      "employee",
+      "table_key",
+      "row",
+      "delete"
+    ],
+    "http": "ANY",
+    "policy": "manual",
+    "reason": "涉及人工审批、主档、权限、签署、删除、工资或文件传输，保留人工或专用工具入口"
+  },
+  {
+    "id": "employee_roster.hr_roster.employee_detail.save_employee_material",
+    "module": "employee_roster.hr_roster.employee_detail",
+    "name": "save_employee_material",
+    "params": [
+      "employee",
+      "fieldname",
+      "file_url",
+      "remove_url"
+    ],
+    "http": "ANY",
+    "policy": "manual",
+    "reason": "涉及人工审批、主档、权限、签署、删除、工资或文件传输，保留人工或专用工具入口"
+  },
+  {
+    "id": "employee_roster.hr_roster.employee_detail.save_employee_section",
+    "module": "employee_roster.hr_roster.employee_detail",
+    "name": "save_employee_section",
+    "params": [
+      "employee",
+      "section",
+      "data"
+    ],
+    "http": "ANY",
+    "policy": "manual",
+    "reason": "涉及人工审批、主档、权限、签署、删除、工资或文件传输，保留人工或专用工具入口"
+  },
+  {
+    "id": "employee_roster.hr_roster.menu_permissions.assign_business_roles",
+    "module": "employee_roster.hr_roster.menu_permissions",
+    "name": "assign_business_roles",
+    "params": [
+      "user",
+      "company",
+      "roles"
+    ],
+    "http": "POST",
+    "policy": "manual",
+    "reason": "涉及人工审批、主档、权限、签署、删除、工资或文件传输，保留人工或专用工具入口"
+  },
+  {
+    "id": "employee_roster.hr_roster.menu_permissions.assign_business_roles_bulk",
+    "module": "employee_roster.hr_roster.menu_permissions",
+    "name": "assign_business_roles_bulk",
+    "params": [
+      "users",
+      "company",
+      "roles"
+    ],
+    "http": "POST",
+    "policy": "manual",
+    "reason": "涉及人工审批、主档、权限、签署、删除、工资或文件传输，保留人工或专用工具入口"
+  },
+  {
+    "id": "employee_roster.hr_roster.menu_permissions.create_business_role",
+    "module": "employee_roster.hr_roster.menu_permissions",
+    "name": "create_business_role",
+    "params": [
+      "company",
+      "role_title",
+      "description",
+      "copy_from"
+    ],
+    "http": "POST",
+    "policy": "manual",
+    "reason": "涉及人工审批、主档、权限、签署、删除、工资或文件传输，保留人工或专用工具入口"
+  },
+  {
+    "id": "employee_roster.hr_roster.menu_permissions.get_my_menu_access",
+    "module": "employee_roster.hr_roster.menu_permissions",
+    "name": "get_my_menu_access",
+    "params": [
+      "company"
+    ],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.menu_permissions.get_permission_management_context",
+    "module": "employee_roster.hr_roster.menu_permissions",
+    "name": "get_permission_management_context",
+    "params": [
+      "company",
+      "role"
+    ],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.menu_permissions.get_role_assignment_context",
+    "module": "employee_roster.hr_roster.menu_permissions",
+    "name": "get_role_assignment_context",
+    "params": [
+      "company"
+    ],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.menu_permissions.save_role_menu_permissions",
+    "module": "employee_roster.hr_roster.menu_permissions",
+    "name": "save_role_menu_permissions",
+    "params": [
+      "role",
+      "menu_keys"
+    ],
+    "http": "POST",
+    "policy": "manual",
+    "reason": "涉及人工审批、主档、权限、签署、删除、工资或文件传输，保留人工或专用工具入口"
+  },
+  {
+    "id": "employee_roster.hr_roster.page.attendance_rules.attendance_rules.get_rules_overview",
+    "module": "employee_roster.hr_roster.page.attendance_rules.attendance_rules",
+    "name": "get_rules_overview",
+    "params": [],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.page.employee_archive.employee_archive.delete_archive_document",
+    "module": "employee_roster.hr_roster.page.employee_archive.employee_archive",
+    "name": "delete_archive_document",
+    "params": [
+      "name"
+    ],
+    "http": "ANY",
+    "policy": "manual",
+    "reason": "涉及人工审批、主档、权限、签署、删除、工资或文件传输，保留人工或专用工具入口"
+  },
+  {
+    "id": "employee_roster.hr_roster.page.employee_archive.employee_archive.export_missing_documents",
+    "module": "employee_roster.hr_roster.page.employee_archive.employee_archive",
+    "name": "export_missing_documents",
+    "params": [
+      "department",
+      "status"
+    ],
+    "http": "ANY",
+    "policy": "manual",
+    "reason": "需在页面人工办理或使用专用业务工具"
+  },
+  {
+    "id": "employee_roster.hr_roster.page.employee_archive.employee_archive.get_archive_export",
+    "module": "employee_roster.hr_roster.page.employee_archive.employee_archive",
+    "name": "get_archive_export",
+    "params": [
+      "export_type",
+      "department",
+      "status",
+      "document_type"
+    ],
+    "http": "ANY",
+    "policy": "internal",
+    "reason": "授权或下载入口，不作为业务数据查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.page.employee_archive.employee_archive.get_archive_options",
+    "module": "employee_roster.hr_roster.page.employee_archive.employee_archive",
+    "name": "get_archive_options",
+    "params": [],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.page.employee_archive.employee_archive.get_archive_overview",
+    "module": "employee_roster.hr_roster.page.employee_archive.employee_archive",
+    "name": "get_archive_overview",
+    "params": [
+      "department"
+    ],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.page.employee_archive.employee_archive.get_departments",
+    "module": "employee_roster.hr_roster.page.employee_archive.employee_archive",
+    "name": "get_departments",
+    "params": [],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.page.employee_archive.employee_archive.import_archive_zip",
+    "module": "employee_roster.hr_roster.page.employee_archive.employee_archive",
+    "name": "import_archive_zip",
+    "params": [
+      "file_url",
+      "overwrite_existing"
+    ],
+    "http": "ANY",
+    "policy": "manual",
+    "reason": "涉及人事批量写入、个人凭据或文件，保留人工或专用流程入口"
+  },
+  {
+    "id": "employee_roster.hr_roster.page.employee_archive.employee_archive.list_archive_documents",
+    "module": "employee_roster.hr_roster.page.employee_archive.employee_archive",
+    "name": "list_archive_documents",
+    "params": [
+      "department",
+      "status",
+      "document_type",
+      "missing_only",
+      "page",
+      "page_size"
+    ],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.page.employee_archive.employee_archive.list_education_records",
+    "module": "employee_roster.hr_roster.page.employee_archive.employee_archive",
+    "name": "list_education_records",
+    "params": [
+      "department",
+      "status",
+      "page",
+      "page_size"
+    ],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.page.employee_archive.employee_archive.list_emergency_contacts",
+    "module": "employee_roster.hr_roster.page.employee_archive.employee_archive",
+    "name": "list_emergency_contacts",
+    "params": [
+      "department",
+      "status",
+      "page",
+      "page_size"
+    ],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.page.employee_archive.employee_archive.list_skill_records",
+    "module": "employee_roster.hr_roster.page.employee_archive.employee_archive",
+    "name": "list_skill_records",
+    "params": [
+      "department",
+      "status",
+      "page",
+      "page_size"
+    ],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.page.employee_archive.employee_archive.list_work_history",
+    "module": "employee_roster.hr_roster.page.employee_archive.employee_archive",
+    "name": "list_work_history",
+    "params": [
+      "department",
+      "status",
+      "page",
+      "page_size"
+    ],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.page.employee_archive.employee_archive.preview_archive_import",
+    "module": "employee_roster.hr_roster.page.employee_archive.employee_archive",
+    "name": "preview_archive_import",
+    "params": [
+      "file_url",
+      "overwrite_existing"
+    ],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.page.employee_archive.employee_archive.upload_archive_document",
+    "module": "employee_roster.hr_roster.page.employee_archive.employee_archive",
+    "name": "upload_archive_document",
+    "params": [
+      "employee",
+      "document_type",
+      "file_url",
+      "remarks"
+    ],
+    "http": "ANY",
+    "policy": "manual",
+    "reason": "涉及人工审批、主档、权限、签署、删除、工资或文件传输，保留人工或专用工具入口"
+  },
+  {
+    "id": "employee_roster.hr_roster.page.orgchart.orgchart.create_org_unit",
+    "module": "employee_roster.hr_roster.page.orgchart.orgchart",
+    "name": "create_org_unit",
+    "params": [
+      "title",
+      "company",
+      "parent",
+      "org_code",
+      "org_abbr",
+      "org_type",
+      "department_head",
+      "supervisor",
+      "department_hrbp",
+      "staff_quota",
+      "effective_date",
+      "enable_cost_center",
+      "org_remark"
+    ],
+    "http": "ANY",
+    "policy": "manual",
+    "reason": "涉及人工审批、主档、权限、签署、删除、工资或文件传输，保留人工或专用工具入口"
+  },
+  {
+    "id": "employee_roster.hr_roster.page.orgchart.orgchart.delete_org_unit",
+    "module": "employee_roster.hr_roster.page.orgchart.orgchart",
+    "name": "delete_org_unit",
+    "params": [
+      "name"
+    ],
+    "http": "ANY",
+    "policy": "manual",
+    "reason": "涉及人工审批、主档、权限、签署、删除、工资或文件传输，保留人工或专用工具入口"
+  },
+  {
+    "id": "employee_roster.hr_roster.page.orgchart.orgchart.get_org_diagram",
+    "module": "employee_roster.hr_roster.page.orgchart.orgchart",
+    "name": "get_org_diagram",
+    "params": [
+      "company"
+    ],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.page.orgchart.orgchart.get_org_import_template",
+    "module": "employee_roster.hr_roster.page.orgchart.orgchart",
+    "name": "get_org_import_template",
+    "params": [],
+    "http": "ANY",
+    "policy": "internal",
+    "reason": "授权或下载入口，不作为业务数据查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.page.orgchart.orgchart.get_org_tree",
+    "module": "employee_roster.hr_roster.page.orgchart.orgchart",
+    "name": "get_org_tree",
+    "params": [
+      "company"
+    ],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.page.orgchart.orgchart.import_org_units",
+    "module": "employee_roster.hr_roster.page.orgchart.orgchart",
+    "name": "import_org_units",
+    "params": [
+      "file_url",
+      "company"
+    ],
+    "http": "ANY",
+    "policy": "manual",
+    "reason": "涉及人工审批、主档、权限、签署、删除、工资或文件传输，保留人工或专用工具入口"
+  },
+  {
+    "id": "employee_roster.hr_roster.page.orgchart.orgchart.move_org_members",
+    "module": "employee_roster.hr_roster.page.orgchart.orgchart",
+    "name": "move_org_members",
+    "params": [
+      "employees",
+      "target",
+      "operation",
+      "source"
+    ],
+    "http": "ANY",
+    "policy": "manual",
+    "reason": "涉及人工审批、主档、权限、签署、删除、工资或文件传输，保留人工或专用工具入口"
+  },
+  {
+    "id": "employee_roster.hr_roster.page.orgchart.orgchart.search_employees",
+    "module": "employee_roster.hr_roster.page.orgchart.orgchart",
+    "name": "search_employees",
+    "params": [
+      "txt",
+      "company"
+    ],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.page.orgchart.orgchart.update_org_person",
+    "module": "employee_roster.hr_roster.page.orgchart.orgchart",
+    "name": "update_org_person",
+    "params": [
+      "org_name",
+      "role",
+      "employee"
+    ],
+    "http": "ANY",
+    "policy": "manual",
+    "reason": "涉及人工审批、主档、权限、签署、删除、工资或文件传输，保留人工或专用工具入口"
+  },
+  {
+    "id": "employee_roster.hr_roster.page.recruiting_active.recruiting_active.get_recruiting_pipeline",
+    "module": "employee_roster.hr_roster.page.recruiting_active.recruiting_active",
+    "name": "get_recruiting_pipeline",
+    "params": [
+      "company",
+      "job_opening",
+      "keyword"
+    ],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.page.recruiting_list.recruiting_list.get_candidates",
+    "module": "employee_roster.hr_roster.page.recruiting_list.recruiting_list",
+    "name": "get_candidates",
+    "params": [
+      "status",
+      "company",
+      "job_opening",
+      "keyword",
+      "sort_by",
+      "page",
+      "page_size"
+    ],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.page.roster.roster.get_departments",
+    "module": "employee_roster.hr_roster.page.roster.roster",
+    "name": "get_departments",
+    "params": [],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.page.roster.roster.get_designation_titles",
+    "module": "employee_roster.hr_roster.page.roster.roster",
+    "name": "get_designation_titles",
+    "params": [],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.page.roster.roster.get_employee_organization_paths",
+    "module": "employee_roster.hr_roster.page.roster.roster",
+    "name": "get_employee_organization_paths",
+    "params": [
+      "employees"
+    ],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.page.roster.roster.get_employee_stats",
+    "module": "employee_roster.hr_roster.page.roster.roster",
+    "name": "get_employee_stats",
+    "params": [
+      "company"
+    ],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.page.roster.roster.get_groups",
+    "module": "employee_roster.hr_roster.page.roster.roster",
+    "name": "get_groups",
+    "params": [],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.page.roster.roster.get_reporting_supervisors",
+    "module": "employee_roster.hr_roster.page.roster.roster",
+    "name": "get_reporting_supervisors",
+    "params": [
+      "employees"
+    ],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.page.roster.roster.get_roster_data",
+    "module": "employee_roster.hr_roster.page.roster.roster",
+    "name": "get_roster_data",
+    "params": [],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.page.roster.roster.search_employees",
+    "module": "employee_roster.hr_roster.page.roster.roster",
+    "name": "search_employees",
+    "params": [
+      "keyword",
+      "department",
+      "status"
+    ],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.page.roster.roster.update_employee_fields",
+    "module": "employee_roster.hr_roster.page.roster.roster",
+    "name": "update_employee_fields",
+    "params": [
+      "employee",
+      "field",
+      "value"
+    ],
+    "http": "ANY",
+    "policy": "manual",
+    "reason": "涉及人工审批、主档、权限、签署、删除、工资或文件传输，保留人工或专用工具入口"
+  },
+  {
+    "id": "employee_roster.hr_roster.system_logs.get_system_log",
+    "module": "employee_roster.hr_roster.system_logs",
+    "name": "get_system_log",
+    "params": [
+      "name"
+    ],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.hr_roster.system_logs.get_system_logs",
+    "module": "employee_roster.hr_roster.system_logs",
+    "name": "get_system_logs",
+    "params": [
+      "page",
+      "page_size",
+      "keyword",
+      "level",
+      "module",
+      "start_time",
+      "end_time"
+    ],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.integrations.approval_directory.resolve_hrbp",
+    "module": "employee_roster.integrations.approval_directory",
+    "name": "resolve_hrbp",
+    "params": [
+      "employee_ref",
+      "company"
+    ],
+    "http": "GET",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.integrations.approval_import.import_approved",
+    "module": "employee_roster.integrations.approval_import",
+    "name": "import_approved",
+    "params": [
+      "payload"
+    ],
+    "http": "POST",
+    "policy": "manual",
+    "reason": "使用approval_request正式流程及其已通过同步队列，不能绕过原审批导入"
+  },
+  {
+    "id": "employee_roster.integrations.cpd_sso.callback",
+    "module": "employee_roster.integrations.cpd_sso",
+    "name": "callback",
+    "params": [
+      "code",
+      "state",
+      "error"
+    ],
+    "http": "GET",
+    "policy": "internal",
+    "reason": "登录、凭据、回调或基础设施接口，不供Agent直接调用"
+  },
+  {
+    "id": "employee_roster.integrations.cpd_sso.start",
+    "module": "employee_roster.integrations.cpd_sso",
+    "name": "start",
+    "params": [
+      "next_path"
+    ],
+    "http": "GET",
+    "policy": "internal",
+    "reason": "登录、凭据、回调或基础设施接口，不供Agent直接调用"
+  },
+  {
+    "id": "employee_roster.integrations.external_api.issue_token",
+    "module": "employee_roster.integrations.external_api",
+    "name": "issue_token",
+    "params": [
+      "client_name",
+      "hr_wecom_id"
+    ],
+    "http": "POST",
+    "policy": "internal",
+    "reason": "登录、凭据、回调或基础设施接口，不供Agent直接调用"
+  },
+  {
+    "id": "employee_roster.integrations.tencent_cos.storage.download_file",
+    "module": "employee_roster.integrations.tencent_cos.storage",
+    "name": "download_file",
+    "params": [
+      "key"
+    ],
+    "http": "ANY",
+    "policy": "manual",
+    "reason": "涉及人工审批、主档、权限、签署、删除、工资或文件传输，保留人工或专用工具入口"
+  },
+  {
+    "id": "employee_roster.integrations.tencent_cos.storage.preview_file",
+    "module": "employee_roster.integrations.tencent_cos.storage",
+    "name": "preview_file",
+    "params": [
+      "key"
+    ],
+    "http": "ANY",
+    "policy": "manual",
+    "reason": "涉及人工审批、主档、权限、签署、删除、工资或文件传输，保留人工或专用工具入口"
+  },
+  {
+    "id": "employee_roster.integrations.tencent_cos.storage.stream_file",
+    "module": "employee_roster.integrations.tencent_cos.storage",
+    "name": "stream_file",
+    "params": [
+      "key"
+    ],
+    "http": "ANY",
+    "policy": "manual",
+    "reason": "涉及人工审批、主档、权限、签署、删除、工资或文件传输，保留人工或专用工具入口"
+  },
+  {
+    "id": "employee_roster.integrations.wecom.api.bind_existing_employees",
+    "module": "employee_roster.integrations.wecom.api",
+    "name": "bind_existing_employees",
+    "params": [
+      "limit"
+    ],
+    "http": "POST",
+    "policy": "internal",
+    "reason": "登录、凭据、回调或基础设施接口，不供Agent直接调用"
+  },
+  {
+    "id": "employee_roster.integrations.wecom.api.complete_wecom_login",
+    "module": "employee_roster.integrations.wecom.api",
+    "name": "complete_wecom_login",
+    "params": [
+      "code",
+      "state"
+    ],
+    "http": "POST",
+    "policy": "manual",
+    "reason": "需在页面人工办理或使用专用业务工具"
+  },
+  {
+    "id": "employee_roster.integrations.wecom.api.get_configuration_status",
+    "module": "employee_roster.integrations.wecom.api",
+    "name": "get_configuration_status",
+    "params": [],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.integrations.wecom.api.get_connection_status",
+    "module": "employee_roster.integrations.wecom.api",
+    "name": "get_connection_status",
+    "params": [],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.integrations.wecom.api.get_my_avatar_authorize_url",
+    "module": "employee_roster.integrations.wecom.api",
+    "name": "get_my_avatar_authorize_url",
+    "params": [
+      "next_path"
+    ],
+    "http": "ANY",
+    "policy": "internal",
+    "reason": "授权或下载入口，不作为业务数据查询"
+  },
+  {
+    "id": "employee_roster.integrations.wecom.api.get_my_navbar_avatar",
+    "module": "employee_roster.integrations.wecom.api",
+    "name": "get_my_navbar_avatar",
+    "params": [
+      "sync"
+    ],
+    "http": "ANY",
+    "policy": "read",
+    "reason": "按当前用户及人事系统权限查询"
+  },
+  {
+    "id": "employee_roster.integrations.wecom.api.get_oauth_entry_url",
+    "module": "employee_roster.integrations.wecom.api",
+    "name": "get_oauth_entry_url",
+    "params": [
+      "next_path"
+    ],
+    "http": "ANY",
+    "policy": "internal",
+    "reason": "登录、凭据、回调或基础设施接口，不供Agent直接调用"
+  },
+  {
+    "id": "employee_roster.integrations.wecom.api.get_web_login_config",
+    "module": "employee_roster.integrations.wecom.api",
+    "name": "get_web_login_config",
+    "params": [
+      "next_path"
+    ],
+    "http": "ANY",
+    "policy": "internal",
+    "reason": "授权或下载入口，不作为业务数据查询"
+  },
+  {
+    "id": "employee_roster.integrations.wecom.api.provision_wecom_employee_users",
+    "module": "employee_roster.integrations.wecom.api",
+    "name": "provision_wecom_employee_users",
+    "params": [
+      "limit",
+      "fetch_remote_profile"
+    ],
+    "http": "POST",
+    "policy": "internal",
+    "reason": "登录、凭据、回调或基础设施接口，不供Agent直接调用"
+  },
+  {
+    "id": "employee_roster.integrations.wecom.api.run_attendance_sync",
+    "module": "employee_roster.integrations.wecom.api",
+    "name": "run_attendance_sync",
+    "params": [
+      "start_date",
+      "end_date",
+      "build_deductions"
+    ],
+    "http": "POST",
+    "policy": "manual",
+    "reason": "需在页面人工办理或使用专用业务工具"
+  },
+  {
+    "id": "employee_roster.integrations.wecom.api.run_contact_sync",
+    "module": "employee_roster.integrations.wecom.api",
+    "name": "run_contact_sync",
+    "params": [
+      "create_missing"
+    ],
+    "http": "POST",
+    "policy": "internal",
+    "reason": "登录、凭据、回调或基础设施接口，不供Agent直接调用"
+  },
+  {
+    "id": "employee_roster.integrations.wecom.api.send_test_message",
+    "module": "employee_roster.integrations.wecom.api",
+    "name": "send_test_message",
+    "params": [
+      "userid",
+      "content"
+    ],
+    "http": "POST",
+    "policy": "internal",
+    "reason": "登录、凭据、回调或基础设施接口，不供Agent直接调用"
+  },
+  {
+    "id": "employee_roster.integrations.wecom.api.send_test_robot_message",
+    "module": "employee_roster.integrations.wecom.api",
+    "name": "send_test_robot_message",
+    "params": [
+      "content"
+    ],
+    "http": "POST",
+    "policy": "internal",
+    "reason": "登录、凭据、回调或基础设施接口，不供Agent直接调用"
+  },
+  {
+    "id": "employee_roster.integrations.wecom.api.send_test_textcard",
+    "module": "employee_roster.integrations.wecom.api",
+    "name": "send_test_textcard",
+    "params": [
+      "userid",
+      "title",
+      "description",
+      "next_path"
+    ],
+    "http": "POST",
+    "policy": "internal",
+    "reason": "登录、凭据、回调或基础设施接口，不供Agent直接调用"
+  },
+  {
+    "id": "employee_roster.integrations.wecom.api.wecom_sso_callback",
+    "module": "employee_roster.integrations.wecom.api",
+    "name": "wecom_sso_callback",
+    "params": [
+      "code",
+      "state"
+    ],
+    "http": "ANY",
+    "policy": "internal",
+    "reason": "登录、凭据、回调或基础设施接口，不供Agent直接调用"
+  },
+  {
+    "id": "employee_roster.integrations.wecom.assets.org_ui_css",
+    "module": "employee_roster.integrations.wecom.assets",
+    "name": "org_ui_css",
+    "params": [],
+    "http": "ANY",
+    "policy": "internal",
+    "reason": "登录、凭据、回调或基础设施接口，不供Agent直接调用"
+  },
+  {
+    "id": "employee_roster.integrations.wecom.assets.org_ui_js",
+    "module": "employee_roster.integrations.wecom.assets",
+    "name": "org_ui_js",
+    "params": [],
+    "http": "ANY",
+    "policy": "internal",
+    "reason": "登录、凭据、回调或基础设施接口，不供Agent直接调用"
+  },
+  {
+    "id": "employee_roster.integrations.wecom.assets.org_ui_lazy_asset",
+    "module": "employee_roster.integrations.wecom.assets",
+    "name": "org_ui_lazy_asset",
+    "params": [
+      "name"
+    ],
+    "http": "ANY",
+    "policy": "internal",
+    "reason": "登录、凭据、回调或基础设施接口，不供Agent直接调用"
+  },
+  {
+    "id": "employee_roster.integrations.wecom.assets.org_ui_version",
+    "module": "employee_roster.integrations.wecom.assets",
+    "name": "org_ui_version",
+    "params": [],
+    "http": "ANY",
+    "policy": "internal",
+    "reason": "登录、凭据、回调或基础设施接口，不供Agent直接调用"
+  }
+]

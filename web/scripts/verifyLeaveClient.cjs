@@ -26,32 +26,36 @@ async function main() {
     write: false,
     format: 'cjs',
     platform: 'node',
-    alias: { '@': path.join(root, 'src') },
+    alias: { '@': path.join(root, 'src'), 'simple-mind-map': path.resolve(root, '../simple-mind-map') },
     plugins: [
       {
         name: 'leave-client',
         setup(build) {
+          build.onLoad({ filter: /utils[\\/]roomLocation\.js$/ }, () => ({
+            contents: 'export const roomFromLocation=route=>route.query.room||""',
+            loader: 'js'
+          }))
           build.onLoad({ filter: /\.vue$/ }, a => ({
             contents: compiler.parseComponent(fs.readFileSync(a.path, 'utf8'))
               .script.content,
             resolveDir: path.dirname(a.path),
             loader: 'js'
           }))
-          build.onLoad({ filter: /services\/leaveService\.js$/ }, () => ({
+          build.onLoad({ filter: /services[\\/]leaveService\.js$/ }, () => ({
             contents:
               'export default global.__leaveClient;export const leaveOperationId=()=>"test-op";export const openLeaveRequest=detail=>window.dispatchEvent(new CustomEvent("mindmap:leave-open",{detail}))',
             loader: 'js'
           }))
-          build.onLoad({ filter: /services\/productHttp\.js$/ }, () => ({
+          build.onLoad({ filter: /services[\\/]productHttp\.js$/ }, () => ({
             contents: 'export const productRequest=async()=>({attachments:[]})',
             loader: 'js'
           }))
-          build.onLoad({ filter: /utils\/agentChat\.js$/ }, () => ({
+          build.onLoad({ filter: /utils[\\/]agentChat\.js$/ }, () => ({
             contents:
               'export const checkAiBackend=async()=>({ok:false});export const streamChat=async()=>({content:""})',
             loader: 'js'
           }))
-          build.onLoad({ filter: /utils\/runtimeConfig\.js$/ }, () => ({
+          build.onLoad({ filter: /utils[\\/]runtimeConfig\.js$/ }, () => ({
             contents:
               'export const getRuntimeConfig=()=>({collabApi:"http://local"})',
             loader: 'js'
@@ -88,6 +92,15 @@ async function main() {
   service.act = async (...args) => {
     writes.push(args)
   }
+  vm.row = {...row('rule-confirmation'),template:{kind:'generic',fingerprint:'reviewed-policy'},report:{...row('rule-confirmation').report,publication:{valid:false}}}
+  assert.equal(vm.canSubmit,false)
+  vm.rulesChecked=true
+  assert.equal(vm.canSubmit,true)
+  await vm.submit()
+  assert.equal(writes[0][2].confirmRules,true)
+  assert.equal(writes[0][2].expectedPolicyFingerprint,'reviewed-policy')
+  assert.equal(vm.rulesChecked,false,'reloading clears explicit rule confirmation')
+  writes=[]
   // Closing and opening another request while save is in flight cannot submit the new one.
   vm.row = row('one')
   service.act = async (...args) => {
@@ -310,6 +323,103 @@ async function main() {
     trigger._isDestroyed = false
     clearTimeout(trigger.checkTimer)
   }
+  // Right-click validates the selected original node and never creates siblings.
+  assert.equal(typeof trigger.startNodeApproval, 'function')
+  trigger.$route.query.room = 'personal'
+  trigger.$store.state.isReadonly = false
+  trigger.busy = false
+  trigger.requestByNode.clear()
+  const notices = [], inserted = [], liveNodes = new Map()
+  trigger.$message = { warning: text => notices.push(text), error: text => notices.push(text) }
+  const liveNode = (uid, text) => {
+    const data = {uid, text}
+    return { parent: {getData:()=> 'parent'}, nodeData:{data,children:[]}, getData: key => key ? data[key] : data }
+  }
+  const sourceNode = liveNode('selected-flow', '转正申请表')
+  liveNodes.set('selected-flow', sourceNode)
+  trigger.mindMap.renderer = {findNodeByUid: uid => liveNodes.get(uid)}
+  trigger.mindMap.execCommand = (command, openEdit, targets, data) => {
+    if(command !== 'INSERT_NODE') return
+    inserted.push({command,targets,data})
+    const anchor = liveNode(data.uid, data.text)
+    Object.assign(anchor.nodeData.data, data)
+    liveNodes.set(data.uid, anchor)
+  }
+  const selectedSource = {roomKey:'personal',nodeUid:'selected-flow'}
+  let requirementFields = [{key:'employee',label:'员工'}], templateReads = 0
+  service.template = async source => {
+    templateReads++
+    assert.deepEqual(source, selectedSource)
+    return {title:'转正申请表',fields:requirementFields,source:selectedSource}
+  }
+  const explicitPreparations = []
+  let opened = 0
+  trigger.open = async () => { opened++ }
+  service.prepare = async (...args) => {
+    explicitPreparations.push(args)
+    return {...row('11111111-1111-4111-a111-111111111111'),report:{missing:['员工'],blockers:['请填写员工']}}
+  }
+  await trigger.startNodeApproval(sourceNode)
+  clearTimeout(trigger.checkTimer)
+  assert.equal(inserted.length, 0)
+  assert.deepEqual(explicitPreparations[0], ['personal','selected-flow',selectedSource,true])
+  assert.equal(opened,1,'original-node validation opens the material summary')
+  assert.ok(notices.some(text => text.includes('员工') && text.includes('填写')))
+  requirementFields = []
+  trigger.requestByNode.clear()
+  await trigger.startNodeApproval(sourceNode)
+  assert.equal(inserted.length, 0, 'empty requirements cannot create branches')
+  assert.ok(notices.some(text=>text.includes('提交要求')))
+  trigger.$store.state.isReadonly = true
+  const readsBefore = templateReads
+  await trigger.startNodeApproval(sourceNode)
+  assert.equal(templateReads, readsBefore, 'read-only cannot launch a workflow')
+  trigger.$store.state.isReadonly = false
+  requirementFields = [{key:'employee',label:'员工'}]
+  let finishTemplate
+  service.template = () => new Promise(resolve => {finishTemplate=resolve})
+  const lateLaunch = trigger.startNodeApproval(sourceNode)
+  trigger.$route.query.room = 'another-room'
+  finishTemplate({title:'转正申请表',fields:requirementFields})
+  await lateLaunch
+  assert.equal(inserted.length, 0, 'navigation during template loading must not insert a node')
+  let directlyOpened
+  await Intent.methods.open.call({
+    node:sourceNode,requestId:'',isPolicy:true,hasSubmissionRequirements:true,
+    startNodeApproval:async node=>{directlyOpened=node}
+  })
+  assert.equal(directlyOpened,sourceNode,'the bottom action opens this original form instead of resolving an intent or opening policy settings')
+  directlyOpened = null
+  await Intent.methods.openCurrent.call({
+    node:sourceNode,requestId:'old-withdrawn',hasSubmissionRequirements:true,
+    publishDefinition:async node=>{directlyOpened=node},
+    open:()=>{throw new Error('closed source-node requests must restart through the direct entry')}
+  })
+  assert.equal(directlyOpened,sourceNode)
+  trigger.$route.query.room='personal'
+  trigger.candidate=sourceNode
+  trigger.requestByNode.set(JSON.stringify(['personal','selected-flow']),'old-withdrawn')
+  service.get=async()=>({...row('old-withdrawn'),status:'withdrawn',template:{sourceNodeInput:true}})
+  service.template=async()=>({title:'转正申请表',fields:requirementFields,source:selectedSource})
+  const beforeRestart=explicitPreparations.length
+  await trigger.startNodeApproval(sourceNode)
+  clearTimeout(trigger.checkTimer)
+  assert.equal(explicitPreparations.length,beforeRestart+1,'a cached withdrawn request must not force opening an unusable historical draft')
+  assert.equal(inserted.length,0)
+  let reflows=0, invalidations=0
+  const markedTree={data:{uid:'published',text:'审批流程'},children:[{data:{uid:'value',text:'原内容'},children:[]}]}
+  const publishedNode={getPureData:()=>markedTree,reRender:()=>true}
+  const markContext={definitionMarks:new Map(),$route:{query:{room:'personal'}},mindMap:{renderer:{findNodeByUid:()=>publishedNode},render:()=>{reflows++}},refreshDefinitions:()=>{}}
+  service.definitions=async()=>({list:[{nodeUid:'published',version:'1',state:'published'}],hasMore:false})
+  service.invalidateDefinition=async()=>{invalidations++}
+  await Intent.methods.refreshDefinitions.call(markContext)
+  assert.equal(reflows,1,'a badge size change relayouts the entire map, not only the decorated node')
+  markedTree.children[0].data.text='新内容'
+  Intent.methods.checkDefinitionEdits.call(markContext)
+  clearTimeout(markContext.definitionRefreshTimer)
+  assert.equal(reflows,2,'the wider draft badge also recalculates surrounding nodes and connectors')
+  assert.equal(invalidations,1)
+  assert.equal(markedTree.data.tag,undefined,'approval markers never persist render-only tags into user content')
   vm.$destroy()
   trigger.$destroy()
   console.log(

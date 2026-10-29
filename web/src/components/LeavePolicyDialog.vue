@@ -1,7 +1,7 @@
 <template>
   <el-dialog
     :visible.sync="visible"
-    title="审批流程配置"
+    :title="agentMode ? '发布这个审批流' : '审批流程配置'"
     custom-class="leavePolicyDialog"
     append-to-body
     :close-on-click-modal="false"
@@ -13,14 +13,16 @@
         <div class="policyHeading">
           <div>
             <small>{{ policy.title }}</small>
-            <h2>脑图定义规则，发布后执行</h2>
+            <h2>{{ agentMode ? '发布为审批节点，由 Agent 通过 MCP 执行' : '脑图定义规则，发布后执行' }}</h2>
           </div>
           <el-tag :type="policy.publication.valid ? 'success' : 'warning'">{{
             policy.publication.valid ? '当前版本已发布' : '待配置 / 待发布'
           }}</el-tag>
         </div>
         <p class="policyHint">
-          审核人和抄送人统一登记在「当前流程 →
+          <template v-if="agentMode">发布后节点显示“审批”标记，可复制给 AI 在 Agent 中运行。材料可在脑图提交要求下填写，也可在 Agent 对话中提供，本次对话材料不写回脑图。修改审批规则后须重新发布。</template>
+          写明姓名会匹配本企业唯一成员，同名时须登记具体账号。部门负责人和HRBP由人事组织架构按申请员工动态解析。
+          也可统一登记在「当前流程 →
           审批配置」子节点。角色下新增「账号：成员ID」；按部门分配时新增「部门：部门ID
           → 账号：成员ID」。未配置或匹配不唯一会阻止提交。
         </p>
@@ -34,6 +36,8 @@
               ><span v-if="scope.row.accounts.length">{{
                 scope.row.accounts.join('、')
               }}</span
+              ><el-tag v-else-if="scope.row.dynamicReady" size="mini" type="success">提交时按申请员工解析</el-tag
+              ><span v-else-if="scope.row.resolutionError">{{ scope.row.resolutionError }}</span
               ><el-tag v-else size="mini" type="warning"
                 >待配置</el-tag
               ></template
@@ -64,13 +68,16 @@
           ><el-button :disabled="loading || busy" @click="load"
             >重新读取</el-button
           ><el-button
-            v-if="policy.canPublish"
             type="primary"
             :loading="busy"
+            :disabled="!policy.canPublish"
             @click="publish"
-            >发布当前流程</el-button
+            >{{ agentMode ? '发布这个审批流' : '发布当前流程' }}</el-button
           >
         </footer>
+        <p v-if="!policy.canPublish && policy.publishHint" class="policyHint publishHint">
+          <i class="el-icon-warning-outline" /> {{ policy.publishHint }}
+        </p>
       </template>
     </section>
   </el-dialog>
@@ -80,6 +87,7 @@ import service from '@/services/leaveService'
 export default {
   data: () => ({
     visible: false,
+    agentMode: false,
     policy: null,
     error: '',
     loading: false,
@@ -94,10 +102,12 @@ export default {
   computed: {
     bindings() {
       return [
-        ...this.policy.steps.map(s => ({ role: s.role, accounts: s.accounts })),
+        ...this.policy.steps.map(s => ({ role: s.role, accounts: s.accounts, resolutionError: s.resolutionError, dynamicReady: ['hrbp','head'].includes(s.dynamicRole) && s.resolverConfigured })),
         ...this.policy.ccBindings.map(s => ({
           role: '抄送 · ' + s.role,
-          accounts: s.accounts
+          accounts: s.accounts,
+          dynamicReady: ['hrbp','head'].includes(s.dynamicRole) && s.resolverConfigured,
+          resolutionError: s.resolutionError
         }))
       ]
     }
@@ -112,6 +122,7 @@ export default {
   },
   methods: {
     open(event) {
+      this.agentMode = !!(event && event.detail && event.detail.agentMode)
       this.source = (event && event.detail && event.detail.source) || null
       this.visible = true
       this.policy = null
@@ -123,7 +134,10 @@ export default {
       this.error = ''
       try {
         const data = await service.template(this.source)
-        if (seq === this.sequence) this.policy = data
+        if (seq === this.sequence) {
+          this.policy = data
+          if(data.publication.agent_mode)this.agentMode=true
+        }
       } catch (e) {
         if (seq === this.sequence) this.error = e.message
       } finally {
@@ -146,8 +160,9 @@ export default {
       this.busy = true
       this.error = ''
       try {
-        await service.publish(this.policy.fingerprint, this.policy.source)
+        await service.publish(this.policy.fingerprint, this.policy.source, this.agentMode ? {agentMode:true,expectedContentFingerprint:this.policy.contentFingerprint} : {})
         await this.load()
+        window.dispatchEvent(new CustomEvent('mindmap:approval-published'))
         this.$message.success('流程已发布，后续提交使用此版本')
       } catch (e) {
         this.error = e.message
@@ -199,6 +214,11 @@ export default {
     font-size: 13px;
     line-height: 1.9;
     color: #7c8898;
+  }
+  .publishHint {
+    font-size: 13px;
+    line-height: 1.9;
+    color: #b54444;
   }
   .policyLookup {
     display: flex;

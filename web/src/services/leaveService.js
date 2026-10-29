@@ -22,10 +22,10 @@ export default {
       '/api/workflow-catalog' +
         (cursor ? '?cursor=' + encodeURIComponent(cursor) : '')
     ),
-  prepare: (roomKey, nodeUid, source) =>
+  prepare: (roomKey, nodeUid, source, useSourceNode = false) =>
     item(source ? '/api/workflow-requests' : '/api/leave-requests', {
       method: 'POST',
-      body: JSON.stringify({ roomKey, nodeUid, source })
+      body: JSON.stringify({ roomKey, nodeUid, source, useSourceNode })
     }),
   get: (id, before) =>
     item(
@@ -53,11 +53,14 @@ export default {
       method: 'POST',
       body: JSON.stringify({ ids })
     }),
-  publish: (fingerprint, source) =>
+  definitions: (room, cursor) => item('/api/workflow-definitions?' + new URLSearchParams({room_key:room,...(cursor?{cursor}:{})})),
+  invalidateDefinition: body => item('/api/workflow-definitions/invalidate',{method:'POST',body:JSON.stringify(body)}),
+  publish: (fingerprint, source, options = {}) =>
     item('/api/leave-template/publish', {
       method: 'POST',
       body: JSON.stringify({
         source,
+        ...options,
         expectedFingerprint: fingerprint,
         operationId: leaveOperationId()
       })

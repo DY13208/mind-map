@@ -33,6 +33,16 @@
       </div>
       <div class="item" @click="exec('UNEXPAND_ALL')"><MenuIcon name="collapse" /><span class="name">{{ $t('contextmenu.unExpandNodeChild') }}</span></div>
       <div class="item" @click="copyNodeForAi"><MenuIcon name="clipboard" /><span class="name">复制给 AI（SOP）</span></div>
+      <div
+        class="item disabled"
+        data-testid="publish-node-approval-readonly"
+        title="当前为只读模式，请先在工具栏切换为编辑模式"
+        @click="publishNodeApproval"
+      >
+        <MenuIcon name="network" />
+        <span class="name">发布这个审批流</span>
+        <span class="desc">只读</span>
+      </div>
     </template>
     <template v-if="type === 'node' && editable">
       <div class="item" @click="exec('INSERT_CHILD_NODE')">
@@ -85,6 +95,10 @@
       <div class="item" data-testid="distill-node-skill" @click="distillNodeSkill">
         <MenuIcon name="clipboard" />
         <span class="name">蒸馏skill</span>
+      </div>
+      <div class="item" data-testid="publish-node-approval" @click="publishNodeApproval">
+        <MenuIcon name="network" />
+        <span class="name">发布这个审批流</span>
       </div>
       <div class="splitLine"></div>
       <div
@@ -465,6 +479,7 @@
 import { appendKnowledgeFullText } from '@/utils/knowledgeFiles'
 import { mapState, mapMutations } from 'vuex'
 import MenuIcon from './ContextmenuIcon.vue'
+import approvalService from '@/services/leaveService'
 import { getTextFromHtml, imgToDataUrl, isMobile } from 'simple-mind-map/src/utils'
 import { transformToMarkdown } from 'simple-mind-map/src/parse/toMarkdown'
 import { transformToTxt } from 'simple-mind-map/src/parse/toTxt'
@@ -778,9 +793,24 @@ export default {
     },
 
     async copyNodeForAi() {
+      const node = this.node
       const reference = this.getNodeAiReference()
       this.hide()
       if (!reference) return
+      if (node._approvalDefinitionState && node._approvalDefinitionState.state !== 'published')
+        return this.$message.warning('该审批流已恢复草稿，请重新发布后复制给 AI 执行')
+      const children = (node.nodeData && node.nodeData.children) || []
+      if (node._approvalDefinitionState || children.some(c=>/^(提交要求|流程标识[:：])/.test(String(c.data && c.data.text || '').replace(/<[^>]+>/g,'').trim()))) {
+        try {
+          const source={roomKey:roomFromLocation(this.$route),nodeUid:this.nodeUid(node)}
+          const tpl=await approvalService.template(source)
+          if (tpl.publication.agent_mode) {
+            if (!tpl.publication.valid) return this.$message.warning('该审批流已恢复草稿，请重新发布后复制给 AI 执行')
+            await this.copyAiInstruction(`执行已发布审批流：${reference}`, '审批执行指令已复制，可粘贴给 AI 使用')
+            return
+          }
+        } catch(e) { return this.$message.warning(e.message || '无法核验审批发布状态，请稍后重试') }
+      }
       await this.copyAiInstruction(`执行这个SOP：${reference}`, '指令已复制，可粘贴给 AI 使用')
     },
 
@@ -794,6 +824,17 @@ export default {
         const fullText = await appendKnowledgeFullText(text, node, { includeDescendants: true })
         await this.copyAiInstruction(fullText, '蒸馏skill 指令及挂载文件正文已复制')
       } catch (error) { this.$message.error(error.message || '读取挂载文件正文失败，未复制') }
+    },
+
+    publishNodeApproval() {
+      if (this.submenuClickGate || !this.node) return
+      if (!this.editable) {
+        this.$message.warning('当前为只读权限，无法发布审批流')
+        return
+      }
+      const node = this.node
+      this.hide()
+      this.$bus.$emit('publishNodeApproval', node)
     },
 
     async copyAiInstruction(text, successMessage) {

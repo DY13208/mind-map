@@ -1,4 +1,45 @@
 // Keep MCP responses within a bounded context; full audit history stays in the UI.
+import { createRequire } from 'module'
+const requireCjs = createRequire(import.meta.url)
+const aiReview = requireCjs('./aiReview')
+function routingAndSync(row, limit = 30) {
+  const resolved = row.report.ccResolved || []
+  const sync = row.hrmsSync
+  const text = value => String(value || '').slice(0, 120)
+  return {
+    definition: row.template.agentDefinition || null,
+    definition_state: row.definitionState || null,
+    execution: {
+      mode: ['approved','rejected','withdrawn','historical'].includes(row.status) ? 'completed' : (row.definitionState && row.definitionState.state!=='published') || (row.report.blockers || []).length || (row.report.configurationRequired || []).length ? 'blocked' : row.template.autoApprove ? 'automatic_by_published_rule' : row.steps.some(s=>s.aiReview && s.aiReview.decision==='escalate') ? 'human_required' : requireAiReview(row.template) ? 'ai_review_then_handoff' : 'human_required',
+      reason: row.template.autoApprove ? '仅按已确认的原节点自动同意规则执行' : '依据本流程的AI预审配置核验，不能判定时保持待办并@实际审核人，不伪造人工决定',
+      handoff: row.steps.slice(row.current_step || 0, (row.current_step || 0)+1).map(s=>({role:text(s.role),account:text(s.assigneeId),name:text(s.assigneeName),mention:s.assigneeId?'@'+text(s.assigneeName || s.assigneeId):null}))
+    },
+    source_node_input: row.template.sourceNodeInput === true,
+    input_mode: row.template.agentInput === true ? 'agent' : 'node',
+    auto_approve: row.template.autoApprove === true,
+    policy_fingerprint: row.template.fingerprint,
+    requires_rule_confirmation: row.template.kind === 'generic' && !(row.report.publication || {}).valid,
+    rule_confirmation: row.report.ruleConfirmation || null,
+    cc_resolved: resolved.slice(0, limit).map(person => ({
+      role: text(person.role), account: text(person.account), name: text(person.name),
+      source: text(person.source), employee: text(person.employee),
+      department: text(person.department), company: text(person.company)
+    })),
+    cc_resolved_count: resolved.length,
+    cc_resolved_truncated: resolved.length > limit,
+    hrms_sync: sync ? {
+      status: sync.status, attempts: sync.attempts,
+      last_error: text(sync.last_error), synced_at: sync.synced_at,
+      result: sync.result ? {
+        name: text(sync.result.name), application_no: text(sync.result.applicationNo),
+        status: text(sync.result.status)
+      } : null
+    } : null
+  }
+}
+function requireAiReview(template) {
+  return aiReview.shouldRun(template)
+}
 export function compactLeaveResult(result) {
   const row = (result && result.item) || result
   if (!row || !row.id || !row.template) return result
@@ -23,12 +64,14 @@ export function compactLeaveResult(result) {
     current_step,
     steps,
     cc,
+    ...routingAndSync(row),
     source: template.source,
     required_fields: template.fields,
     leave_types: template.types,
     calendar: template.calendar,
     validation: {
       nodeInputHash: report.nodeInputHash,
+      inputHash: report.inputHash || null,
       missing: report.missing,
       blockers: report.blockers,
       warnings: report.warnings,
@@ -86,6 +129,7 @@ export function compactLeaveResult(result) {
       criterion_count: s.criteria.length
     })),
     truncated: true,
+    ...routingAndSync(row, 10),
     next:
       '请用定向节点读取工具按source和步骤uid读取原文；审批历史在消息中心查看'
   }
@@ -98,6 +142,7 @@ export function compactLeaveResult(result) {
     current_step,
     source: template.source,
     truncated: true,
+    ...routingAndSync(row, 10),
     field_count: Object.keys(fields).length,
     validation: {
       nodeInputHash: report.nodeInputHash,
@@ -251,9 +296,15 @@ function compactTemplate(tpl) {
     kind: tpl.kind,
     source: tpl.source,
     fingerprint: tpl.fingerprint,
+    content_fingerprint: tpl.contentFingerprint,
     fields: tpl.fields,
     steps: tpl.steps,
     ccBindings: tpl.ccBindings,
+    requirements_node_uid: tpl.requirementsNodeUid,
+    supports_source_node_input: tpl.kind === 'generic' && !!tpl.requirementsNodeUid,
+    input_modes: tpl.publication?.agent_mode && tpl.publication?.valid ? ['node','agent'] : ['node'],
+    auto_approve: tpl.autoApprove === true,
+    ai_review: aiReview.shouldRun(tpl),
     configurationErrors: tpl.configurationErrors,
     publication: tpl.publication,
     canPublish: tpl.canPublish
@@ -264,6 +315,12 @@ function compactTemplate(tpl) {
     kind: tpl.kind,
     source: tpl.source,
     fingerprint: tpl.fingerprint,
+    content_fingerprint: tpl.contentFingerprint,
+    requirements_node_uid: tpl.requirementsNodeUid,
+    supports_source_node_input: tpl.kind === 'generic' && !!tpl.requirementsNodeUid,
+    input_modes: tpl.publication?.agent_mode && tpl.publication?.valid ? ['node','agent'] : ['node'],
+    auto_approve: tpl.autoApprove === true,
+    ai_review: aiReview.shouldRun(tpl),
     fields: tpl.fields.map(f => ({
       uid: f.uid,
       key: f.key,
@@ -283,18 +340,20 @@ function compactTemplate(tpl) {
 export function registerApprovalTools(server, { api, z, ok, fail }) {
   server.tool(
     'approval_request',
-    '通用脑图原生审批，不限定模板所在目录。先resolve匹配用户意图或catalog分页发现当前身份可访问的模板（hasMore必须继续nextCursor）；模板以直属子节点“流程标识：名称或编号”登记，并在该模板内写申请字段、审批流程、审核要点和审批配置。多个候选必须展示来源供用户选择，不擅自选第一个；没有模板或人员缺失必须提示待配置。template读取实际字段和稳定key；prepare必须传所选template_source，仅生成草稿与申请资料子节点，不通知审批人。用户或获授权AI只编辑脑图字段和值，随后import读取权威节点并校验；不另建表单。submit前展示本次字段、附件及流程，获得用户明确提交指令，使用当前revision、validation.nodeInputHash、唯一operation_id；结果未知先status查询，不能换ID盲重试。analysis仅为辅助建议，正式决定由当前审核人登录页面办理。本版通用流程执行顺序审批，不把条件分支或会签默认为顺序。',
+    '通用脑图原生审批。已发布审批节点的publication.agent_mode=true时必须确认publication.valid=true，并在prepare和submit带expected_definition_version=publication.id；草稿禁止执行，confirm_rules不能替代重新发布。evaluate只读判断execution.mode：仅automatic_by_published_rule可按原规则自动通过，human_required须submit创建实际审批人的待办并展示execution.handoff中的@人员；blocked须先补齐信息。禁止伪造审批决定或猜测未能核验的业务事实。用户已指定room_key/node_uid时，直接用该节点作为template_source调用template核对，不必再匹配意图；否则resolve或catalog分页发现模板（hasMore须继续nextCursor），多候选由用户选择。两种入口：用户在脑图填写时input_mode=node，prepare传use_source_node=true及原节点，随后import读取；用户直接在对话提供材料时input_mode=agent，prepare传template_source、fields，可省略room_key/node_uid。agent模式不读取节点示例值，不向脑图创建任何节点；补充或修改用save传完整fields，禁止import；缺项要追问，附件只能引用服务器可核验的授权附件，不能把文件名当证明。agent模式prepare/save/submit均带input_mode=agent。返回cc_resolved是后台按人事组织解析的实际抄送人，HRBP/IT等动态角色不要求手工填姓名，不猜人员；configurationRequired非空时须处理。submit前展示本次字段、附件、抄送人与流程，取得用户明确提交指令，带当前revision、唯一operation_id及confirm_submission=true；脑图入口携带validation.nodeInputHash，对话入口携带expected_input_hash=validation.inputHash；仅执行SOP或核对不等于授权提交。结果未知先status，不能换ID盲重试。首次执行或规则变化时，requires_rule_confirmation=true；展示policy_fingerprint对应规则并取得用户明确确认后，submit同时传confirm_rules=true和expected_policy_fingerprint，只为本次申请确认版本，不必单独发布，也不全局发布给其他人。直属角色的默认同意含拒绝或须确认条件时仍由实际审核人核验，不能由AI判定条件已满足。auto_approve仅代表本次已确认或已发布的原节点自动同意规则，不是AI代批；人工审批仍由审核人登录页面办理。status的hrms_sync返回等待、失败重试或已同步及单号，审批已通过不等于人事已同步；null表示未入队，不可声称同步成功。analysis仅为辅助建议。',
     {
       action: z.enum([
         'catalog',
         'resolve',
         'template',
         'prepare',
+        'save',
         'import',
         'submit',
         'status',
         'analysis',
         'members'
+        , 'evaluate'
       ]),
       text: z
         .string()
@@ -305,15 +364,22 @@ export function registerApprovalTools(server, { api, z, ok, fail }) {
       template_source: z
         .object({ room_key: z.string(), node_uid: z.string() })
         .optional()
-        .describe('resolve/catalog返回的source；多候选须先由用户确定'),
+        .describe('用户明确指定的原流程，或resolve/catalog返回的source；多候选须先由用户确定'),
       room_key: z
         .string()
         .optional()
-        .describe('prepare时用户自己的申请节点所在房间'),
+        .describe('prepare时申请节点所在房间；use_source_node=true时必须与template_source一致'),
       node_uid: z
         .string()
         .optional()
-        .describe('prepare时申请节点，不能用制度模板节点'),
+        .describe('prepare时申请节点；use_source_node=true时使用template_source原流程节点'),
+      use_source_node: z.boolean().optional().describe('仅prepare：true时直接核对原流程提交要求，不新增申请资料分支；必须提供相同的room_key/node_uid和template_source'),
+      input_mode: z.enum(['node','agent']).optional().describe('两种材料入口：node读取脑图；agent使用对话材料、不写回脑图。agent模式的prepare/save/submit均须携带；prepare可省略room_key/node_uid，使用template_source'),
+      fields: z.record(z.union([z.string(),z.array(z.string())])).optional().describe('仅agent模式prepare/save：完整本次申请资料，键为template字段key或准确名称；文本/日期/金额用字符串，附件用已授权服务器附件ID数组。缺项须追问，不能借用脑图示例值或伪造文件引用'),
+      expected_input_hash: z.string().optional().describe('agent模式submit须传最新validation.inputHash，绑定用户已核对的申请材料和附件快照'),
+      confirm_rules: z.boolean().optional().describe('仅submit：用户明确核对字段、规则、审核人与抄送人后确认本次申请使用当前版本，不是全局发布；不能由Agent自行代确认'),
+      expected_policy_fingerprint: z.string().optional().describe('submit确认规则时传最新prepare/import/status返回的policy_fingerprint；规则变化后必须重新核对'),
+      expected_definition_version: z.string().optional().describe('已发布 Agent 审批的版本，prepare/submit必须与template.publication.id一致；草稿或版本变化必须停止并重新发布'),
       request_id: z
         .string()
         .uuid()
@@ -376,14 +442,17 @@ export function registerApprovalTools(server, { api, z, ok, fail }) {
             body: JSON.stringify({
               roomKey: input.room_key,
               nodeUid: input.node_uid,
-              source
+              source,
+              useSourceNode: input.use_source_node === true
+              , inputMode: input.input_mode, fields: input.fields
+              , expectedDefinitionVersion: input.expected_definition_version
             })
           })
         } else {
           if (!input.request_id) throw new Error('请先prepare取得request_id')
           const path =
             '/api/workflow-requests/' + encodeURIComponent(input.request_id)
-          if (input.action === 'status') result = await api(path)
+          if (input.action === 'status' || input.action === 'evaluate') result = await api(path)
           else {
             if (!input.operation_id || input.expected_revision == null)
               throw new Error(
@@ -394,12 +463,18 @@ export function registerApprovalTools(server, { api, z, ok, fail }) {
               body: JSON.stringify({
                 expectedRevision: input.expected_revision,
                 operationId: input.operation_id,
-                nodeSource: input.action === 'submit',
+                nodeSource: input.input_mode==='agent'?false:input.action === 'submit',
+                fields: input.fields,
+                expectedInputHash: input.expected_input_hash,
                 expectedNodeHash: input.expected_node_hash,
                 confirmSubmission: input.confirm_submission === true,
+                confirmRules: input.confirm_rules === true,
+                expectedPolicyFingerprint: input.expected_policy_fingerprint,
+                expectedDefinitionVersion: input.expected_definition_version,
                 content: input.analysis
               })
             })
+            if (input.action === 'submit') result = await api(path)
           }
         }
         return ok(

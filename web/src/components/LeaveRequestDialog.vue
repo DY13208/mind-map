@@ -43,7 +43,8 @@
           v-if="editable && !(row.report.publication || {}).valid"
           class="leaveAlert warning"
         >
-          当前流程尚未发布或已修改，请模板管理员核对人员和规则后发布。<el-button
+          {{ generic ? '首次执行或规则已修改，请核对本次字段、规则、审核人和抄送人后确认使用。' : '当前流程尚未发布或已修改，请模板管理员核对人员和规则后发布。' }}
+          <el-checkbox v-if="generic" v-model="rulesChecked" :disabled="busy">已核对，确认本次申请使用当前规则版本</el-checkbox><el-button
             v-if="currentTemplate && currentTemplate.canPublish"
             type="text"
             :disabled="busy"
@@ -51,16 +52,29 @@
             >发布当前流程</el-button
           >
         </div>
+        <div v-if="(row.report.ccResolved || []).length" class="leaveAlert">
+          <strong>抄送人员</strong>
+          <div v-for="recipient in row.report.ccResolved" :key="recipient.account">
+            {{ recipient.name }}（{{ recipient.source }}{{ recipient.department ? ' · ' + recipient.department : '' }}）
+          </div>
+        </div>
+        <div v-if="row.hrmsSync" class="leaveAlert" :class="row.hrmsSync.status === 'failed' ? 'warning' : ''">
+          <strong>人事系统同步：{{ row.hrmsSync.status === 'synced' ? '已同步' : row.hrmsSync.status === 'failed' ? '失败，将自动重试' : '等待同步' }}</strong>
+          <div v-if="row.hrmsSync.result">单号：{{ row.hrmsSync.result.applicationNo }}</div>
+          <div v-if="row.hrmsSync.last_error">{{ row.hrmsSync.last_error }}</div>
+        </div>
         <el-tabs v-model="tab">
-          <el-tab-pane label="节点资料核对" name="form">
+          <el-tab-pane :label="row.template.agentInput ? '申请资料核对' : '节点资料核对'" name="form">
+            <div v-if="row.template.agentInput" class="leaveNodeIntro"><div><strong>资料来自 Agent 对话</strong><p>本次材料独立保存在申请中，不写回脑图。补充或修改请回到 Agent 核对后提交。</p></div></div>
             <div v-if="editable" class="leaveNodeIntro">
               <div>
                 <i class="el-icon-connection" /><strong
-                  >资料在思维导图中填写</strong
+                  >{{ row.template.sourceNodeInput ? '直接核对原流程的提交要求' : '资料在思维导图中填写' }}</strong
                 >
                 <p>
-                  编辑「申请资料 → 字段 →
-                  值」，或将字段改为「字段：值」。此处仅核对服务器已读取的节点内容。
+                  {{ row.template.sourceNodeInput
+                    ? '直接在原流程「提交要求 → 字段 → 具体人员／具体日期／附件」下填写。支持读取更下级的实际内容，无须新建申请分支。'
+                    : '编辑「申请资料 → 字段 → 值」，或将字段改为「字段：值」。此处仅核对服务器已读取的节点内容。' }}
                 </p>
               </div>
               <el-button size="small" :disabled="busy" @click="backToNodes"
@@ -72,7 +86,7 @@
                 <dt>{{ item.label }}</dt>
                 <dd
                   :class="{ missing: !item.value }"
-                  v-text="item.value || '待在子节点填写'"
+                  v-text="item.value || (row.template.agentInput ? '待在 Agent 中补充' : '待在子节点填写')"
                 />
               </div>
             </dl>
@@ -85,7 +99,7 @@
             </div>
             <p class="leaveHint">
               {{
-                editable
+                row.template.agentInput ? '此处为本次申请材料快照，补充材料请在 Agent 中操作。' : editable
                   ? '证明上传到本申请模板指定的附件字段节点。节点内容对该脑图现有协作者可见，请使用受限的个人脑图。'
                   : '当前为已提交的材料快照；修改脑图不会改变本轮审批材料，须撤回或退回后重新读取提交。'
               }}
@@ -118,6 +132,13 @@
             </div>
           </el-tab-pane>
           <el-tab-pane label="审批流程与依据" name="flow">
+            <el-alert
+              v-if="row.template.autoApprove"
+              title="本流程按“发起后全部流程默认同意”规则执行：提交要求填写完整并确认提交后，自动同意并通知已配置的抄送人。"
+              type="info"
+              :closable="false"
+              show-icon
+            />
             <article
               v-for="(step, index) in row.steps"
               :key="step.uid"
@@ -204,6 +225,9 @@
                 }}轮</small
               >
               <p v-if="e.detail.reason">{{ e.detail.reason }}</p>
+              <p v-if="e.detail.automaticDecision">
+                按流程规则自动同意：{{ e.detail.automaticDecision.rule.text }}
+              </p>
               <pre v-if="e.action === 'analysis'">{{ e.detail.content }}</pre>
             </article></el-tab-pane
           >
@@ -278,6 +302,7 @@ export default {
     currentTemplate: null,
     tab: 'form',
     checked: [],
+    rulesChecked: false,
     reason: '',
     analysis: '',
     analyzing: false,
@@ -303,7 +328,7 @@ export default {
       return this.row && this.row.requester_id === this.userId
     },
     editable() {
-      return this.owner && ['draft', 'returned'].includes(this.row.status)
+      return this.owner && !this.row.template.agentInput && ['draft', 'returned'].includes(this.row.status)
     },
     summaryItems() {
       const f = this.row.fields || {}
@@ -333,7 +358,7 @@ export default {
         !!this.row.report.nodeInputHash &&
         !(this.row.report.blockers || []).length &&
         !this.configMissing.length &&
-        (this.row.report.publication || {}).valid
+        ((this.row.report.publication || {}).valid || (this.generic && this.rulesChecked))
       )
     },
     configMissing() {
@@ -353,7 +378,8 @@ export default {
     },
     analysisAllowed() {
       return (
-        this.row && ['draft', 'returned', 'pending'].includes(this.row.status)
+        this.row && !this.row.template.autoApprove &&
+        ['draft', 'returned', 'pending'].includes(this.row.status)
       )
     }
   },
@@ -465,6 +491,7 @@ export default {
       this.analyzing = false
       this.analysis = ''
       this.checked = []
+      this.rulesChecked = false
       this.reason = ''
       this.analysisError = ''
     },
@@ -498,6 +525,7 @@ export default {
         const data = await service.get(this.row.id)
         if (seq !== this.sequence) return
         this.row = data
+        this.rulesChecked = false
         this.checked = []
         this.reason = ''
         this.error = ''
@@ -578,6 +606,8 @@ export default {
       if (!this.canSubmit) return
       await this.act('submit', {
         confirmSubmission: true,
+        confirmRules: this.generic && this.rulesChecked,
+        expectedPolicyFingerprint: this.row.template.fingerprint,
         nodeSource: true,
         expectedNodeHash: this.row.report.nodeInputHash
       })

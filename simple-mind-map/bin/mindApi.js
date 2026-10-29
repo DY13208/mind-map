@@ -2082,6 +2082,12 @@ async function handleApi(req, res) {
   }
 
   if (await require('./leaveWorkflow/http').handle(req, res, { url, db: getPool(), writer: executeTrustedOperation, readBody, sendJson })) return true
+  if (await require('./hrmsAgent/confirmation').handle(req,res,{url,db:getPool(),readBody,sendJson})) return true
+  if (pathname === '/api/integrations/hrms/agent' && req.method === 'POST') {
+    try { sendJson(res,200,{ok:true,item:await require('./hrmsAgent/service').handle(getPool(),req,await readBody(req))}) }
+    catch(e){sendJson(res,e.statusCode || 400,{ok:false,code:e.code || 'HRMS_ERROR',error:e.message || '人事接口调用失败'})}
+    return true
+  }
 
   try {
     if (pathname === '/api/access-requests' && req.method === 'POST') {

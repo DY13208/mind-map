@@ -766,7 +766,13 @@ function createMapRefNode() {
 
 //  创建标签节点
 function createTagNode() {
-  const tagData = this.getData('tag')
+  const state = this._approvalDefinitionState
+  const tagData = [...(state ? [{text:state.state==='published'?'审批':'审批·草稿',style:{
+    fill:state.state==='published'?'#087f5b':'#fff3cd',
+    color:state.state==='published'?'#ffffff':'#754800',
+    stroke:state.state==='published'?'#066348':'#b7791f',strokeWidth:1,
+    fontSize:13,fontWeight:700,height:24,paddingX:9,radius:5
+  }}] : []), ...(this.getData('tag') || [])]
   if (!tagData || tagData.length <= 0) {
     return []
   }

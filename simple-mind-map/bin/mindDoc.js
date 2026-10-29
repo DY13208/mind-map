@@ -854,6 +854,8 @@ function addNodeOnDoc(ydoc, { parent, text, note, uid: clientUid, index } = {}) 
 }
 
 const NODE_DATA_PATCH_KEYS = [
+  'customLeft',
+  'customTop',
   'note',
   'image',
   'imageTitle',
