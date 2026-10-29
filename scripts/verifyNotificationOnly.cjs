@@ -1,0 +1,11 @@
+const assert=require('node:assert/strict'),core=require('../simple-mind-map/bin/leaveWorkflow/workflowCore')
+const n=(uid,parent_uid,text)=>({uid,parent_uid,position:uid,data:{text}})
+const nodes=[n('root',null,'自用电脑申请'),n('fields','root','提交要求'),n('field','fields','申请原因说明'),n('value','field','更换电脑'),n('cc','root','抄送总经理、副总')]
+const tpl=core.compile(nodes,'root')
+assert.equal(tpl.notificationOnly,true);assert.equal(tpl.autoApprove,true);assert.deepEqual(tpl.steps,[]);assert.deepEqual(tpl.configurationErrors,[])
+assert.equal(core.compile([...nodes,n('approval','root','审批流程')],'root').notificationOnly,false)
+assert.equal(core.compile([...nodes,n('manual','root','人工审批')],'root').notificationOnly,false)
+assert.equal(core.compile([...nodes,n('reviewer','root','待填写审核人')],'root').notificationOnly,false)
+assert.equal(core.compile(nodes.filter(x=>x.uid!=='cc'),'root').notificationOnly,false)
+assert.equal(core.compile([...nodes,n('config','root','审批配置'),n('person','config','经理')],'root').notificationOnly,false)
+console.log('PASS: pure form-and-CC is notification-only; incomplete or explicit approval rules never silently convert')

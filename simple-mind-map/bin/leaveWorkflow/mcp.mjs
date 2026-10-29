@@ -10,13 +10,14 @@ function routingAndSync(row, limit = 30) {
     definition: row.template.agentDefinition || null,
     definition_state: row.definitionState || null,
     execution: {
-      mode: ['approved','rejected','withdrawn','historical'].includes(row.status) ? 'completed' : (row.definitionState && row.definitionState.state!=='published') || (row.report.blockers || []).length || (row.report.configurationRequired || []).length ? 'blocked' : row.template.autoApprove ? 'automatic_by_published_rule' : row.steps.some(s=>s.aiReview && s.aiReview.decision==='escalate') ? 'human_required' : requireAiReview(row.template) ? 'ai_review_then_handoff' : 'human_required',
-      reason: row.template.autoApprove ? '仅按已确认的原节点自动同意规则执行' : '依据本流程的AI预审配置核验，不能判定时保持待办并@实际审核人，不伪造人工决定',
+      mode: ['approved','rejected','withdrawn','historical'].includes(row.status) ? 'completed' : (row.definitionState && row.definitionState.state!=='published') || (row.report.blockers || []).length || (row.report.configurationRequired || []).length ? 'blocked' : row.template.notificationOnly ? 'notification_only' : row.template.autoApprove ? 'automatic_by_published_rule' : row.steps.some(s=>s.aiReview && s.aiReview.decision==='escalate') ? 'human_required' : requireAiReview(row.template) ? 'ai_review_then_handoff' : 'human_required',
+      reason: row.template.notificationOnly ? '仅抄送，无需审批：材料完整并确认提交后完成登记并通知抄送人，不生成审核待办' : row.template.autoApprove ? '仅按已确认的原节点自动同意规则执行' : '依据本流程的AI预审配置核验，不能判定时保持待办并@实际审核人，不伪造人工决定',
       handoff: row.steps.slice(row.current_step || 0, (row.current_step || 0)+1).map(s=>({role:text(s.role),account:text(s.assigneeId),name:text(s.assigneeName),mention:s.assigneeId?'@'+text(s.assigneeName || s.assigneeId):null}))
     },
     source_node_input: row.template.sourceNodeInput === true,
     input_mode: row.template.agentInput === true ? 'agent' : 'node',
     auto_approve: row.template.autoApprove === true,
+    notification_only: row.template.notificationOnly === true,
     policy_fingerprint: row.template.fingerprint,
     requires_rule_confirmation: row.template.kind === 'generic' && !(row.report.publication || {}).valid,
     rule_confirmation: row.report.ruleConfirmation || null,
@@ -304,6 +305,7 @@ function compactTemplate(tpl) {
     supports_source_node_input: tpl.kind === 'generic' && !!tpl.requirementsNodeUid,
     input_modes: tpl.publication?.agent_mode && tpl.publication?.valid ? ['node','agent'] : ['node'],
     auto_approve: tpl.autoApprove === true,
+    notification_only: tpl.notificationOnly === true,
     ai_review: aiReview.shouldRun(tpl),
     configurationErrors: tpl.configurationErrors,
     publication: tpl.publication,
@@ -320,6 +322,7 @@ function compactTemplate(tpl) {
     supports_source_node_input: tpl.kind === 'generic' && !!tpl.requirementsNodeUid,
     input_modes: tpl.publication?.agent_mode && tpl.publication?.valid ? ['node','agent'] : ['node'],
     auto_approve: tpl.autoApprove === true,
+    notification_only: tpl.notificationOnly === true,
     ai_review: aiReview.shouldRun(tpl),
     fields: tpl.fields.map(f => ({
       uid: f.uid,
@@ -340,7 +343,7 @@ function compactTemplate(tpl) {
 export function registerApprovalTools(server, { api, z, ok, fail }) {
   server.tool(
     'approval_request',
-    '通用脑图原生审批。已发布审批节点的publication.agent_mode=true时必须确认publication.valid=true，并在prepare和submit带expected_definition_version=publication.id；草稿禁止执行，confirm_rules不能替代重新发布。evaluate只读判断execution.mode：仅automatic_by_published_rule可按原规则自动通过，human_required须submit创建实际审批人的待办并展示execution.handoff中的@人员；blocked须先补齐信息。禁止伪造审批决定或猜测未能核验的业务事实。用户已指定room_key/node_uid时，直接用该节点作为template_source调用template核对，不必再匹配意图；否则resolve或catalog分页发现模板（hasMore须继续nextCursor），多候选由用户选择。两种入口：用户在脑图填写时input_mode=node，prepare传use_source_node=true及原节点，随后import读取；用户直接在对话提供材料时input_mode=agent，prepare传template_source、fields，可省略room_key/node_uid。agent模式不读取节点示例值，不向脑图创建任何节点；补充或修改用save传完整fields，禁止import；缺项要追问，附件只能引用服务器可核验的授权附件，不能把文件名当证明。agent模式prepare/save/submit均带input_mode=agent。返回cc_resolved是后台按人事组织解析的实际抄送人，HRBP/IT等动态角色不要求手工填姓名，不猜人员；configurationRequired非空时须处理。submit前展示本次字段、附件、抄送人与流程，取得用户明确提交指令，带当前revision、唯一operation_id及confirm_submission=true；脑图入口携带validation.nodeInputHash，对话入口携带expected_input_hash=validation.inputHash；仅执行SOP或核对不等于授权提交。结果未知先status，不能换ID盲重试。首次执行或规则变化时，requires_rule_confirmation=true；展示policy_fingerprint对应规则并取得用户明确确认后，submit同时传confirm_rules=true和expected_policy_fingerprint，只为本次申请确认版本，不必单独发布，也不全局发布给其他人。直属角色的默认同意含拒绝或须确认条件时仍由实际审核人核验，不能由AI判定条件已满足。auto_approve仅代表本次已确认或已发布的原节点自动同意规则，不是AI代批；人工审批仍由审核人登录页面办理。status的hrms_sync返回等待、失败重试或已同步及单号，审批已通过不等于人事已同步；null表示未入队，不可声称同步成功。analysis仅为辅助建议。',
+    '通用脑图原生审批。已发布审批节点的publication.agent_mode=true时必须确认publication.valid=true，并在prepare和submit带expected_definition_version=publication.id；草稿禁止执行，confirm_rules不能替代重新发布。evaluate只读判断execution.mode：notification_only表示仅登记抄送、无需审核，材料完整且用户确认后submit直接完成并通知抄送人，不生成审核待办；automatic_by_published_rule可按原规则自动通过，human_required须submit创建实际审批人的待办并展示execution.handoff中的@人员；blocked须先补齐信息。禁止伪造审批决定或猜测未能核验的业务事实。用户已指定room_key/node_uid时，直接用该节点作为template_source调用template核对，不必再匹配意图；否则resolve或catalog分页发现模板（hasMore须继续nextCursor），多候选由用户选择。两种入口：用户在脑图填写时input_mode=node，prepare传use_source_node=true及原节点，随后import读取；用户直接在对话提供材料时input_mode=agent，prepare传template_source、fields，可省略room_key/node_uid。agent模式不读取节点示例值，不向脑图创建任何节点；补充或修改用save传完整fields，禁止import；缺项要追问，附件只能引用服务器可核验的授权附件，不能把文件名当证明。agent模式prepare/save/submit均带input_mode=agent。返回cc_resolved是后台按人事组织解析的实际抄送人，HRBP/IT等动态角色不要求手工填姓名，不猜人员；configurationRequired非空时须处理。submit前展示本次字段、附件、抄送人与流程，取得用户明确提交指令，带当前revision、唯一operation_id及confirm_submission=true；脑图入口携带validation.nodeInputHash，对话入口携带expected_input_hash=validation.inputHash；仅执行SOP或核对不等于授权提交。结果未知先status，不能换ID盲重试。首次执行或规则变化时，requires_rule_confirmation=true；展示policy_fingerprint对应规则并取得用户明确确认后，submit同时传confirm_rules=true和expected_policy_fingerprint，只为本次申请确认版本，不必单独发布，也不全局发布给其他人。直属角色的默认同意含拒绝或须确认条件时仍由实际审核人核验，不能由AI判定条件已满足。auto_approve仅代表本次已确认或已发布的原节点自动同意规则，不是AI代批；人工审批仍由审核人登录页面办理。status的hrms_sync返回等待、失败重试或已同步及单号，审批已通过不等于人事已同步；null表示未入队，不可声称同步成功。analysis仅为辅助建议。',
     {
       action: z.enum([
         'catalog',

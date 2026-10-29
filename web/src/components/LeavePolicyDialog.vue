@@ -16,9 +16,11 @@
             <h2>{{ agentMode ? '发布为审批节点，由 Agent 通过 MCP 执行' : '脑图定义规则，发布后执行' }}</h2>
           </div>
           <el-tag :type="policy.publication.valid ? 'success' : 'warning'">{{
-            policy.publication.valid ? '当前版本已发布' : '待配置 / 待发布'
+            policy.publication.valid ? '当前版本已发布' : configurationPending ? '待配置' : '待发布'
           }}</el-tag>
         </div>
+        <el-alert v-if="policy.notificationOnly" title="仅抄送，无需审批：材料完整并确认提交后完成登记，通知已配置的抄送人，不生成审核待办。" type="info" :closable="false" show-icon />
+        <el-alert v-if="(policy.configurationErrors || []).length" :title="policy.configurationErrors.join('；')" type="warning" :closable="false" show-icon />
         <p class="policyHint">
           <template v-if="agentMode">发布后节点显示“审批”标记，可复制给 AI 在 Agent 中运行。材料可在脑图提交要求下填写，也可在 Agent 对话中提供，本次对话材料不写回脑图。修改审批规则后须重新发布。</template>
           写明姓名会匹配本企业唯一成员，同名时须登记具体账号。部门负责人和HRBP由人事组织架构按申请员工动态解析。
@@ -70,7 +72,7 @@
           ><el-button
             type="primary"
             :loading="busy"
-            :disabled="!policy.canPublish"
+            :disabled="!policy.canPublish || configurationPending"
             @click="publish"
             >{{ agentMode ? '发布这个审批流' : '发布当前流程' }}</el-button
           >
@@ -100,6 +102,9 @@ export default {
     searchSequence: 0
   }),
   computed: {
+    configurationPending() {
+      return !this.policy || (this.policy.configurationErrors || []).length > 0 || this.bindings.some(s=>!s.accounts.length&&!s.dynamicReady)
+    },
     bindings() {
       return [
         ...this.policy.steps.map(s => ({ role: s.role, accounts: s.accounts, resolutionError: s.resolutionError, dynamicReady: ['hrbp','head'].includes(s.dynamicRole) && s.resolverConfigured })),

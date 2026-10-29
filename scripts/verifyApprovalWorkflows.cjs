@@ -767,6 +767,35 @@ async function main() {
     nr=await service.mutate(pool,who('ssc'),nr.id,'decide',body(nr,{decision:'approve',reason:'已核对真实性及拒绝条件，未触发拒绝',checkedCriteria:nr.steps[0].criteria.map(c=>c.uid)}))
     check(nr.status,'approved')
     check((await service.get(pool,who('owner'),nr.id)).history.some(e=>e.action==='submit'&&e.detail.ruleConfirmation?.scope==='request'),true)
+    const notification=fixture('channel','notification-only')
+    notification.nodes.find(n=>n.data.text==='申请字段').data.text='提交要求'
+    const approvalRoot=notification.nodes.find(n=>n.data.text==='审批流程').uid
+    const configuredReviewer=notification.nodes.find(n=>n.data.text==='渠道负责人'&&n.parent_uid!==approvalRoot).uid
+    const excluded=new Set([approvalRoot,configuredReviewer])
+    for(let changed=true;changed;){changed=false;for(const n of notification.nodes)if(excluded.has(n.parent_uid)&&!excluded.has(n.uid)){excluded.add(n.uid);changed=true}}
+    notification.nodes=notification.nodes.filter(n=>!excluded.has(n.uid))
+    await insert('channels',notification.nodes)
+    const notificationSource={roomKey:'channels',nodeUid:notification.root}
+    const nt=await service.template(pool,who('owner'),notificationSource)
+    check(nt.notificationOnly,true)
+    check(nt.configurationErrors,[])
+    const np=await service.publish(pool,who('owner'),{source:notificationSource,expectedFingerprint:nt.fingerprint,expectedContentFingerprint:nt.contentFingerprint,agentMode:true,operationId:randomUUID()})
+    const notificationActor={...who('owner'),authUser:{id:'owner',mcp:true}}
+    let noticeRequest=await service.prepare(pool,notificationActor,{source:notificationSource,inputMode:'agent',expectedDefinitionVersion:String(np.id)})
+    await rejects(()=>service.mutate(pool,notificationActor,noticeRequest.id,'submit',body(noticeRequest,{expectedInputHash:noticeRequest.report.inputHash,expectedDefinitionVersion:String(np.id),confirmSubmission:true})),'APPLICATION_INCOMPLETE')
+    noticeRequest=await service.mutate(pool,notificationActor,noticeRequest.id,'save',body(noticeRequest,{fields:{渠道名称:'测试渠道',申请措施:'调整',预计日期:'2026-10-29',库存及结款说明:'登记通知'}}))
+    check(compactLeaveResult(noticeRequest).execution.mode,'notification_only')
+    const noticeSubmit=body(noticeRequest,{expectedInputHash:noticeRequest.report.inputHash,expectedDefinitionVersion:String(np.id),confirmSubmission:true})
+    noticeRequest=await service.mutate(pool,notificationActor,noticeRequest.id,'submit',noticeSubmit)
+    check(noticeRequest.status,'approved','notification-only uses the terminal stored state without approval tasks')
+    check(noticeRequest.steps,[])
+    check((await pool.query('select kind from leave_notifications where request_id=$1',[noticeRequest.id])).rows.map(r=>r.kind),['notification','notification'],'registration receipt and CC only, no reviewer todo or approval notification')
+    const completedEvent=(await pool.query("select detail from leave_events where request_id=$1 and action='submit'",[noticeRequest.id])).rows[0].detail
+    check(completedEvent.completion.kind,'notification_only')
+    check(completedEvent.automaticDecision,undefined,'registration does not fabricate approval evidence')
+    await service.mutate(pool,notificationActor,noticeRequest.id,'submit',noticeSubmit)
+    check((await pool.query('select count(*)::int n from leave_notifications where request_id=$1',[noticeRequest.id])).rows[0].n,2,'duplicate submit does not duplicate CC')
+    await service.project(pool,async()=>{throw Error('Notification Agent flow must not write graph')},noticeRequest.id)
     const agentFixture=require('./fixtures/natural-approval.cjs')('agent-definition')
     await insert('channels',agentFixture.nodes)
     const agentSource={roomKey:'channels',nodeUid:agentFixture.root}
