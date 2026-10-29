@@ -1,0 +1,5 @@
+[
+  "employee_roster.hr_roster.api.employee_center.get_context",
+  "employee_roster.hr_roster.api.personal_center.get_context",
+  "employee_roster.hr_roster.api.employee_checkin_dashboard.get_checkin_dashboard"
+]

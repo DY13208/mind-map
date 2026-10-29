@@ -12,6 +12,7 @@ const source = {
 }
 const wait = ms => new Promise(r => setTimeout(r, ms))
 async function main() {
+  process.env.WCPD_AI_REVIEW_ENABLED = '0'
   assert.equal(process.env.LEAVE_TEST_DISPOSABLE, '1')
   const container = process.env.LEAVE_TEST_DB_CONTAINER
   assert.ok(container && /preview|test/.test(container))
@@ -72,6 +73,9 @@ async function main() {
         ONEID_AUTH_ENABLED: 'false',
         WORKBUDDY_AUTH_ENABLED: 'false',
         KNOWLEDGE_COMPILER_ENABLED: 'false',
+        HRMS_SYNC_ENABLED: '0',
+        HRMS_AGENT_WRITES_ENABLED: 'true', // Synthetic page-confirmation tests only.
+        WCPD_AI_REVIEW_ENABLED: '0',
         TENCENT_COS_SECRET_ID: '',
         TENCENT_COS_SECRET_KEY: '',
         TENCENT_COS_BUCKET: '',
@@ -139,16 +143,18 @@ async function main() {
     return r.data.item
   }
   try {
-    for (let i = 0; i < 120; i++) {
+    let healthy = false
+    for (let i = 0; i < 600; i++) {
       if (child.exitCode !== null)
         throw new Error('Collab test server exited: ' + log)
       try {
-        if ((await fetch(base + '/api/health')).ok) break
+        if ((await fetch(base + '/api/health')).ok) { healthy = true; break }
       } catch (_) {
         /* startup */
       }
       await wait(100)
     }
+    if (!healthy) throw new Error('Collab test server startup timed out: ' + log)
     await db.connect()
     connected = true
     for (const [id, token] of Object.entries(tokens)) {
@@ -166,6 +172,23 @@ async function main() {
         ]
       )
     }
+    // Real session cookies, real HTTP route: MCP cannot approve its own plan.
+    const hrmsPlan=randomUUID(),hrmsHash='synthetic-request-hash'
+    await db.query("insert into hrms_agent_actions(id,owner_id,corp_id,operation_id,operation,params,request_hash) values($1,'applicant','wwleaverequesttest',$2,'employee_roster.hr_roster.api.employee_center.save_application',$3,$4)",[hrmsPlan,randomUUID(),{payload:{note:'</script><script>unsafe</script>'}},hrmsHash])
+    const confirmationPath='/api/integrations/hrms/agent/confirm?plan_id='+hrmsPlan
+    check((await api('mcp:applicant',confirmationPath)).data.code,'HRMS_BROWSER_REQUIRED')
+    check((await api('other',confirmationPath)).status,404)
+    const pageResponse=await fetch(base+confirmationPath,{headers:{Cookie:'mind_map_session='+tokens.applicant}})
+    check(pageResponse.status,200)
+    check(pageResponse.headers.get('cache-control'),'no-store')
+    check(pageResponse.headers.get('content-security-policy').includes("frame-ancestors 'none'"),true)
+    const html=await pageResponse.text()
+    check(html.includes('</script><script>unsafe'),false)
+    const pagePlan=JSON.parse(html.match(/const plan=(.*?);const el=/)[1])
+    const body={plan_id:hrmsPlan,confirmation_hash:hrmsHash,nonce:pagePlan.nonce}
+    check((await api('mcp:applicant','/api/integrations/hrms/agent/confirm','POST',body)).status,403)
+    check((await api('applicant','/api/integrations/hrms/agent/confirm','POST',body)).data.item.page_confirmed,true)
+    check((await api('applicant','/api/integrations/hrms/agent/confirm','POST',body)).status,409)
     const nodes = structuredClone(
       require('./fixtures/leave-template-verified.json')
     )
@@ -524,13 +547,16 @@ async function main() {
         }
       },
       {
-        api: async (path, options = {}) =>
-          item(
+        api: async (path, options = {}) => {
+          const response = await api(
             'mcp:applicant',
             path,
             options.method,
             options.body ? JSON.parse(options.body) : undefined
-          ),
+          )
+          if (response.status !== 200) throw Object.assign(new Error(response.data.error), {code:response.data.code,statusCode:response.status})
+          return response.data.item
+        },
         z,
         ok: v => v,
         fail: e => ({ isError: true, error: e.message })
@@ -618,6 +644,79 @@ async function main() {
       ),
       true
     )
+    const direct=require('./fixtures/approval-templates.cjs').template('channel','http-direct')
+    direct.nodes=direct.nodes.filter(n=>!n.data.text.startsWith('流程标识：'))
+    direct.nodes.find(n=>n.data.text==='申请字段').data.text='提交要求'
+    direct.nodes.push({uid:'http-direct-auto',parent_uid:direct.root,position:'Z',data:{text:'发起后全部流程默认同意'}})
+    await db.query("insert into rooms(room_key,title,cos_key,owner_id,nodes) values('http-direct','direct','http-direct.json','applicant','{}')")
+    await db.query("insert into room_members(room_key,user_id,role,direct_role) values('http-direct','applicant','owner','owner')")
+    for(const n of direct.nodes) await db.query('insert into room_nodes(room_key,uid,parent_uid,position,data,is_root) values($1,$2,$3,$4,$5,$6)',['http-direct',n.uid,n.parent_uid,n.position,n.data,n.uid===direct.root])
+    const directSource={room_key:'http-direct',node_uid:direct.root}
+    let directTpl=await call({action:'template',template_source:directSource})
+    check(directTpl.supports_source_node_input,true,'known original 提交要求 needs no discovery marker')
+    check(directTpl.auto_approve,true)
+    for(const f of directTpl.fields) await db.query('insert into room_nodes(room_key,uid,parent_uid,position,data) values($1,$2,$3,$4,$5)',['http-direct','value-'+f.uid,f.uid,'ZZ',{text:values[f.label]}])
+    directTpl=await call({action:'template',template_source:directSource})
+    const countBefore=(await db.query("select count(*)::int n from room_nodes where room_key='http-direct'")).rows[0].n
+    const bad=await call({action:'prepare',room_key:'http-personal',node_uid:'invalid-direct-anchor',template_source:directSource,use_source_node:true})
+    check(bad.structuredContent.code,'INVALID_SOURCE_INPUT','direct entry cannot target a different anchor')
+    const directPrepared=await call({action:'prepare',room_key:'http-direct',node_uid:direct.root,template_source:directSource,use_source_node:true})
+    check(directPrepared.source_node_input,true)
+    check(directPrepared.requires_rule_confirmation,true)
+    check(directPrepared.validation.missing,[])
+    check(directPrepared.cc_resolved[0].account,'ceo')
+    const noConfirm=await call({action:'submit',request_id:directPrepared.request_id,expected_revision:directPrepared.revision,expected_node_hash:directPrepared.validation.nodeInputHash,operation_id:randomUUID()})
+    check(noConfirm.isError,true,'source-node support never removes explicit submit confirmation')
+    const noRules=await call({action:'submit',request_id:directPrepared.request_id,expected_revision:directPrepared.revision,expected_node_hash:directPrepared.validation.nodeInputHash,operation_id:randomUUID(),confirm_submission:true})
+    check(noRules.structuredContent.code,'RULE_CONFIRMATION_REQUIRED')
+    const approved=await call({action:'submit',request_id:directPrepared.request_id,expected_revision:directPrepared.revision,expected_node_hash:directPrepared.validation.nodeInputHash,operation_id:randomUUID(),confirm_submission:true,confirm_rules:true,expected_policy_fingerprint:directPrepared.policy_fingerprint})
+    check(approved.status,'approved')
+    check(approved.rule_confirmation.scope,'request')
+    check(approved.hrms_sync,null,'approval success does not imply HRMS success')
+    check((await db.query("select count(*)::int n from room_nodes where room_key='http-direct'")).rows[0].n,countBefore,'MCP direct submission creates no application branches')
+    await db.query("insert into approval_hrms_sync(request_id,round,payload,status,result,synced_at) values($1,1,'{}','synced',$2,now())",[approved.request_id,{name:'synthetic-hrms',applicationNo:'WCPD-TEST',status:'已通过'}])
+    const synced=await call({action:'status',request_id:approved.request_id})
+    check(synced.hrms_sync.status,'synced')
+    check(synced.hrms_sync.result.application_no,'WCPD-TEST')
+    const natural=require('./fixtures/natural-approval.cjs')('http-natural')
+    await db.query("insert into rooms(room_key,title,cos_key,owner_id,nodes) values('http-natural','natural','http-natural.json','applicant','{}')")
+    await db.query("insert into room_members(room_key,user_id,role,direct_role) values('http-natural','applicant','owner','owner')")
+    for(const n of natural.nodes) await db.query('insert into room_nodes(room_key,uid,parent_uid,position,data,is_root) values($1,$2,$3,$4,$5,$6)',['http-natural',n.uid,n.parent_uid,n.position,n.data,n.uid===natural.root])
+    const naturalRequest=await call({action:'prepare',room_key:'http-natural',node_uid:natural.root,template_source:{room_key:'http-natural',node_uid:natural.root},use_source_node:true})
+    check(naturalRequest.steps[0].role,'SSC')
+    check(naturalRequest.validation.configurationRequired,[])
+    const pending=await call({action:'submit',request_id:naturalRequest.request_id,expected_revision:naturalRequest.revision,expected_node_hash:naturalRequest.validation.nodeInputHash,operation_id:randomUUID(),confirm_submission:true,confirm_rules:true,expected_policy_fingerprint:naturalRequest.policy_fingerprint})
+    check(pending.status,'pending','MCP does not auto-agree conditional SSC rules')
+    check(pending.steps[0].assigneeId,'ssc')
+    check((await db.query("select count(*)::int n from leave_policy_publications where source_room in ('http-natural','http-direct')")).rows[0].n,0)
+    const lifecycle=require('./fixtures/natural-approval.cjs')('http-agent')
+    await db.query("insert into rooms(room_key,title,cos_key,owner_id,nodes) values('http-agent','agent','http-agent.json','applicant','{}')")
+    await db.query("insert into room_members(room_key,user_id,role,direct_role) values('http-agent','applicant','owner','owner')")
+    for(const n of lifecycle.nodes) await db.query('insert into room_nodes(room_key,uid,parent_uid,position,data,is_root) values($1,$2,$3,$4,$5,$6)',['http-agent',n.uid,n.parent_uid,n.position,n.data,n.uid===lifecycle.root])
+    const lifecycleSource={room_key:'http-agent',node_uid:lifecycle.root}
+    const lc=await item('applicant','/api/workflow-template?'+new URLSearchParams({source_room:'http-agent',source_node:lifecycle.root}))
+    const publication=await item('applicant','/api/workflow-template/publish','POST',{source:{roomKey:'http-agent',nodeUid:lifecycle.root},expectedFingerprint:lc.fingerprint,expectedContentFingerprint:lc.contentFingerprint,agentMode:true,operationId:randomUUID()})
+    check(publication.agent_mode,true)
+    const managed=await call({action:'prepare',room_key:'http-agent',node_uid:lifecycle.root,template_source:lifecycleSource,use_source_node:true,expected_definition_version:String(publication.id)})
+    check(managed.definition.version,String(publication.id))
+    check((await call({action:'evaluate',request_id:managed.request_id})).execution.mode,'human_required')
+    const countBeforeChat=(await db.query("select count(*)::int n from room_nodes where room_key='http-agent'")).rows[0].n
+    let chat=await call({action:'prepare',template_source:lifecycleSource,input_mode:'agent',fields:{补贴月份:'2026-11',补贴金额:'222',申请说明:'对话申请'},expected_definition_version:String(publication.id)})
+    check(chat.input_mode,'agent')
+    check(chat.request_id!==managed.request_id,true)
+    check(typeof chat.validation.inputHash,'string')
+    chat=await call({action:'save',request_id:chat.request_id,input_mode:'agent',fields:{补贴月份:'2026-11',补贴金额:'333',申请说明:'对话材料更新'},expected_revision:chat.revision,operation_id:randomUUID()})
+    check(chat.fields[chat.required_fields.find(f=>f.label==='补贴金额').key],'333')
+    chat=await call({action:'submit',request_id:chat.request_id,input_mode:'agent',expected_revision:chat.revision,operation_id:randomUUID(),expected_definition_version:String(publication.id),expected_input_hash:chat.validation.inputHash,confirm_submission:true})
+    check(chat.status,'pending')
+    check((await db.query("select count(*)::int n from room_nodes where room_key='http-agent'")).rows[0].n,countBeforeChat,'real HTTP Agent material path never projects nodes')
+    check((await item('applicant','/api/workflow-definitions?room_key=http-agent')).list[0].state,'published')
+    const material=lifecycle.nodes.find(n=>n.uid===lifecycle.truth)
+    await db.query("update room_nodes set data=jsonb_build_object('text','核对加班真实性') where room_key='http-agent' and uid=$1",[material.uid])
+    check((await item('applicant','/api/workflow-definitions?room_key=http-agent')).list[0].state,'draft')
+    check((await call({action:'evaluate',request_id:managed.request_id})).execution.mode,'blocked')
+    const stale=await call({action:'submit',request_id:managed.request_id,expected_revision:managed.revision,expected_node_hash:managed.validation.nodeInputHash,expected_definition_version:String(publication.id),confirm_submission:true,confirm_rules:true,expected_policy_fingerprint:managed.policy_fingerprint,operation_id:randomUUID()})
+    check(stale.structuredContent.code,'DEFINITION_DRAFT','Agent cannot bypass draft state with execution confirmation')
     console.log(
       JSON.stringify({
         ok: true,

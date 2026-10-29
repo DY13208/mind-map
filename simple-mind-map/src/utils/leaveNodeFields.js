@@ -30,7 +30,14 @@ function extractFields(nodes, rootUid, definitions) {
           a.uid.localeCompare(b.uid)
       )
   const data = n => plain((n.data || n).text)
-  const group = children(rootUid).find(n => data(n) === '申请资料')
+  const sourceInput = !!(definitions && definitions.some(f => f.sourceInput))
+  const group = children(rootUid).find(n => data(n) === (sourceInput ? '提交要求' : '申请资料'))
+  const placeholder = text => /^(?:待填写(?:$|[（(：:])|具体人员$|具体日期$|评分表附件$|分支主题$|子主题$)/.test(text)
+  const nestedValues = n => children(n.uid).flatMap(child => {
+    const text = data(child)
+    if (/^(?:类型|最小值|最大值)\s*[:：]/.test(text) || text === '选项') return []
+    return children(child.uid).length ? nestedValues(child) : placeholder(text) ? [] : [text]
+  })
   const values = {},
     attachments = new Set()
   const collect = n => {
@@ -42,7 +49,7 @@ function extractFields(nodes, rootUid, definitions) {
   if (root && (root.data || root).attachmentId)
     attachments.add(String((root.data || root).attachmentId))
   for (const n of [
-    ...children(rootUid).filter(item => !group || item.uid !== group.uid),
+    ...children(rootUid).filter(item => !group || item.uid !== group.uid).filter(() => !sourceInput),
     ...(group ? children(group.uid) : [])
   ]) {
     const text = data(n),
@@ -69,9 +76,9 @@ function extractFields(nodes, rootUid, definitions) {
     }
     const raw =
       (split && split[2].trim()) ||
-      children(n.uid)
+      (sourceInput ? nestedValues(n) : children(n.uid)
         .map(data)
-        .filter(s => !/^待填写(?:$|[（(：:])/.test(s))
+        .filter(s => !/^待填写(?:$|[（(：:])/.test(s)))
         .join('\n')
     if (!raw || /^待填写(?:$|[（(：:])/.test(raw)) continue
     const value =

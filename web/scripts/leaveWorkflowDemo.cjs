@@ -1,6 +1,7 @@
 // Real Vue components + HTTP handlers + PostgreSQL in a disposable schema.
 // Only authentication and AI availability are fixtures. No production data/calls.
 const assert = require('node:assert/strict')
+process.env.WCPD_AI_REVIEW_ENABLED = '0'
 const fs = require('node:fs'),
   path = require('node:path'),
   http = require('node:http')
@@ -28,6 +29,7 @@ const actors = {
 }
 let cleanupOnFailure
 async function main() {
+  process.env.WCPD_AI_REVIEW_ENABLED = '0'
   assert.equal(process.env.LEAVE_TEST_DISPOSABLE, '1')
   const container = process.env.LEAVE_TEST_DB_CONTAINER
   assert.ok(container && /test|preview/.test(container))
@@ -113,7 +115,40 @@ async function main() {
   await pool.query(
     "insert into room_nodes values('personal','home',null,'A','{\"text\":\"我的业务申请\"}',null),('personal','anchor','home','A','{\"text\":\"待登记事项\"}',null),('personal','contract-anchor','home','B','{\"text\":\"待登记合同申请\"}',null),('personal','channel-anchor','home','C','{\"text\":\"待登记渠道申请\"}',null)"
   )
+  if (process.env.NODE_APPROVAL_DEMO === '1') {
+    const rows = [
+      ['probation-template','home','转正申请表'],
+      ['probation-requirements','probation-template','提交要求'],
+      ['probation-employee','probation-requirements','员工'],
+      ['probation-start','probation-requirements','试用期开始日'],
+      ['probation-end','probation-requirements','试用期结束日'],
+      ['probation-score','probation-requirements','转正评分表'],
+      ['probation-auto','probation-template','发起后全部流程默认同意'],
+      ['probation-cc','probation-template','抄送人事组、IT'],
+      ['probation-config','probation-template','审批配置'],
+      ['probation-cc-config','probation-config','抄送'],
+      ['probation-hr','probation-cc-config','人事组'],
+      ['probation-hr-id','probation-hr','账号：hr'],
+      ['probation-it','probation-cc-config','IT'],
+      ['probation-it-id','probation-it','账号：ceo'],
+      ['empty-template','home','未配置提交要求的流程']
+    ]
+    for (const [uid,parent,text] of rows) await pool.query(
+      "insert into room_nodes(room_key,uid,parent_uid,position,data) values('personal',$1,$2,$3,$4)",
+      [uid,parent,String(rows.findIndex(r=>r[0]===uid)).padStart(4,'0'),{text,expand:!['probation-requirements','probation-config'].includes(uid)}]
+    )
+    const source = {roomKey:'personal',nodeUid:'probation-template'}
+    const selected = await service.template(pool, reqFor('applicant'), source)
+    await service.publish(pool, reqFor('applicant'), {source,expectedFingerprint:selected.fingerprint,operationId:randomUUID()})
+  }
   const tpl = await service.template(pool, reqFor('owner'))
+  if (process.env.NATURAL_APPROVAL_DEMO === '1') {
+    const natural = require('../../scripts/fixtures/natural-approval.cjs')('natural-browser')
+    for (const node of natural.nodes) await pool.query(
+      "insert into room_nodes(room_key,uid,parent_uid,position,data) values('personal',$1,$2,$3,$4)",
+      [node.uid,node.uid===natural.root?'home':node.parent_uid,node.position,{...node.data,expand:node.uid===natural.root}]
+    )
+  }
   await service.publish(pool, reqFor('owner'), {
     expectedFingerprint: tpl.fingerprint,
     operationId: randomUUID()
@@ -177,6 +212,7 @@ async function main() {
     define: { 'process.env.NODE_ENV': '"test"' },
     alias: {
       '@': path.join(root, 'src'),
+      'simple-mind-map': path.resolve(root, '../simple-mind-map'),
       vue: fs.realpathSync(require.resolve('vue/dist/vue.esm.js'))
     },
     loader: { '.woff': 'dataurl', '.woff2': 'dataurl', '.ttf': 'dataurl' },
@@ -187,15 +223,18 @@ async function main() {
           build.onEnd(r => {
             if (!r.errors.length) compiled = r
           })
-          build.onLoad({ filter: /src\/utils\/runtimeConfig\.js$/ }, () => ({
+          build.onLoad({ filter: /src[\\/]utils[\\/]runtimeConfig\.js$/ }, () => ({
             contents:
               'export const getRuntimeConfig=()=>({collabApi:location.origin+"/actor/"+(location.pathname.slice(1)||"applicant")})',
             loader: 'js'
           }))
-          build.onLoad({ filter: /src\/utils\/agentChat\.js$/ }, () => ({
+          build.onLoad({ filter: /src[\\/]utils[\\/]agentChat\.js$/ }, () => ({
             contents:
               'export const checkAiBackend=async()=>({ok:false});export const streamChat=async()=>({content:""})',
             loader: 'js'
+          }))
+          build.onLoad({ filter: /utils[\\/]roomLocation\.js$/ }, () => ({
+            contents:'export const roomFromLocation=route=>route.query.room||"personal";export const buildInviteUrl=()=>"";',loader:'js'
           }))
           build.onResolve({ filter: /\?leave-style$/ }, a => ({
             path: a.path.slice(0, -12),
@@ -298,7 +337,7 @@ async function main() {
               [
                 node.uid,
                 node.uid === 'home' ? null : node.parentUid,
-                { text: node.text }
+                { text: node.text, ...(node.approvalSource ? {approvalSource:node.approvalSource} : {}) }
               ]
             )
             return sendJson(res, 200, { ok: true })

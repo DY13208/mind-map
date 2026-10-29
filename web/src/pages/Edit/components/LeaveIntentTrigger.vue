@@ -11,9 +11,11 @@
     <span v-else-if="requestId" class="leaveNodeStatus">{{
       checkedLabel || '直接在申请资料子节点填写'
     }}</span>
-    <button type="button" :disabled="busy" @click="open">
+    <button type="button" :disabled="busy" @click="openCurrent">
       <i class="el-icon-date" /><span>{{
-        isPolicy
+        hasSubmissionRequirements && !requestId
+          ? '发布这个审批流'
+          : isPolicy
           ? '配置审批流程'
           : requestId
           ? '核对申请与审批'
@@ -57,6 +59,7 @@
 <script>
 import service, { openLeaveRequest } from '@/services/leaveService'
 import { roomFromLocation } from '@/utils/roomLocation'
+import { signature as definitionSignature } from '../../../../../simple-mind-map/src/utils/approvalDefinition'
 import {
   extractFields,
   isWorkflowIntent
@@ -112,13 +115,27 @@ export default {
     choices: [],
     catalogCursor: null,
     choosing: false,
-    policySource: null
+    policySource: null,
+    approvalLaunchSequence: 0
   }),
+  computed: {
+    hasSubmissionRequirements() {
+      return !!this.node && ((this.node.nodeData && this.node.nodeData.children) || []).some(
+        child => String((child.data || {}).text || '').replace(/<[^>]+>/g, '').trim() === '提交要求'
+      )
+    }
+  },
   mounted() {
+    this.definitionMarks = new Map()
+    this.$bus.$on('publishNodeApproval', this.publishDefinition)
+    window.addEventListener('mindmap:approval-published', this.refreshDefinitions)
+    this.definitionTimer = setInterval(this.refreshDefinitions, 5000)
+    this.refreshDefinitions()
     this.requestByNode = new Map()
     this.signatures = new Map()
     this.requestTemplates = new Map()
     this.$bus.$on('node_active', this.select)
+    this.$bus.$on('submitNodeApproval', this.startNodeApproval)
     this.mindMap.on('hide_text_edit', this.onTextEnd)
     this.mindMap.on('data_change', this.onDataChange)
     window.addEventListener('mindmap:leave-focus', this.focusNodes)
@@ -137,13 +154,154 @@ export default {
       .catch(() => {})
   },
   beforeDestroy() {
+    clearInterval(this.definitionTimer)
+    clearTimeout(this.definitionRefreshTimer)
+    this.$bus.$off('publishNodeApproval', this.publishDefinition)
+    window.removeEventListener('mindmap:approval-published', this.refreshDefinitions)
     clearTimeout(this.checkTimer)
+    this.approvalLaunchSequence++
     this.$bus.$off('node_active', this.select)
+    this.$bus.$off('submitNodeApproval', this.startNodeApproval)
     this.mindMap.off('hide_text_edit', this.onTextEnd)
     this.mindMap.off('data_change', this.onDataChange)
     window.removeEventListener('mindmap:leave-focus', this.focusNodes)
   },
   methods: {
+    publishDefinition(node) {
+      if (!node) return
+      if (this.$store.state.isReadonly) {
+        this.$message.warning(
+          '当前为只读模式，请先在工具栏点“眼睛/铅笔”图标切换为编辑模式，再发布审批流'
+        )
+        return
+      }
+      const source={roomKey:roomFromLocation(this.$route),nodeUid:node.getData('uid')}
+      window.dispatchEvent(new CustomEvent('mindmap:leave-policy',{detail:{source,agentMode:true}}))
+    },
+    async refreshDefinitions() {
+      if (this.definitionRefreshBusy || !this.definitionMarks || !service.definitions) return
+      const room=roomFromLocation(this.$route)
+      if (!room) return
+      this.definitionRefreshBusy=true
+      try {
+        let cursor, list=[]
+        do {
+          const page=await service.definitions(room,cursor)
+          list.push(...page.list);cursor=page.hasMore?page.nextCursor:null
+        }while(cursor && !this._isDestroyed && room===roomFromLocation(this.$route))
+        if(this._isDestroyed || room!==roomFromLocation(this.$route))return
+        const marks=new Map()
+        let layoutChanged=false
+        for(const entry of list){
+          const node=this.mindMap.renderer.findNodeByUid(entry.nodeUid)
+          if(!node)continue
+          marks.set(entry.nodeUid,{...entry,room,signature:definitionSignature(node.getPureData())})
+          if(JSON.stringify(node._approvalDefinitionState)!==JSON.stringify(entry)){
+            node._approvalDefinitionState=entry
+            layoutChanged=node.reRender(['tag']) || layoutChanged
+          }
+        }
+        this.definitionMarks=marks
+        if(layoutChanged)this.mindMap.render()
+      }catch(_){ /* Do not claim publication when the server cannot be reached. */ }
+      finally{this.definitionRefreshBusy=false}
+    },
+    checkDefinitionEdits() {
+      if(!this.definitionMarks)return
+      let layoutChanged=false
+      for(const [uid,entry] of this.definitionMarks){
+        const node=this.mindMap.renderer.findNodeByUid(uid)
+        if(!node || entry.room!==roomFromLocation(this.$route))continue
+        if(entry.state==='published' && definitionSignature(node.getPureData())!==entry.signature){
+          entry.state='draft'
+          node._approvalDefinitionState={...node._approvalDefinitionState,state:'draft'}
+          layoutChanged=node.reRender(['tag']) || layoutChanged
+          service.invalidateDefinition({roomKey:entry.room,nodeUid:uid,version:entry.version}).catch(()=>{})
+        }
+      }
+      if(layoutChanged)this.mindMap.render()
+      clearTimeout(this.definitionRefreshTimer)
+      this.definitionRefreshTimer=setTimeout(this.refreshDefinitions,800)
+    },
+    openCurrent() {
+      return this.hasSubmissionRequirements ? this.publishDefinition(this.node) : this.open()
+    },
+    async startNodeApproval(selectedNode) {
+      if (this.busy || !selectedNode || this.$store.state.isReadonly) return
+      this.candidate = selectedNode
+      this.update()
+      const target = this.node && (this.isPolicy || this.requestId) ? this.node : selectedNode
+      this.candidate = target
+      if (this.requestId) {
+        const requestId = this.requestId
+        const requestRoom = roomFromLocation(this.$route)
+        this.busy = true
+        try {
+          const existing = await service.get(requestId)
+          if (this._isDestroyed || this.$store.state.isReadonly ||
+              requestRoom !== roomFromLocation(this.$route) || this.requestId !== requestId ||
+              !this.candidate || this.candidate.getData('uid') !== target.getData('uid')) return
+          if (!existing.template.sourceNodeInput || ['draft', 'pending', 'returned'].includes(existing.status)) {
+            this.busy = false
+            await this.open()
+            return
+          }
+          this.requestByNode.delete(nodeKey(requestRoom, target.getData('uid')))
+          this.requestTemplates.delete(requestId)
+          this.signatures.delete(requestId)
+          this.requestId = ''
+        } catch (e) {
+          this.$message.warning(e.message)
+          return
+        } finally {
+          this.busy = false
+        }
+      }
+      const room = roomFromLocation(this.$route)
+      const uid = target.getData('uid')
+      if (!room || !uid) return this.$message.warning('请先打开已保存的脑图')
+      const savedSource = target.getData('approvalSource')
+      if (savedSource) {
+        this.node = target
+        this.isPolicy = false
+        return this.begin(savedSource)
+      }
+      const source = { roomKey: room, nodeUid: uid }
+      const seq = ++this.approvalLaunchSequence
+      const current = () => !this._isDestroyed &&
+        !this.$store.state.isReadonly &&
+        room === roomFromLocation(this.$route) && seq === this.approvalLaunchSequence
+      this.busy = true
+      this.error = ''
+      try {
+        const tpl = await service.template(source)
+        if (!current() || !this.candidate || this.candidate.getData('uid') !== uid) return
+        if (!tpl.fields || !tpl.fields.length) {
+          this.$message.warning('请先在该流程的“提交要求”下填写需要执行人提交的内容')
+          return
+        }
+        const live = this.mindMap.renderer.findNodeByUid(uid)
+        if (!live) return
+        this.candidate = live
+        this.node = live
+        this.requestId = ''
+        this.isPolicy = false
+        this.busy = false
+        const row = await this.begin(source, true)
+        if (!current()) return
+        if (!row) throw new Error(this.error || '审批草稿创建失败，请在本次申请节点重试')
+        const missing = row.report.missing || []
+        if (missing.length) this.$message.warning('请先填写提交要求：' + missing.join('、'))
+        await this.open()
+      } catch (e) {
+        if (current()) {
+          this.error = e.message
+          this.$message.warning(e.message)
+        }
+      } finally {
+        if (!this._isDestroyed && seq === this.approvalLaunchSequence) this.busy = false
+      }
+    },
     focusNodes(event) {
       const d = event.detail || {}
       if (d.roomKey === roomFromLocation(this.$route))
@@ -171,6 +329,7 @@ export default {
       this.update()
     },
     onDataChange() {
+      this.checkDefinitionEdits()
       this.update()
       this.scheduleCheck()
     },
@@ -204,16 +363,17 @@ export default {
               nodeKey(roomFromLocation(this.$route), p.getData('uid'))
             ))
         if (id) {
+          this.isPolicy = false
           this.node = direct && p.parent ? p.parent : p
           this.requestId = id
           break
         }
       }
-      for (let depth = 0, p = n; p && depth < 20; p = p.parent, depth++) {
+      for (let depth = 0, p = n; !this.requestId && p && depth < 20; p = p.parent, depth++) {
         if (
           ((p.nodeData && p.nodeData.children) || []).some(c =>
-            /^流程标识\s*[:：]\s*.+/.test(
-              String(c.data.text || '').replace(/<[^>]+>/g, '')
+            /^(?:流程标识\s*[:：]\s*.+|提交要求)$/.test(
+              String(c.data.text || '').replace(/<[^>]+>/g, '').trim()
             )
           )
         ) {
@@ -253,7 +413,7 @@ export default {
         this.busy = false
       }
     },
-    async begin(source) {
+    async begin(source, useSourceNode = false) {
       if (this.busy || !this.node || this.readonly) return
       const node = this.node,
         uid = node.getData('uid'),
@@ -293,7 +453,7 @@ export default {
         for (let attempt = 0; attempt < 4; attempt++) {
           if (!current()) return
           try {
-            row = await service.prepare(room, uid, source)
+            row = await service.prepare(room, uid, source, useSourceNode)
             break
           } catch (e) {
             if (e.code !== 'NODE_SCOPE_INVALID' || attempt === 3) throw e
@@ -305,9 +465,10 @@ export default {
         if (!current()) return
         this.requestByNode.set(nodeKey(room, uid), row.id)
         this.requestTemplates.set(row.id, row.template)
-        this.checkedLabel = '已生成资料子节点，直接双击“待填写”编辑'
+        this.checkedLabel = useSourceNode ? '已读取原流程的提交要求' : '已生成资料子节点，直接双击“待填写”编辑'
         this.update()
         window.dispatchEvent(new CustomEvent('mindmap:leave-changed'))
+        return row
       } catch (e) {
         if (current()) this.error = e.message
       } finally {
@@ -380,6 +541,8 @@ export default {
     },
     async open() {
       clearTimeout(this.checkTimer)
+      if (!this.requestId && this.hasSubmissionRequirements)
+        return this.startNodeApproval(this.node)
       if (this.isPolicy)
         return window.dispatchEvent(
           new CustomEvent('mindmap:leave-policy', {

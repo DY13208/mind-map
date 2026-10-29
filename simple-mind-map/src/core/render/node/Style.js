@@ -222,15 +222,17 @@ class Style {
   tagText(node, style) {
     node
       .fill({
-        color: '#fff'
+        color: style.color || '#fff'
       })
       .css({
-        'font-size': style.fontSize + 'px'
+        'font-size': style.fontSize + 'px',
+        'font-weight': style.fontWeight || 'normal'
       })
   }
 
   //  标签矩形
   tagRect(node, style) {
+    if (style.stroke) node.stroke({color:style.stroke,width:style.strokeWidth || 1})
     node.fill({
       color: style.fill
     })

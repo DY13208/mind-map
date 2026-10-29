@@ -44,7 +44,11 @@ async function handle(req, res, { url, db, writer, readBody, sendJson }) {
         new Error('请指定审批模板来源，通用入口不会默认选择请假'),
         { code: 'SOURCE_REQUIRED', statusCode: 400 }
       )
-    if (path === '/api/leave-catalog' && req.method === 'GET')
+    if (path === '/api/leave-definitions' && req.method === 'GET')
+      result = await service.definitions(db,req,url.searchParams.get('room_key'),url.searchParams.get('cursor') || '')
+    else if (path === '/api/leave-definitions/invalidate' && req.method === 'POST')
+      result = await service.invalidateDefinition(db,req,await readBody(req))
+    else if (path === '/api/leave-catalog' && req.method === 'GET')
       result = await service.catalog(db, req, {
         cursor: url.searchParams.get('cursor'),
         limit: url.searchParams.get('limit')
@@ -63,8 +67,13 @@ async function handle(req, res, { url, db, writer, readBody, sendJson }) {
           'manage'
         )
         result.canPublish = !req.authUser.mcp && !req.verifiedMcpSource
+        if (!result.canPublish)
+          result.publishHint =
+            '发布须由登录用户在页面办理，MCP / AI 身份不能发布'
       } catch (_) {
         result.canPublish = false
+        result.publishHint =
+          '当前账号对该脑图没有管理权限，请联系脑图所有者或管理员授权后再发布'
       }
     } else if (
       path === '/api/leave-template/publish' &&

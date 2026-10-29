@@ -1,5 +1,5 @@
-// Template placement is unrestricted. The explicit child marker distinguishes
-// executable definitions from examples, ordinary SOP text and application data.
+// Catalog templates have explicit markers. A directly selected node may instead
+// declare its form with 提交要求; it is never discovered by fuzzy matching.
 const leave = require('./core')
 const { plain, label } = leave
 const TYPE = {
@@ -47,27 +47,58 @@ function compile(nodes, rootUid, kind = 'generic') {
   if (!root)
     throw leave.failure('TEMPLATE_NOT_FOUND', '审批模板节点不存在', 404)
   const markers = top.filter(n => marker(n.text))
-  if (markers.length !== 1)
+  const requirementsNode = top.find(n => label(n.text) === '提交要求')
+  if (!markers.length && !requirementsNode)
+    throw leave.failure(
+      'SUBMISSION_REQUIREMENTS_REQUIRED',
+      '请先在该流程节点下填写“提交要求”，再发起审批'
+    )
+  if (markers.length > 1)
     throw leave.failure(
       'TEMPLATE_NOT_REGISTERED',
       '请在模板直属子节点登记唯一的“流程标识：名称或编号”'
     )
   const errors = []
-  const fieldsNode = top.find(n => /^(申请字段|必要条件)$/.test(label(n.text)))
+  const fieldGroups = top.filter(n => /^(申请字段|必要条件|提交要求)$/.test(label(n.text)))
+  const fieldsNode = fieldGroups[0]
+  if (fieldGroups.length > 1) errors.push('提交要求或申请字段存在多个分支，请合并后再提交')
   const flowNode = top.find(n => label(n.text) === '审批流程')
+  const ruleGroup = text => /^(默认同意|以下情况拒绝|须确认)$/.test(label(text))
+  const implicitSteps = requirementsNode ? top.filter(n => children(n.uid).some(c => ruleGroup(c.text))) : []
+  const autoRules = top.filter(n => label(n.text) === '发起后全部流程默认同意')
+  const autoApprove = autoRules.length === 1
+  // 「AI预审」显式开启；「人工审批」显式关闭（AI 预审默认对全部流程生效）。
+  const aiReviewNode = top.find(n => /^AI预审$/.test(label(n.text)))
+  const aiReview = !!aiReviewNode
+  const humanOnlyNode = top.find(n =>
+    /^(人工审批|禁用AI预审|不使用AI预审)$/.test(label(n.text))
+  )
+  const humanOnly = !!humanOnlyNode
+  if (flowNode && implicitSteps.length) errors.push('显式审批流程与直属审批角色同时存在，请明确唯一的执行顺序')
+  if (autoApprove && implicitSteps.some(n => descendants(n.uid).some(c => /^(以下情况拒绝|须确认)$/.test(label(c.text)))))
+    errors.push('全流程默认同意与角色的拒绝或须确认条件冲突，请先明确规则')
+  if (autoRules.length > 1) errors.push('默认同意规则重复，请合并后重新发布')
   const config = top.find(n =>
     /^(审批配置|审批人员配置|人员配置)$/.test(label(n.text))
   )
   const aliasNode = top.find(n => label(n.text) === '触发词')
   const title = label(root.text),
-    flowId = marker(markers[0].text)[1].trim()
+    flowId = markers.length ? marker(markers[0].text)[1].trim() : 'node:' + rootUid
+  const materialUids = new Set()
+  if (requirementsNode) {
+    for (const field of children(requirementsNode.uid)) for (const child of children(field.uid)) {
+      if (/^(?:类型|最小值|最大值)\s*[:：]/.test(child.text) || label(child.text) === '选项') continue
+      materialUids.add(child.uid)
+      descendants(child.uid).forEach(n => materialUids.add(n.uid))
+    }
+  }
   const fields = (fieldsNode ? children(fieldsNode.uid) : []).map(n => {
     const meta = children(n.uid),
       fieldLabel = label(n.text),
       typeNode = meta.find(c => /^类型\s*[:：]/.test(c.text))
     const typeLabel = typeNode
       ? typeNode.text.replace(/^类型\s*[:：]\s*/, '')
-      : fieldLabel === '附件'
+      : /附件$/.test(fieldLabel) || (requirementsNode && meta.some(c => /附件$/.test(label(c.text))))
       ? '附件'
       : '文本'
     const type = TYPE[typeLabel]
@@ -100,17 +131,17 @@ function compile(nodes, rootUid, kind = 'generic') {
       min: bound('最小值'),
       max: bound('最大值'),
       requirements: descendants(n.uid)
-        .filter(c => !children(c.uid).length && !/^类型[:：]/.test(c.text))
+        .filter(c => !materialUids.has(c.uid) && !children(c.uid).length && !/^类型[:：]/.test(c.text))
         .map(c => ({ uid: c.uid, text: c.text }))
     }
   })
-  if (!fields.length) errors.push('申请字段待登记')
+  if (!fields.length) errors.push(requirementsNode ? '请先填写该流程的提交要求' : '申请字段待登记')
   if (fields.length > 50) errors.push('申请字段超过50项，请拆分模板')
   if (new Set(fields.map(f => f.label)).size !== fields.length)
     errors.push('申请字段名称重复，请先合并')
-  if (!flowNode) errors.push('审批流程待登记')
+  if (!flowNode && !implicitSteps.length && !autoApprove) errors.push('审批流程待登记')
   if (
-    [...top, ...(flowNode ? descendants(flowNode.uid) : [])].some(n =>
+    [...top, ...(flowNode ? descendants(flowNode.uid) : []), ...implicitSteps.flatMap(n => descendants(n.uid))].some(n =>
       /^(条件分支|条件路由|并行|会签|或签|分支条件)/.test(label(n.text))
     )
   )
@@ -146,12 +177,19 @@ function compile(nodes, rootUid, kind = 'generic') {
       }))
     }
   }
-  const steps = (flowNode ? children(flowNode.uid) : []).map(n => {
+  const steps = (!autoApprove ? (flowNode ? children(flowNode.uid) : implicitSteps) : []).map(n => {
     const role = label(n.text),
       criteriaNode = children(n.uid).find(c => label(c.text) === '审核要点')
     const below = descendants(criteriaNode ? criteriaNode.uid : n.uid)
+    const inline = children(n.uid).map(account).filter(Boolean)
+    if (implicitSteps.includes(n)) {
+      for (const group of children(n.uid).filter(c => /^(以下情况拒绝|须确认)$/.test(label(c.text)))) {
+        if (!descendants(group.uid).some(c => !children(c.uid).length && label(c.text) && !account(c)))
+          errors.push(`${role}的“${label(group.text)}”条件待填写`)
+      }
+    }
     const criteria = below
-      .filter(c => !children(c.uid).length)
+      .filter(c => !children(c.uid).length && !account(c))
       .map(c => {
         const context = []
         let p = rows.find(x => x.uid === c.parent_uid)
@@ -166,9 +204,11 @@ function compile(nodes, rootUid, kind = 'generic') {
       criteria.some(c => /^待(?:补充|配置|确认)/.test(c.text))
     )
       errors.push(`${role}的审核要点待配置`)
-    return { uid: n.uid, role, ...binding(role), criteria }
+    const configured = binding(role)
+    return { uid: n.uid, role, ...configured, accounts: [...new Set([...configured.accounts, ...inline])], criteria,
+      ...(implicitSteps.includes(n) ? {decisionMode:'human',requiresHumanConfirmation:true,defaultDecision:children(n.uid).some(c=>label(c.text)==='默认同意')?'approve':null} : {}) }
   })
-  if (!steps.length) errors.push('审批步骤待登记')
+  if (!steps.length && !autoApprove) errors.push('审批步骤待登记')
   if (steps.length > 20) errors.push('审批步骤超过20步')
   if (new Set(steps.map(s => s.role)).size !== steps.length)
     errors.push('审批步骤名称重复，请使用明确的角色名称')
@@ -178,7 +218,9 @@ function compile(nodes, rootUid, kind = 'generic') {
       ? children(ccNode.uid).map(n => label(n.text))
       : label(ccNode.text)
           .replace(/^抄送/, '')
+          .replace(/^[:：\s]+/, '')
           .split(/[、,，]/)
+          .map(role => role.trim())
           .filter(Boolean)
     : []
   const ccBindings = ccRoles.map(role => ({ role, ...binding(role, true) }))
@@ -197,7 +239,13 @@ function compile(nodes, rootUid, kind = 'generic') {
     title,
     flowId,
     rootUid,
-    markerUid: markers[0].uid,
+    markerUid: markers.length ? markers[0].uid : null,
+    requirementsNodeUid: requirementsNode ? requirementsNode.uid : null,
+    autoApprove,
+    autoApproveRule: autoApprove ? { uid: autoRules[0].uid, text: autoRules[0].text } : null,
+    aiReview,
+    aiReviewNodeUid: aiReviewNode ? aiReviewNode.uid : null,
+    humanOnly,
     aliases,
     fields,
     steps,
@@ -208,14 +256,14 @@ function compile(nodes, rootUid, kind = 'generic') {
     cc: [...new Set(ccBindings.flatMap(c => c.accounts))],
     ccMissing: ccBindings.filter(c => !c.accounts.length).map(c => c.role),
     configurationErrors: errors,
-    warnings: [],
+    warnings: implicitSteps.length ? ['直属角色的默认同意及拒绝／须确认条件将交由实际审核人逐项核验，不自动推断条件已满足'] : [],
     fingerprint: leave.digest(
-      rows.map(n => ({
+      rows.filter(n => !materialUids.has(n.uid)).map(n => ({
         uid: n.uid,
         parent: n.parent_uid,
         position: n.position,
         text: n.text
-      }))
+      })).concat(requirementsNode ? [{ fieldSchema: fields.map(f => ({uid:f.uid,type:f.type,required:f.required,options:f.options,min:f.min,max:f.max})) }] : [])
     )
   }
 }
