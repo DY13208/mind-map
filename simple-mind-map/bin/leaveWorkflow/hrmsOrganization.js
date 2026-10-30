@@ -82,7 +82,19 @@ async function resolveDirectory(spec, corpId, options = {}) {
   if (!cfg.ready) throw new Error('人事组织架构只读接口尚未配置')
   if (cfg.corpId !== corpId) throw new Error('人事组织架构与当前企业不匹配')
   if (!spec || !spec.query) throw new Error('请填写要查询的职务或部门名称')
-  const payload = await callDirectory(cfg, spec, options)
+  let payload
+  try {
+    payload = await callDirectory(cfg, spec, options)
+  } catch (e) {
+    // auto 是「拿角色名直接去试」，失败时原样抛人事侧文案会让人不知道该写什么。
+    // 补一句可操作的指引：职位名要以人事系统为准，可用「职务：正式名@姓名」精确指定。
+    if (spec.kind === 'auto')
+      throw new Error(
+        `${e.message}；若「${spec.query}」是职位，请按人事系统的正式职位名写成「职务：正式职位名${spec.names&&spec.names.length?'@'+spec.names.join('、'):'@姓名'}」，` +
+        `若是部门请写成「部门成员：部门简称」`
+      )
+    throw e
+  }
   const result = payload && payload.message
   if (!result || result.company !== cfg.company || !Array.isArray(result.members))
     throw new Error('人事组织未返回有效的成员列表')
