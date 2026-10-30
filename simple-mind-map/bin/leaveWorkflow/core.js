@@ -151,8 +151,11 @@ function compileTemplate(nodes, rootUid) {
   if (ccNode && !ccBinding) warnings.push('抄送人员待配置')
   const ccRoles = ccNode
     ? label(ccNode.text)
-        .replace(/^抄送/, '')
+        // 「抄送·总经理」剥掉「抄送」后还剩「·总经理」，分隔符必须一起去掉，
+        // 否则角色名带着「·」既匹配不到人名，也识别不出「职务：」这类前缀。
+        .replace(/^抄送\s*[·・\-—_:：]?\s*/, '')
         .split(/[、,，]/)
+        .map(role => role.replace(/^[·・\-—_:：\s]+/, '').trim())
         .filter(Boolean)
     : []
   const ccMissing = ccRoles.filter(

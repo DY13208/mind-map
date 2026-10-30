@@ -159,6 +159,17 @@ async function template(db, req, source = SOURCE, enforceAccess = true) {
         if (!binding.resolverConfigured) binding.resolutionError = '部门负责人：请先配置人事组织架构只读连接及企业范围'
         continue
       }
+      if (specialRole === 'directory') {
+        // 职务/部门反查（「职务：总经理」「部门成员：人事组」）：不做唯一性校验，
+        // 抄送本来就允许多人；成员是否存在留到提交时按实时组织解析。
+        const cfg = organization.config()
+        binding.dynamicRole = 'directory'
+        binding.directorySpec = organization.directorySpec(binding.role)
+        binding.resolverConfigured = !!binding.directorySpec && cfg.ready && cfg.corpId === who.corp_id
+        binding.resolverSource = {base:cfg.base,company:cfg.company,corpId:cfg.corpId}
+        if (!binding.resolverConfigured) binding.resolutionError = `抄送${binding.role}：请先配置人事组织架构只读连接及企业范围`
+        continue
+      }
       if (specialRole === 'it') {
         const account = process.env.WCPD_APPROVAL_IT_USER_ID || 'LiJiBing'
         const matches = (await db.query('select user_id from wecom_users where corp_id=$1 and wecom_userid=$2 limit 2',[who.corp_id,account])).rows
@@ -170,12 +181,20 @@ async function template(db, req, source = SOURCE, enforceAccess = true) {
       const matches = await require('./memberNames').findMembers(db,who.corp_id,binding.role)
       binding.nameReference = binding.role
       if (matches.length === 1) binding.accounts = [matches[0].user_id]
-      else binding.resolutionError = matches.length
-        ? `抄送${binding.role}：姓名重复，请绑定具体成员账号`
-        : `抄送${binding.role}：未匹配到本企业成员，请同步通讯录；若为角色名称请绑定成员账号`
+      else if (!matches.length) {
+        // 通讯录里没有这个人，很可能是「总经理」「人事组」这类角色名。
+        // 交给人事组织架构按「先职务后部门」再试一次，真正的裁决留到提交时实时解析，
+        // 发布阶段不调外部接口。写错的名字也会走这条路，提交时会收到明确报错。
+        const cfg = organization.config()
+        binding.dynamicRole = 'directory'
+        binding.directorySpec = {kind:'auto',query:binding.role,names:[]}
+        binding.resolverConfigured = cfg.ready && cfg.corpId === who.corp_id
+        binding.resolverSource = {base:cfg.base,company:cfg.company,corpId:cfg.corpId}
+        if (!binding.resolverConfigured) binding.resolutionError = `抄送${binding.role}：请先配置人事组织架构只读连接及企业范围`
+      } else binding.resolutionError = `抄送${binding.role}：姓名重复，请绑定具体成员账号`
     }
     compiled.cc = [...new Set(compiled.ccBindings.flatMap(binding => binding.accounts))]
-    compiled.ccMissing = compiled.ccBindings.filter(binding => !binding.accounts.length && !((binding.dynamicRole === 'hrbp' || binding.dynamicRole === 'head') && binding.resolverConfigured)).map(binding => binding.role)
+    compiled.ccMissing = compiled.ccBindings.filter(binding => !binding.accounts.length && !(['hrbp','head','directory'].includes(binding.dynamicRole) && binding.resolverConfigured)).map(binding => binding.role)
     compiled.fingerprint = core.digest({
       definition: compiled.fingerprint,
       namedRecipients: namedBindings.map(binding => ({name:binding.role,accounts:binding.accounts,...(binding.dynamicRole ? {resolver:binding.resolverSource} : {})}))
@@ -186,6 +205,12 @@ async function template(db, req, source = SOURCE, enforceAccess = true) {
     const who=await identity(db,req)
     for(const step of namedReviewers){
       const specialRole=organization.role(step.role)
+      if(specialRole==='directory'){
+        const cfg=organization.config()
+        Object.assign(step,{dynamicRole:'directory',directorySpec:organization.directorySpec(step.role),resolverConfigured:cfg.ready&&cfg.corpId===who.corp_id,resolverSource:{base:cfg.base,company:cfg.company,corpId:cfg.corpId}})
+        if(!step.resolverConfigured)step.resolutionError=`${step.role}：请先配置人事组织架构只读连接及企业范围`
+        continue
+      }
       if(specialRole==='head'||specialRole==='hrbp'){
         const cfg=organization.config()
         Object.assign(step,{dynamicRole:specialRole,resolverConfigured:cfg.ready&&cfg.corpId===who.corp_id,resolverSource:{base:cfg.base,company:cfg.company,corpId:cfg.corpId}})
@@ -201,7 +226,14 @@ async function template(db, req, source = SOURCE, enforceAccess = true) {
       const matches=await require('./memberNames').findMembers(db,who.corp_id,step.role)
       step.nameReference=step.role
       if(matches.length===1){step.accounts=[matches[0].user_id];step.resolvedName=matches[0].name}
-      else step.resolutionError=matches.length?`审核人${step.role}：姓名匹配不唯一，请绑定具体成员账号`:`审核人${step.role}：未匹配到本企业成员，请填写准确姓名或成员账号`
+      else if(!matches.length){
+        // 审核人同理：通讯录无此人时按职务/部门再试，提交时实时解析；
+        // 多人命中会要求用「职务：VP@姓名」收窄，不会自动挑一个。
+        const cfg=organization.config()
+        Object.assign(step,{dynamicRole:'directory',directorySpec:{kind:'auto',query:step.role,names:[]},resolverConfigured:cfg.ready&&cfg.corpId===who.corp_id,resolverSource:{base:cfg.base,company:cfg.company,corpId:cfg.corpId}})
+        if(!step.resolverConfigured)step.resolutionError=`${step.role}：请先配置人事组织架构只读连接及企业范围`
+      }
+      else step.resolutionError=`审核人${step.role}：姓名匹配不唯一，请绑定具体成员账号`
     }
     compiled.fingerprint=core.digest({definition:compiled.fingerprint,namedReviewers:namedReviewers.map(step=>({name:step.role,accounts:step.accounts,...(step.dynamicRole?{resolver:step.resolverSource}:{} )}))})
   }
@@ -271,7 +303,7 @@ async function publish(pool, req, body) {
     if (
       (tpl.kind !== 'generic' && !tpl.calendar.periods.length) ||
       (tpl.configurationErrors || []).length ||
-      tpl.steps.some(s => !s.criteria.length || (!s.accounts.length && !(['head','hrbp'].includes(s.dynamicRole)&&s.resolverConfigured))) ||
+      tpl.steps.some(s => !s.criteria.length || (!s.accounts.length && !(['head','hrbp','directory'].includes(s.dynamicRole)&&s.resolverConfigured))) ||
       tpl.ccMissing.length ||
       structural.length
     )
@@ -364,6 +396,18 @@ function resolveAccounts(binding, who) {
     )
   ]
 }
+/** 把人事侧的企微账号落到本地 wecom_users，必要时补建一条最小成员记录。 */
+async function ensureLocalMember(db,who,person){
+  let member=(await db.query('select user_id,name from wecom_users where corp_id=$1 and wecom_userid=$2',[who.corp_id,person.wecomUserId])).rows[0]
+  if(!member){
+    const occupied=(await db.query('select user_id from wecom_users where user_id=$1',[person.wecomUserId])).rows.length
+    const id=occupied?'wecom:'+createHash('sha256').update(`${who.corp_id}:${person.wecomUserId}`).digest('hex').slice(0,48):person.wecomUserId
+    await db.query('insert into wecom_users(user_id,wecom_userid,corp_id,name) values($1,$2,$3,$4) on conflict do nothing',[id,person.wecomUserId,who.corp_id,person.name])
+    member=(await db.query('select user_id,name from wecom_users where corp_id=$1 and wecom_userid=$2',[who.corp_id,person.wecomUserId])).rows[0]
+  }
+  if(!member)throw new Error('人事组织账号映射冲突，请核对企业成员记录')
+  return member
+}
 async function organizationMember(db,tpl,who,fields,dynamicRole){
   const field=(tpl.fields||[]).find(f=>/^(员工|员工姓名|员工编号|申请员工)$/.test(f.label))
   let employeeRef=field&&fields[field.key]
@@ -374,15 +418,22 @@ async function organizationMember(db,tpl,who,fields,dynamicRole){
   if(!employeeRef){const me=(await db.query('select wecom_userid from wecom_users where corp_id=$1 and user_id=$2',[who.corp_id,who.user_id])).rows[0];employeeRef=me&&me.wecom_userid}
   const assignment=dynamicRole==='head'?await organization.resolveDepartmentHead(employeeRef,who.corp_id):await organization.resolveHrbp(employeeRef,who.corp_id)
   const person=dynamicRole==='head'?assignment.head:assignment.hrbp
-  let member=(await db.query('select user_id,name from wecom_users where corp_id=$1 and wecom_userid=$2',[who.corp_id,person.wecomUserId])).rows[0]
-  if(!member){
-    const occupied=(await db.query('select user_id from wecom_users where user_id=$1',[person.wecomUserId])).rows.length
-    const id=occupied?'wecom:'+createHash('sha256').update(`${who.corp_id}:${person.wecomUserId}`).digest('hex').slice(0,48):person.wecomUserId
-    await db.query('insert into wecom_users(user_id,wecom_userid,corp_id,name) values($1,$2,$3,$4) on conflict do nothing',[id,person.wecomUserId,who.corp_id,person.name])
-    member=(await db.query('select user_id,name from wecom_users where corp_id=$1 and wecom_userid=$2',[who.corp_id,person.wecomUserId])).rows[0]
-  }
-  if(!member)throw new Error('人事组织账号映射冲突，请核对企业成员记录')
+  const member=await ensureLocalMember(db,who,person)
   return {account:member.user_id,name:member.name,source:'人事组织架构',employee:assignment.employee,department:assignment.department,company:assignment.company}
+}
+/**
+ * 职务/部门反查成员（抄送用，可多人）。
+ * 与 organizationMember 的区别：不看申请员工，只看节点上写的职务/部门。
+ */
+async function organizationDirectoryMembers(db,who,spec){
+  const result=await organization.resolveDirectory(spec,who.corp_id)
+  const members=[]
+  for(const person of result.members){
+    const member=await ensureLocalMember(db,who,person)
+    members.push({account:member.user_id,name:member.name,source:'人事组织架构',employee:person.employee,department:person.department||'',designation:person.designation||'',company:result.company})
+  }
+  if(!members.length)throw new Error(`「${spec.query}」未匹配到本企业成员`)
+  return members
 }
 async function routing(db, tpl, who, fields = {}) {
   const missing = [],
@@ -425,6 +476,14 @@ async function routing(db, tpl, who, fields = {}) {
     if(['head','hrbp'].includes(step.dynamicRole)){
       if(!step.resolverConfigured)missing.push(step.resolutionError||`${step.role}：人事组织解析尚未配置`)
       else try{ids=[(await organizationMember(db,tpl,who,fields,step.dynamicRole)).account]}catch(e){missing.push(`${step.role}：${e.message}`)}
+    } else if(step.dynamicRole==='directory'){
+      if(!step.resolverConfigured)missing.push(step.resolutionError||`${step.role}：人事组织解析尚未配置`)
+      else try{
+        const found=await organizationDirectoryMembers(db,who,step.directorySpec||organization.directorySpec(step.role))
+        // 审核人必须唯一；多人要用户在脑图上用 @姓名 收窄，脚本不替业务猜。
+        ids=found.length===1?[found[0].account]:[]
+        if(found.length>1)missing.push(`${step.role}：匹配到 ${found.map(m=>m.name).join('、')}，请在脑图写「${(step.directorySpec||{}).kind==='department'?'部门成员':'职务'}：${(step.directorySpec||{}).query}@姓名」指定唯一审核人`)
+      }catch(e){missing.push(`${step.role}：${e.message}`)}
     }
     if (ids.length !== 1)
       missing.push(step.resolutionError || `${step.role}：${ids.length ? '匹配不唯一' : '待配置'}`)
@@ -450,6 +509,17 @@ async function routing(db, tpl, who, fields = {}) {
   }
   const cc = [], resolved = []
   for (const binding of tpl.ccBindings) {
+    if (binding.dynamicRole === 'directory') {
+      if (!binding.resolverConfigured) { missing.push(binding.resolutionError); continue }
+      try {
+        // 抄送允许整组人：几个成员就抄送几个，不做唯一性约束。
+        const members=await organizationDirectoryMembers(db,who,binding.directorySpec||organization.directorySpec(binding.role))
+        for(const member of members){cc.push(member.account);resolved.push({role:binding.role,...member})}
+      } catch (e) {
+        missing.push(`抄送${binding.role}：`+(e.name === 'TimeoutError' ? '人事系统查询超时' : e.message))
+      }
+      continue
+    }
     if (binding.dynamicRole === 'hrbp' || binding.dynamicRole === 'head') {
       const isHead = binding.dynamicRole === 'head'
       if (!binding.resolverConfigured) { missing.push(binding.resolutionError); continue }
@@ -486,7 +556,9 @@ async function routing(db, tpl, who, fields = {}) {
   for (const id of ids)
     if (!users.some(u => u.user_id === id))
       missing.push(`账号${id}未匹配到同企业成员`)
-  for (const binding of tpl.ccBindings.filter(b => b.dynamicRole !== 'hrbp')) {
+  // 动态角色（hrbp/head/directory）已在上面解析并 push 进 resolved，
+  // 这里只补静态账号，否则同一个抄送人多出一条来源为「流程配置」的影子记录。
+  for (const binding of tpl.ccBindings.filter(b => !b.dynamicRole)) {
     for (const id of resolveAccounts(binding,who)) {
       const person = users.find(u => u.user_id === id)
       if (person) resolved.push({role:binding.role,account:id,name:person.name,source:binding.defaultRole === 'it' ? '默认IT' : '流程配置'})

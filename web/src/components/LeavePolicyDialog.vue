@@ -106,12 +106,13 @@ export default {
       return !this.policy || (this.policy.configurationErrors || []).length > 0 || this.bindings.some(s=>!s.accounts.length&&!s.dynamicReady)
     },
     bindings() {
+      const dynamicReady = s => ['hrbp','head','directory'].includes(s.dynamicRole) && s.resolverConfigured
       return [
-        ...this.policy.steps.map(s => ({ role: s.role, accounts: s.accounts, resolutionError: s.resolutionError, dynamicReady: ['hrbp','head'].includes(s.dynamicRole) && s.resolverConfigured })),
+        ...this.policy.steps.map(s => ({ role: s.role, accounts: s.accounts, resolutionError: s.resolutionError, dynamicReady: dynamicReady(s) })),
         ...this.policy.ccBindings.map(s => ({
           role: '抄送 · ' + s.role,
           accounts: s.accounts,
-          dynamicReady: ['hrbp','head'].includes(s.dynamicRole) && s.resolverConfigured,
+          dynamicReady: dynamicReady(s),
           resolutionError: s.resolutionError
         }))
       ]
