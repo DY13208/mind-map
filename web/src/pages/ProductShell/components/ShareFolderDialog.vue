@@ -397,12 +397,12 @@
     </el-dialog>
     <span v-if="!readOnly" slot="footer" class="permissionFooter"
       ><span class="footerHint"
-        ><i class="el-icon-success" /> {{ loadFailed ? '加载失败，请关闭后重试' : isFolderManager ? '可管理成员请在右侧调整权限；批量授权仅限所有者' : '勾选授权保存后生效；列表修改即时生效' }}</span
+        ><i class="el-icon-success" /> {{ loadFailed ? '加载失败，请关闭后重试' : isFolderManager ? '可管理人员可新增可查看、可编辑；可管理仍仅限所有者' : '勾选授权保存后生效；列表修改即时生效' }}</span
       ><span
         ><el-button v-if="!embedded" @click="shown = false">取消</el-button
         ><el-button
           type="primary"
-          :disabled="!selectionCount || loadFailed || (isFolderManager && !isRoom && !isTeam)"
+          :disabled="!selectionCount || loadFailed"
           :loading="busy"
           @click="grantSelected"
           >{{ busy ? '正在保存授权…' : '保存授权' }}</el-button

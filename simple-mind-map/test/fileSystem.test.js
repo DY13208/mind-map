@@ -5,6 +5,7 @@ const {
   createMemoryFileStore,
   handleFileSystemApi
 } = require('../bin/fileSystem')
+const { isAuthEnabled } = require('../bin/auth')
 const { DEFAULT_METADATA } = require('../bin/fileSystem/model')
 const { handleHistoryApi } = require('../bin/collabHistory/http')
 
@@ -831,6 +832,40 @@ function mockRes() {
     item => item.folder_id === xferFolder.id && item.user_id === OWNER
   )
   assert.strictEqual(oldOwnerMem.role, 'manager')
+
+  // Folder managers can bulk-grant viewer/editor, but not manager.
+  const bulk = engineWith()
+  const bulkFolder = await bulk.fs.createFolder({ name: 'bulk-root', userId: OWNER })
+  await bulk.store.setFolderMember(bulkFolder.id, EDITOR, 'manager')
+  await bulk.store.setFolderMember(bulkFolder.id, VIEWER, 'viewer')
+  const bulkUrl = `/api/folders/${bulkFolder.id}/members/bulk`
+  const viewerBulk = mockRes()
+  await handleFileSystemApi(
+    { method: 'POST', url: bulkUrl, authUser: { id: VIEWER } },
+    viewerBulk,
+    { engine: bulk.fs, body: { userIds: [OTHER], role: 'editor' } }
+  )
+  const managerGrant = mockRes()
+  await handleFileSystemApi(
+    { method: 'POST', url: bulkUrl, authUser: { id: EDITOR } },
+    managerGrant,
+    { engine: bulk.fs, body: { userIds: [OTHER], role: 'editor' } }
+  )
+  const managerPromote = mockRes()
+  await handleFileSystemApi(
+    { method: 'POST', url: bulkUrl, authUser: { id: EDITOR } },
+    managerPromote,
+    { engine: bulk.fs, body: { userIds: [OTHER], role: 'manager' } }
+  )
+  if (isAuthEnabled()) {
+    assert.strictEqual(viewerBulk.code, 403)
+    assert.strictEqual(managerGrant.code, 200)
+    assert.strictEqual(managerPromote.code, 403)
+  } else {
+    assert.strictEqual(viewerBulk.code, 200)
+    assert.strictEqual(managerGrant.code, 200)
+    assert.strictEqual(managerPromote.code, 200)
+  }
 
   const roleFixture = engineWith()
   const ownMap = await roleFixture.fs.createRoom({ title: 'mine', userId: OWNER })
