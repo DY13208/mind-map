@@ -288,10 +288,20 @@ async function handleFileSystemApi(req, res, options = {}) {
     if (bulkFolderId && method === 'POST') {
       const folder = await fs.store.getFolder(bulkFolderId)
       if (!folder) throw Object.assign(new Error('文件夹不存在'), { code: 'FOLDER_NOT_FOUND', statusCode: 404 })
-      if (!bypass && folder.created_by !== userId) throw Object.assign(new Error('只有文件夹所有者可以设置权限'), { code: 'FORBIDDEN', statusCode: 403 })
       const body = options.body || (await readBody(req))
       const role = String(body.role || '').trim().toLowerCase()
       if (!['manager', 'editor', 'viewer'].includes(role)) throw Object.assign(new Error('文件夹权限必须是可管理、可编辑或可查看'), { code: 'BAD_REQUEST', statusCode: 400 })
+      const actorMember = !bypass && userId && fs.store.listFolderMembers
+        ? (await fs.store.listFolderMembers(bulkFolderId)).find(item => item.user_id === userId)
+        : null
+      const isOwner = bypass || folder.created_by === userId
+      const isManager = !!(actorMember && actorMember.role === 'manager')
+      if (!isOwner && !isManager) {
+        throw Object.assign(new Error('只有文件夹所有者或可管理人员可以设置权限'), { code: 'FORBIDDEN', statusCode: 403 })
+      }
+      if (!isOwner && role === 'manager') {
+        throw Object.assign(new Error('可管理权限只能由文件夹创建人授予'), { code: 'FORBIDDEN', statusCode: 403 })
+      }
       const params = [req.authUser && req.authUser.corpId]
       const targetClauses = []
       const requestedDepartmentIds = Array.from(
@@ -334,10 +344,17 @@ async function handleFileSystemApi(req, res, options = {}) {
         .map(row => String(row.user_id || '').trim())
         .filter(id => id && id !== folder.created_by)
       const requestedCount = userIds.length
-      if (body.onlyChanges === true && userIds.length) {
+      if (userIds.length && (!isOwner || body.onlyChanges === true)) {
         const existing = await fs.store.listFolderMembers(bulkFolderId)
-        const unchanged = new Set(existing.filter(member => member.role === role).map(member => member.user_id))
-        userIds = userIds.filter(id => !unchanged.has(id))
+        const protectedIds = new Set(
+          isOwner ? [] : existing.filter(member => member.role === 'manager').map(member => member.user_id)
+        )
+        const unchanged = new Set(
+          body.onlyChanges === true
+            ? existing.filter(member => member.role === role).map(member => member.user_id)
+            : []
+        )
+        userIds = userIds.filter(id => !protectedIds.has(id) && !unchanged.has(id))
       }
       if (fs.store.kind === 'pg' && userIds.length) {
         await fs.store.withTx(async db => {
