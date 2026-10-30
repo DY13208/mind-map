@@ -12,14 +12,14 @@
       @drop.prevent="onDrop"
     >
       <i class="el-icon-upload2 kb-drop-icon" aria-hidden="true" />
-      <div><strong>点击或拖拽文件、文件夹到此处批量上传</strong></div>
+      <div><strong>点击此处选择文件，或拖拽文件、文件夹到此处批量上传</strong></div>
       <div class="kb-drop-sub">支持 {{ extText }}，单个文件不超过 {{ maxText }}{{ limitSource === 'fallback' ? '（后端缺省值）' : '' }}</div>
       <div class="kb-drop-sub">
-        <el-button type="text" size="mini" :disabled="folderBusy" @click.stop="pickFolder">选择文件夹</el-button>
+        <el-button type="text" size="mini" :disabled="folderBusy" @click.stop="pickFolder" @keydown.enter.native.stop>选择文件夹</el-button>
         <span>（保留子目录结构，建在「{{ folderLabel }}」下；跳过隐藏和系统文件）</span>
       </div>
-      <input ref="input" type="file" multiple class="kb-hidden-input" @change="onPick" />
-      <input ref="folder" type="file" multiple webkitdirectory directory class="kb-hidden-input" @change="onPickFolder" />
+      <input ref="input" type="file" multiple class="kb-hidden-input" @click.stop @change="onPick" />
+      <input ref="folder" type="file" multiple webkitdirectory directory class="kb-hidden-input" @click.stop @change="onPickFolder" />
     </div>
     <div v-if="folderJob" class="kb-folder-job">
       <div class="kb-folder-job-main">
