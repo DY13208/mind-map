@@ -6,6 +6,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const attachmentSourceApi = require('./attachmentSources.cjs');
 
 const PORT = Number(process.env.PORT || 3848);
 
@@ -560,27 +561,279 @@ function handleSearch(dir, body) {
   return { status: 200, body: searchWiki(dir, { query, top_k: body.top_k, mode: body.mode, allowedRooms: body.allowedRooms }) };
 }
 
-function readRequestBody(req) {
+function readRequestBody(req, maxBytes = 64 * 1024) {
   return new Promise((resolve, reject) => {
     const chunks = [];
-    req.on('data', chunk => chunks.push(chunk));
+    let size = 0;
+    let tooLarge = false;
+    req.on('data', chunk => {
+      size += chunk.length;
+      if (size > maxBytes) {
+        tooLarge = true;
+        chunks.length = 0;
+        return;
+      }
+      if (!tooLarge) chunks.push(chunk);
+    });
     req.on('error', reject);
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    req.on('end', () => tooLarge
+      ? reject(Object.assign(new Error('request_too_large'), { code: 'request_too_large' }))
+      : resolve(Buffer.concat(chunks).toString('utf8')));
   });
 }
 
 function roomBundles(dir, allowedRooms) {
   const bundles = [];
   for (const roomId of [...allowedRooms].sort()) {
-    if (!/^[a-zA-Z0-9_-][a-zA-Z0-9._-]{0,119}$/.test(roomId)) continue;
-    const roomDir = path.join(dir, 'rooms', roomId);
-    const pointer = readJson(path.join(roomDir, 'current.json'));
-    if (!pointer || !/^[a-f0-9-]{36}$/.test(pointer.generation)) continue;
-    const bundle = readJson(path.join(roomDir, 'generations', pointer.generation, 'bundle.json'));
-    if (!bundle || bundle.roomId !== roomId || bundle.sourceHash !== pointer.sourceHash || !Array.isArray(bundle.topics)) continue;
+    const bundle = roomBundle(dir, roomId);
+    if (!bundle) continue;
     bundles.push(bundle);
   }
   return bundles;
+}
+function roomBundle(dir, roomId) {
+  if (!/^[a-zA-Z0-9_-][a-zA-Z0-9._-]{0,119}$/.test(String(roomId))) return null;
+  const roomDir = path.join(dir, 'rooms', String(roomId));
+  const pointer = readJson(path.join(roomDir, 'current.json'));
+  if (!pointer || !/^[a-f0-9-]{36}$/.test(pointer.generation)) return null;
+  const bundle = readJson(path.join(roomDir, 'generations', pointer.generation, 'bundle.json'));
+  if (!bundle || bundle.roomId !== roomId || bundle.sourceHash !== pointer.sourceHash || !Array.isArray(bundle.topics)) return null;
+  return { ...bundle, generation: pointer.generation };
+}
+
+function dataObject(value) {
+  if (value && typeof value === 'object' && !Array.isArray(value)) return value;
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch (_) { return {}; }
+  }
+  return {};
+}
+function nodeAttachmentIds(data) {
+  const ids = new Set();
+  const add = value => {
+    if (typeof value === 'string' && value.trim()) ids.add(value.trim());
+    else if (value && typeof value === 'object') {
+      const id = value.id || value.attachmentId || value.attachment_id;
+      if (id != null && String(id).trim()) ids.add(String(id).trim());
+    }
+  };
+  add(data.attachmentId);
+  for (const item of [].concat(data.attachmentIds || [], data.attachments || [])) add(item);
+  return ids;
+}
+async function loadLiveAttachments(pool, roomId, nodeUid, requestedAttachmentId) {
+  const nodeResult = await pool.query(`select r.version,
+      coalesce(s.revision,0) as source_revision, n.uid, n.data
+    from rooms r
+    left join room_tombstones t using(room_key)
+    join room_nodes n on n.room_key=r.room_key and n.uid=$2 and n.deleted_at is null
+    left join knowledge_source_state s on s.room_key=r.room_key
+    where r.room_key=$1 and r.deleted_at is null and t.room_key is null`, [roomId, nodeUid]);
+  const node = nodeResult.rows[0];
+  if (!node || !node.uid) return { status: 'not_found' };
+  const mountedIds = nodeAttachmentIds(dataObject(node.data));
+  if (requestedAttachmentId && !mountedIds.has(requestedAttachmentId)) return { status: 'not_attached' };
+  const attachmentIds = requestedAttachmentId ? [requestedAttachmentId] : [...mountedIds];
+  if (!attachmentIds.length) return { status: 'not_attached' };
+  const attachmentResult = await pool.query(`select id, node_uid, file_name, status, content_hash,
+      char_length(extracted_text) as total_chars
+    from node_attachments where room_key=$1 and id=any($2::text[])`, [roomId, attachmentIds]);
+  const rows = attachmentResult.rows || [];
+  if (rows.length !== attachmentIds.length) return { status: 'not_found' };
+  return {
+    status: 'ok',
+    version: Number(node.version) || 0,
+    source_revision: Number(node.source_revision) || 0,
+    attachments: rows.map(attachment => ({
+      id: String(attachment.id),
+      node_uid: nodeUid,
+      attachment_node_uid: String(attachment.node_uid || ''),
+      name: String(attachment.file_name || attachment.id),
+      status: String(attachment.status || 'unavailable'),
+      content_hash: String(attachment.content_hash || ''),
+      total_chars: Math.max(0, Number(attachment.total_chars) || 0)
+    }))
+  };
+}
+function sourceMatchesLive(source, attachment, bundle) {
+  return source && source.index_version === attachmentSourceApi.INDEX_VERSION &&
+    source.room_key === bundle.roomId && source.node_uid === attachment.node_uid &&
+    source.attachment_id === attachment.id && source.content_hash === attachment.content_hash &&
+    source.status === attachment.status && Number(source.version) === Number(bundle.version) &&
+    Number(source.source_revision) === Number(bundle.revision) && source.generation === bundle.generation;
+}
+function httpDomainResponse(status, roomId, nodeUid, bundle, extra = {}) {
+  return { status, room_key: roomId, node_uid: nodeUid, generation: bundle?.generation || '',
+    version: Number(bundle?.version) || 0, source_revision: Number(bundle?.revision) || 0, ...extra };
+}
+function liveSource(attachment, roomId, nodeUid, live, bundle) {
+  return {
+    room_key: roomId,
+    node_uid: nodeUid,
+    node_ids: [nodeUid],
+    attachment_id: attachment.id,
+    name: attachment.name,
+    content_hash: attachment.content_hash,
+    status: attachment.status,
+    version: live.version,
+    source_revision: live.source_revision,
+    generation: bundle?.generation || '',
+    range: null,
+    total_chars: attachment.total_chars,
+    index_version: 0
+  };
+}
+function sourceSummary(attachments, roomId, nodeUid, live, bundle) {
+  const rows = (attachments || []).slice(0, attachmentSourceApi.MAX_SEARCH_RESULTS)
+    .map(attachment => liveSource(attachment, roomId, nodeUid, live, bundle));
+  return {
+    ...(rows.length === 1 ? { source: rows[0] } : { sources: rows }),
+    ...(attachments && attachments.length > rows.length ? { truncated: true } : {})
+  };
+}
+function boundedAttachmentResponse(body, maxBytes) {
+  const result = JSON.parse(JSON.stringify(body || {}));
+  const clipSource = source => {
+    if (!source || typeof source !== 'object') return;
+    for (const key of ['room_key', 'node_uid', 'attachment_id', 'name', 'content_hash', 'generation']) {
+      if (typeof source[key] === 'string' && source[key].length > 256) {
+        source[key] = source[key].slice(0, 256);
+        result.truncated = true;
+      }
+    }
+    if (Array.isArray(source.node_ids)) source.node_ids = source.node_ids.slice(0, attachmentSourceApi.MAX_SEARCH_RESULTS);
+  };
+  if (Array.isArray(result.sources)) {
+    if (result.sources.length > attachmentSourceApi.MAX_SEARCH_RESULTS) {
+      result.sources = result.sources.slice(0, attachmentSourceApi.MAX_SEARCH_RESULTS);
+      result.truncated = true;
+    }
+    result.sources.forEach(clipSource);
+  }
+  clipSource(result.source);
+  if (Array.isArray(result.items)) {
+    result.items.forEach(item => clipSource(item && item.source));
+    while (Buffer.byteLength(JSON.stringify(result), 'utf8') > maxBytes && result.items.length) {
+      result.items.pop();
+      result.truncated = true;
+    }
+  }
+  if (Buffer.byteLength(JSON.stringify(result), 'utf8') <= maxBytes) return result;
+  result.truncated = true;
+  delete result.items;
+  if (Array.isArray(result.sources)) result.sources = result.sources.slice(0, 1);
+  for (const key of ['source', 'sources']) {
+    if (Array.isArray(result[key])) result[key] = result[key].slice(0, 1);
+  }
+  if (Buffer.byteLength(JSON.stringify(result), 'utf8') <= maxBytes) return result;
+  return { status: result.status || 'unavailable', truncated: true };
+}
+function addAttachmentFallback(body) {
+  if (!body || ['ok', 'no_match', 'not_found', 'not_attached', 'unauthorized'].includes(body.status)) return body;
+  const entries = [];
+  if (body.source && typeof body.source === 'object') entries.push(body.source);
+  if (Array.isArray(body.sources)) entries.push(...body.sources);
+  if (!entries.length && body.attachment_id) entries.push({
+    room_key: body.room_key, node_uid: body.node_uid, attachment_id: body.attachment_id
+  });
+  const fallback = [];
+  const seen = new Set();
+  for (const source of entries) {
+    if (!source || !source.attachment_id) continue;
+    const roomKey = String(source.room_key || body.room_key || '');
+    const nodeUid = String(source.node_uid || body.node_uid || '');
+    const attachmentId = String(source.attachment_id);
+    const key = roomKey + '\0' + nodeUid + '\0' + attachmentId;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    fallback.push({ tool: 'read_attachment', room_key: roomKey, node_uid: nodeUid, attachment_id: attachmentId });
+    if (fallback.length >= attachmentSourceApi.MAX_SEARCH_RESULTS) break;
+  }
+  if (!fallback.length) return body;
+  return { ...body, fallback: fallback.length === 1 ? fallback[0] : fallback,
+    ...(entries.length > fallback.length ? { fallback_truncated: true } : {}) };
+}
+async function handleAttachmentRequest(req, res, { dir, pool, env, user, allowedRooms, pathname }) {
+  const raw = await readRequestBody(req);
+  const body = JSON.parse(raw || '{}');
+  const roomId = typeof body.room_key === 'string' ? body.room_key.trim() : '';
+  const nodeUid = typeof body.node_uid === 'string' ? body.node_uid.trim() : '';
+  const attachmentId = typeof body.attachment_id === 'string' ? body.attachment_id.trim() : '';
+  const isSearch = pathname === '/api/attachments/search';
+  if (body.attachment_id != null && typeof body.attachment_id !== 'string') {
+    return { httpStatus: 400, body: { status: 'unavailable', error: 'invalid_request' } };
+  }
+  if (!roomId || roomId.length > 120 || !nodeUid || nodeUid.length > 256 ||
+      attachmentId.length > 256 || (!isSearch && !attachmentId)) {
+    return { httpStatus: 400, body: { status: 'unavailable', error: 'invalid_request' } };
+  }
+  if (!allowedRooms.has(roomId)) return { httpStatus: 404, body: { status: 'not_found' } };
+  if (isSearch) {
+    const query = typeof body.query === 'string' ? body.query.trim() : '';
+    if (!query || query.length > 2000) return { httpStatus: 400, body: { status: 'unavailable', error: 'invalid_request' } };
+    if (body.top_k != null && (!Number.isInteger(Number(body.top_k)) || Number(body.top_k) < 1)) {
+      return { httpStatus: 400, body: { status: 'unavailable', error: 'invalid_request' } };
+    }
+  } else {
+    if (body.cursor != null && (typeof body.cursor !== 'string' || body.cursor.length > 4096)) {
+      return { httpStatus: 400, body: { status: 'unavailable', error: 'invalid_request' } };
+    }
+    if (body.length != null && (!Number.isInteger(Number(body.length)) || Number(body.length) < 1)) {
+      return { httpStatus: 400, body: { status: 'unavailable', error: 'invalid_request' } };
+    }
+  }
+  try {
+    const live = await loadLiveAttachments(pool, roomId, nodeUid, attachmentId);
+    if (live.status === 'not_found') return { httpStatus: 404, body: httpDomainResponse('not_found', roomId, nodeUid) };
+    if (live.status === 'not_attached') return { httpStatus: 200, body: httpDomainResponse('not_attached', roomId, nodeUid) };
+    const bundle = roomBundle(dir, roomId);
+    if (!bundle) return { httpStatus: 200, body: httpDomainResponse('not_synced', roomId, nodeUid, null, {
+      version: live.version, source_revision: live.source_revision,
+      ...sourceSummary(live.attachments, roomId, nodeUid, live, null)
+    }) };
+    if (live.version !== Number(bundle.version) || live.source_revision !== Number(bundle.revision)) {
+      return { httpStatus: 200, body: httpDomainResponse('stale', roomId, nodeUid, bundle, {
+        ...sourceSummary(live.attachments, roomId, nodeUid, live, bundle)
+      }) };
+    }
+    if (Number(bundle.attachmentSourceIndexVersion) !== attachmentSourceApi.INDEX_VERSION) {
+      return { httpStatus: 200, body: httpDomainResponse('index_upgrade_required', roomId, nodeUid, bundle, {
+        ...sourceSummary(live.attachments, roomId, nodeUid, live, bundle)
+      }) };
+    }
+    const indexedSources = [];
+    for (const attachment of live.attachments) {
+      const indexed = attachmentSourceApi.findSource(bundle, nodeUid, attachment.id);
+      if (!indexed) return { httpStatus: 200, body: httpDomainResponse('not_synced', roomId, nodeUid, bundle, {
+        ...sourceSummary(live.attachments, roomId, nodeUid, live, bundle)
+      }) };
+      if (!sourceMatchesLive(indexed.source, attachment, bundle)) return { httpStatus: 200,
+        body: httpDomainResponse('stale', roomId, nodeUid, bundle, {
+          source: attachmentSourceApi.publicSource(indexed.source, bundle)
+        }) };
+      indexedSources.push({ ...indexed, attachment });
+    }
+    if (isSearch) {
+      const rawTopK = body.top_k == null ? 3 : Math.min(attachmentSourceApi.MAX_SEARCH_RESULTS, Number(body.top_k));
+      const queryWords = String(body.query).split(/[\s,，.。!！?？、；;:："'（）()【】]+/).filter(Boolean);
+      const terms = [...new Set([...tokenize(body.query, []), ...tokenize(body.query, queryWords)])]
+        .map(term => String(term).toLowerCase());
+      const result = attachmentSourceApi.attachmentSearch({ bundle, sources: indexedSources, nodeUid, terms, topK: rawTopK });
+      return { httpStatus: 200, body: result };
+    }
+    const rawLength = body.length == null ? attachmentSourceApi.DEFAULT_READ_CHARS : Math.min(attachmentSourceApi.MAX_READ_CHARS, Number(body.length));
+    const indexed = indexedSources[0];
+    const result = attachmentSourceApi.attachmentRead({ bundle, source: indexed.source, topic: indexed.topic, nodeUid,
+      attachmentId, identity: user, cursor: body.cursor, length: rawLength, env });
+    return { httpStatus: 200, body: result };
+  } catch (_) {
+    return { httpStatus: 503, body: httpDomainResponse('unavailable', roomId, nodeUid, null, {
+      ...(attachmentId ? { attachment_id: attachmentId } : {})
+    }) };
+  }
 }
 function roomArticle(topic) {
   const body = topic.markdown.replace(/^# [^\n]*\n?/, '').trim();
@@ -636,6 +889,11 @@ function createWikiServer({ dir, pool, env = process.env }) {
     try {
       const user = verifyIdentity(req.headers['x-wiki-compiler-identity'], env);
       const allowedRooms = await readableRooms(pool, user, env);
+      if (req.method === 'POST' && ['/api/attachments/search', '/api/attachments/read'].includes(url.pathname)) {
+        const result = await handleAttachmentRequest(req, res, { dir, pool, env, user, allowedRooms, pathname: url.pathname });
+        const responseLimit = url.pathname.endsWith('/search') ? attachmentSourceApi.MAX_SEARCH_RESPONSE_BYTES : attachmentSourceApi.MAX_READ_RESPONSE_BYTES;
+        return json(result.httpStatus, boundedAttachmentResponse(addAttachmentFallback(result.body), responseLimit));
+      }
       if (url.pathname === '/api/search' && req.method === 'POST') {
         const raw = await readRequestBody(req);
         const body = JSON.parse(raw || '{}');
@@ -652,8 +910,8 @@ function createWikiServer({ dir, pool, env = process.env }) {
       if (url.pathname.startsWith('/api/concept/')) return json(404, { error: 'not_found' });
       return json(404, { error: 'not_found' });
     } catch (error) {
-      const status = error.code === 'unauthorized' ? 401 : error instanceof SyntaxError ? 400 : 503;
-      return json(status, { error: status === 401 ? 'unauthorized' : status === 400 ? 'invalid_json' : 'wiki_compiler_unavailable' });
+      const status = error.code === 'unauthorized' ? 401 : error.code === 'request_too_large' ? 413 : error instanceof SyntaxError ? 400 : 503;
+      return json(status, { error: status === 401 ? 'unauthorized' : status === 413 ? 'request_too_large' : status === 400 ? 'invalid_json' : 'wiki_compiler_unavailable' });
     }
   });
 }

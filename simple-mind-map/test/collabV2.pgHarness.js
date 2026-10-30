@@ -143,14 +143,70 @@ async function seedPgRoom(api, roomKey, count) {
 
 async function startV2Server() {
   const { attachCollabV2 } = require('../bin/collabV2/socketServer')
+  const { getPool } = require('../bin/storage')
+  const eventBus = require('../bin/eventBus').createPostgresBus(getPool())
   const server = http.createServer((req, res) => {
     res.writeHead(200)
     res.end('ok')
   })
-  const attached = attachCollabV2(server)
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
-  const url = 'http://127.0.0.1:' + server.address().port
-  return { server, url, presence: attached && attached.presence }
+  let attached = null
+  let cleanupPromise = null
+  const cleanup = () => {
+    if (cleanupPromise) return cleanupPromise
+    cleanupPromise = (async () => {
+      let cleanupError = null
+      try {
+        if (attached && attached.stop) await attached.stop()
+      } catch (error) {
+        cleanupError = error
+      }
+      try {
+        await eventBus.close()
+      } catch (error) {
+        cleanupError ||= error
+      }
+      if (cleanupError) throw cleanupError
+    })()
+    return cleanupPromise
+  }
+  // Older PG tests close only the raw HTTP server. Ensure that path also stops
+  // the bridge and releases the dedicated PostgreSQL LISTEN connection.
+  server.once('close', () => {
+    cleanup().catch(error => console.error('[test-harness] close cleanup failed:', error.message))
+  })
+  try {
+    await eventBus.start()
+    attached = attachCollabV2(server, { eventBus })
+    await new Promise((resolve, reject) => {
+      server.once('error', reject)
+      server.listen(0, '127.0.0.1', resolve)
+    })
+    const url = 'http://127.0.0.1:' + server.address().port
+    return {
+      server,
+      url,
+      presence: attached && attached.presence,
+      eventBus,
+      async close() {
+        try {
+          await cleanup()
+          if (attached && attached.io) await new Promise(resolve => attached.io.close(resolve))
+          else if (server.listening) await new Promise(resolve => server.close(resolve))
+        } finally {
+          await cleanup()
+        }
+      }
+    }
+  } catch (error) {
+    try {
+      await cleanup()
+      if (attached && attached.io) await new Promise(resolve => attached.io.close(resolve))
+      else if (server.listening) await new Promise(resolve => server.close(resolve))
+    } finally {
+      await cleanup()
+    }
+    throw error
+  }
 }
 
 async function joinClient(url, roomKey, userId) {
