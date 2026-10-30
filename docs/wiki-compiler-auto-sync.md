@@ -41,6 +41,21 @@ node scripts/wiki-compile-model.js --wiki-dir data/wiki-compiler/wiki --dry-run
 
 预演只列出待检查房间，不初始化数据库或写入输出文件。
 
+### 附件来源索引升级
+
+附件按需读取复用已有正文，并在 Canonical manifest / Wiki bundle 中增加来源范围索引。无数据库字段变更，无 SQL 迁移。旧产物在升级前返回 `index_upgrade_required`；用户读取请求不会触发重编译。
+
+先部署兼容的新编译器和 Wiki 读取接口，再按房间升级并验证，最后启用 MCP 新默认值。命令一次只升级一个房间，`--only-room` 与既有公司模型绑定参数 `--room-id` 含义不同：
+
+```powershell
+node scripts/wiki-compile-model.js --wiki-dir data/wiki-compiler/wiki --only-room room-example --dry-run
+node scripts/wiki-compile-model.js --wiki-dir data/wiki-compiler/wiki --only-room room-example --upgrade-attachment-index
+```
+
+在目标环境现有编译进程所用的数据库、密钥及输出目录下执行。不要在宿主目录与容器目录之间随意替换路径。命令输出 successful / failed / pending；只有新版索引和当前源版本匹配才计为升级成功，锁占用或源仍变化会记录待处理并返回非零退出码。读取流量不等待升级。保留旧 generation，回滚时恢复旧 MCP 行为即可，无需数据库回滚。
+
+上线验收分别记录：本地自动测试、目标房间索引升级结果、真实 MCP 阅读流程与人工确认。不要把本地验证等同于已部署。
+
 ## 发布与权限
 
 每房间的 `rooms/<roomId>/current.json` 指向完整、不可变的 `generations/<generation>/bundle.json`。主题 slug 根据房间 ID 与节点 UID 生成，同名主题不覆盖，改名不改变标识。旧版本保留供恢复。`[WikiCompiler]` 日志记录核对房间数、源版本、发布版本和失败原因。

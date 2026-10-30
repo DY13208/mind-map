@@ -223,9 +223,72 @@ async function testDatabaseWriteHintsAndFragments() {
     'fragment continuation must not issue extra queries for write hints')
 }
 
+async function testAttachmentContentModes() {
+  const { queryRoomNodes } = require('../bin/nodeQuery')
+  const input = { selector: { type: 'uid', value: 'target' }, scope: 'self' }
+  assert.strictEqual(normalizeRequest(input).attachment_content, 'preview')
+  assert.strictEqual(normalizeRequest({ ...input, attachment_content: 'metadata' }).attachment_content, 'metadata')
+  expectCode(() => normalizeRequest({ ...input, attachment_content: 'full' }), 'INVALID_QUERY')
+
+  const extractedText = '附件正文'.repeat(10000)
+  const metadataData = {
+    text: '目标', note: '备注', attachmentId: 'attachment-1',
+    attachmentName: '需求说明.pdf', attachmentMimeType: 'application/pdf',
+    attachmentStatus: 'ready', attachmentError: '', attachmentExtractedText: extractedText,
+    __fv: { text: 5, note: 6, attachment: 7 }
+  }
+  const metadata = await queryRoomNodes(
+    createFakeQueryDb(metadataData), 'fake-db-room',
+    { ...input, attachment_content: 'metadata', include_write_hints: true }
+  )
+  const item = metadata.items[0]
+  assert.strictEqual(Object.hasOwn(item.data, 'attachmentExtractedText'), false)
+  assert.strictEqual(item.data.attachmentId, 'attachment-1')
+  assert.strictEqual(item.data.attachmentName, '需求说明.pdf')
+  assert.strictEqual(item.data.attachmentStatus, 'ready')
+  assert.strictEqual(item.data.note, '备注')
+  assert.deepStrictEqual(item.data.__fv, metadataData.__fv)
+  assert.deepStrictEqual(item.write_hints.update.text, { uid: 'target', '__fv.text': 5 })
+  assert.deepStrictEqual(item.write_hints.update.note, { uid: 'target', '__fv.note': 6 })
+  assert.deepStrictEqual(item.write_hints.update.hyperlink, { uid: 'target', '__fv.hyperlink': 0 })
+  assert.ok(metadata.omitted_fields.includes('data.attachmentExtractedText'))
+  assert.ok(Buffer.byteLength(JSON.stringify(metadata), 'utf8') <= metadata.byte_limit)
+
+  const defaultPreview = await queryRoomNodes(
+    createFakeQueryDb({ ...metadataData, attachmentExtractedText: '旧预览' }),
+    'fake-db-room', input
+  )
+  assert.strictEqual(defaultPreview.items[0].data.attachmentExtractedText, '旧预览',
+    'omitting the HTTP option must retain the legacy preview response')
+
+  const longInput = { ...input, byte_limit: 4096 }
+  const longDb = createFakeQueryDb({
+    text: '文字'.repeat(6000),
+    attachmentExtractedText: '附件预览'
+  })
+  const first = await queryRoomNodes(longDb, 'fake-db-room', longInput)
+  assert.ok(first.items[0].content_fragment, 'node long-text fragment should remain supported')
+  await assert.rejects(
+    queryRoomNodes(longDb, 'fake-db-room', {
+      ...longInput,
+      attachment_content: 'metadata',
+      cursor: first.next_cursor
+    }),
+    error => error && error.code === 'INVALID_CURSOR'
+  )
+  const next = await queryRoomNodes(longDb, 'fake-db-room', {
+    ...longInput,
+    cursor: first.next_cursor
+  })
+  assert.ok(next.items[0].content_fragment)
+  assert.strictEqual(next.items[0].data.attachmentExtractedText, '附件预览')
+}
+
 testNormalizeName()
 testRequestRules()
 testCursorRoundtrip()
 testLegacyFallbackScopes()
 testLegacyWriteHints()
-testDatabaseWriteHintsAndFragments().then(() => console.log('nodeQuery tests passed'))
+testDatabaseWriteHintsAndFragments()
+  .then(testAttachmentContentModes)
+  .then(() => console.log('nodeQuery tests passed'))

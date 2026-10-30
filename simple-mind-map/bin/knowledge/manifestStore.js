@@ -221,6 +221,9 @@ async function publish(roomDir, writes, deletes, manifest, options = {}) {
       await atomicWrite(target(stage, file), text)
       if (options.afterWrite) await options.afterWrite(file)
     }
+    // Optional document attachment source indexes live in this manifest. They
+    // are committed with the corresponding Markdown files so readers cannot
+    // observe ranges from a different publication.
     if (options.beforeWrite) await options.beforeWrite('manifest.json')
     await atomicWrite(target(stage, 'manifest.json'), JSON.stringify({ ...manifest, publicationId }, null, 2) + '\n')
     if (options.afterWrite) await options.afterWrite('manifest.json')

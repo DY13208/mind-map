@@ -15,8 +15,9 @@ async function handleApi(req, res, pathname) {
       userId = req.authUser.id
     }
     const suffix = pathname.slice('/api/wiki-compiler/'.length)
-    if (!/^api\/(?:graph|search|topic\/[^/]+|concept\/[^/]+)$/.test(suffix)) { send(404, 'not_found'); return true }
+    if (!/^api\/(?:graph|search|topic\/[^/]+|concept\/[^/]+|attachments\/(?:search|read))$/.test(suffix)) { send(404, 'not_found'); return true }
     if (!['GET', 'POST'].includes(req.method)) { send(405, 'method_not_allowed'); return true }
+    if (suffix.startsWith('api/attachments/') && req.method !== 'POST') { send(405, 'method_not_allowed'); return true }
     const base = new URL(process.env.WIKI_COMPILER_INTERNAL_URL || 'http://wiki-graph:3848/')
     if (!['http:', 'https:'].includes(base.protocol) || base.username || base.password) throw new Error('invalid upstream')
     let raw
