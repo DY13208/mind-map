@@ -60,6 +60,7 @@ const {
   scheduleSave,
   commitRoomOperation,
   commitDirectRoomOperation,
+  LIVE_DOC_MAX_NODES,
   invalidateRoomCache,
   getRoomVersion,
   listRoomOperations,
@@ -309,6 +310,10 @@ function stripMcpRequestFields(input = {}) {
 
 async function applyCommittedLive(roomKey, command, committed) {
   if (committed && committed.duplicate) return committed
+  if (!committed.nodes && (await countLiveRoomNodes(roomKey)) > LIVE_DOC_MAX_NODES) {
+    dropLiveDoc(roomKey)
+    return committed
+  }
   const nodes =
     committed.nodes ||
     ((await getRoomSnapshot(roomKey)) || {}).nodes ||
@@ -352,9 +357,111 @@ async function applyCommittedLive(roomKey, command, committed) {
   return committed
 }
 
+const LARGE_ROOM_DIRECT_TYPES = new Set([
+  'node.insert',
+  'node.update',
+  'node.move',
+  'node.reorder',
+  'node.delete',
+  'node.restore',
+  'map.meta.update'
+])
+
+function trustedWritePlan(type, liveCount, maxNodes = LIVE_DOC_MAX_NODES) {
+  const live = Number(liveCount) || 0
+  const limit = Number(maxNodes) > 0 ? Number(maxNodes) : 2000
+  if (live <= limit) return 'legacy'
+  if (LARGE_ROOM_DIRECT_TYPES.has(String(type || ''))) return 'direct'
+  return 'blocked'
+}
+
+async function countLiveRoomNodes(roomKey) {
+  const result = await getPool().query(
+    `select count(*)::int as live
+     from room_nodes
+     where room_key = $1 and deleted_at is null`,
+    [roomKey]
+  )
+  return Number(result.rows[0] && result.rows[0].live) || 0
+}
+
+async function readValidationNode(client, roomKey, uid) {
+  const key = String(uid || '').trim()
+  if (!key) return {}
+  const found = await client.query(
+    `select uid, data, is_root
+     from room_nodes
+     where room_key = $1 and uid = $2 and deleted_at is null`,
+    [roomKey, key]
+  )
+  const row = found.rows[0]
+  if (!row) return {}
+  return {
+    [row.uid]: {
+      isRoot: row.is_root === true || row.is_root === 't',
+      data: row.data || {},
+      children: []
+    }
+  }
+}
+
+function fullGraphWriteBlocked(liveCount) {
+  const err = new Error('这张脑图太大，不能整图装入内存后再写入')
+  err.statusCode = 409
+  err.code = 'FULL_GRAPH_WRITE_BLOCKED'
+  err.details = { liveCount, limit: LIVE_DOC_MAX_NODES }
+  return err
+}
+
+async function commitLargeRoomDirect(roomKey, command, internalOptions = {}) {
+  const payload = command.payload || {}
+  return withRoomMutation(roomKey, () =>
+    commitDirectRoomOperation(
+      roomKey,
+      command,
+      async ({ client, room, currentVersion }) => {
+        if (typeof internalOptions.validateBase === 'function') {
+          const validation = await internalOptions.validateBase({
+            nodes: await readValidationNode(client, roomKey, payload.uid),
+            currentVersion,
+            room
+          })
+          if (validation && validation.noop) {
+            const err = new Error('操作无需更新')
+            err.operationNoop = validation.result || {}
+            throw err
+          }
+        }
+        const store = require('./collabV2/directStore').createPgStore(client, roomKey)
+        store.setMeta((room && room.metadata) || {})
+        const applied = await require('./collabV2/directApplier').applyDirect(
+          store,
+          {
+            ...command,
+            roomKey,
+            targetId: payload.uid || '',
+            opId: command.operationId
+          },
+          {
+            version: currentVersion + 1,
+            operationId: command.operationId
+          }
+        )
+        return { ...applied, queryStats: store.stats }
+      },
+      {
+        mcpRequest: internalOptions.mcpRequest,
+        diagnosticSource: internalOptions.diagnosticSource || 'trusted-large'
+      }
+    )
+  )
+}
+
 /**
  * Trusted in-process mutation (caller already enforced ACL).
  * Used by Wiki→Mindmap sync — same commit path as HTTP node APIs.
+ * Rooms above LIVE_DOC_MAX_NODES never build a Y.Doc: that synchronous
+ * transaction blocks the only collab thread.
  */
 async function executeTrustedOperation(roomKey, command, internalOptions = {}) {
   assertRoomWritable(roomKey)
@@ -367,6 +474,39 @@ async function executeTrustedOperation(roomKey, command, internalOptions = {}) {
   }
   const started = Date.now()
   try {
+    const liveCount = await countLiveRoomNodes(roomKey)
+    const writePlan = trustedWritePlan(command.type, liveCount)
+    if (writePlan !== 'legacy') {
+      if (writePlan === 'blocked') {
+        throw fullGraphWriteBlocked(liveCount)
+      }
+      const committed = await commitLargeRoomDirect(roomKey, command, internalOptions)
+      const uid =
+        (command.payload && command.payload.uid) ||
+        (committed.result && committed.result.uid) ||
+        ''
+      if (uid && committed && !committed.noop && !committed.duplicate) {
+        const found = await getPool().query(
+          `select data from room_nodes
+           where room_key = $1 and uid = $2 and deleted_at is null`,
+          [roomKey, uid]
+        )
+        if (found.rows[0]) {
+          committed.nodes = { [uid]: { data: found.rows[0].data || {} } }
+        }
+      }
+      invalidateRoomCache(roomKey)
+      dropLiveDoc(roomKey)
+      const version = Number((committed.operation && committed.operation.version) || 0)
+      recordOperation({
+        mapId: roomKey,
+        version,
+        ok: true,
+        duplicate: !!committed.duplicate,
+        durationMs: Date.now() - started
+      })
+      return committed
+    }
     const committed = await withRoomMutation(roomKey, async () => {
       return commitRoomOperation(
         roomKey,
@@ -4158,4 +4298,4 @@ async function handleApi(req, res) {
   return false
 }
 
-module.exports = { handleApi, executeTrustedOperation }
+module.exports = { handleApi, executeTrustedOperation, trustedWritePlan }

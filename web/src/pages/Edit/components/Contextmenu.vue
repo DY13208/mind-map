@@ -838,7 +838,7 @@ export default {
           }
         } catch(e) { return this.$message.warning(e.message || '无法核验审批发布状态，请稍后重试') }
       }
-      await this.copyAiInstruction(`执行这个SOP：${reference}`, '指令已复制，可粘贴给 AI 使用')
+      await this.copyAiInstruction(reference, '指令已复制，可粘贴给 AI 使用')
     },
 
     async distillNodeSkill() {
