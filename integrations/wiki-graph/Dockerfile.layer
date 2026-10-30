@@ -1,2 +1,0 @@
-FROM mind-map-wiki-graph:1
-COPY attachmentSources.cjs /app/integrations/wiki-graph/attachmentSources.cjs
