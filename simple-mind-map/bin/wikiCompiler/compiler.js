@@ -3,6 +3,7 @@ const path = require('node:path')
 const { randomUUID } = require('node:crypto')
 const { syncDir } = require('../knowledge/manifestStore')
 const { safeId, hash } = require('../knowledge/utils')
+const { ATTACHMENT_SOURCE_INDEX_VERSION } = require('../knowledge/markdownRenderer')
 
 function topicSlug(roomId, nodeUid) {
   return 'map-' + hash([roomId, String(nodeUid)]).slice(0, 40)
@@ -23,7 +24,8 @@ async function atomicJson(file, data) {
 }
 async function publishRoom(outputDir, input) {
   const roomDir = path.join(outputDir, 'rooms', safeId(input.roomId))
-  const sourceHash = hash(input)
+  const attachmentSourceIndexVersion = Number(input.attachmentSourceIndexVersion) || 0
+  const sourceHash = hash({ ...input, attachmentSourceIndexVersion })
   const current = await readJson(path.join(roomDir, 'current.json'))
   if (current && current.sourceHash === sourceHash && await fs.stat(path.join(roomDir, 'generations', safeId(current.generation), 'bundle.json')).catch(() => null)) {
     return { changed: false, generation: current.generation }
@@ -32,10 +34,19 @@ async function publishRoom(outputDir, input) {
   const publishedAt = new Date().toISOString()
   const topics = input.topics.map(topic => ({ ...topic, roomId: input.roomId,
     roomTitle: input.title, slug: topicSlug(input.roomId, topic.nodeUid),
-    version: input.version, sourceRevision: input.revision,
-    contentHash: hash(topic.markdown), publishedAt }))
+    version: input.version, sourceRevision: input.revision, generation,
+    contentHash: hash(topic.markdown), publishedAt,
+    attachmentSources: topic.attachmentSourceIndexVersion === ATTACHMENT_SOURCE_INDEX_VERSION && Array.isArray(topic.attachmentSources)
+      ? topic.attachmentSources.map(source => ({
+        ...source,
+        room_key: input.roomId,
+        version: input.version,
+        source_revision: input.revision,
+        generation
+      }))
+      : undefined }))
   const bundle = { format: 1, roomId: input.roomId, title: input.title, version: input.version,
-    revision: input.revision, sourceHash, publishedAt, topics }
+    revision: input.revision, attachmentSourceIndexVersion, sourceHash, generation, publishedAt, topics }
   const target = path.join(roomDir, 'generations', generation)
   await fs.mkdir(target, { recursive: true })
   await atomicJson(path.join(target, 'bundle.json'), bundle)

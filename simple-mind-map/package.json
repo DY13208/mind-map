@@ -64,6 +64,8 @@
     "test:collab:node-query": "node ./test/nodeQuery.test.js && node ./test/nodeQuery.pg.test.js",
     "test:export-room": "node ./test/exportRoomTree.test.js",
     "test:attachment:read": "node ./test/nodeKnowledge.test.js && node ./test/nodeKnowledge.http.test.js",
+    "test:mcp:attachment-knowledge": "node --test ./test/mcpAttachmentKnowledge.test.mjs ./test/mcpAttachmentKnowledge.fallback.test.mjs ./test/sopContext.test.mjs ./bin/knowledge/attachmentSourceIndex.test.js ./bin/wikiCompiler/api.test.js ../integrations/wiki-graph/attachments.test.cjs",
+    "test:mcp:attachment-knowledge:pg": "node --test ../integrations/wiki-graph/attachments.pg.test.cjs",
     "test:attachment:read:pg": "node ./test/nodeAttachmentRead.pg.test.js",
     "test:collab:restart": "node ./test/collabRestart.integration.test.js",
     "test:collab:outbox": "node ./test/outbox.integration.test.js",

@@ -133,3 +133,10 @@ output/*.py
 
 # Read-only cross-map automatic D discovery regression.
 !/simple-mind-map/test/automaticDNodes.pg.test.cjs
+!/simple-mind-map/test/attachmentQuery.benchmark.cjs
+!/simple-mind-map/test/mcpAttachmentKnowledge.test.mjs
+!/simple-mind-map/test/mcpAttachmentKnowledge.fallback.test.mjs
+!/simple-mind-map/bin/wikiCompiler/api.test.js
+!/simple-mind-map/bin/knowledge/attachmentSourceIndex.test.js
+!/integrations/wiki-graph/attachments.test.cjs
+!/integrations/wiki-graph/attachments.pg.test.cjs

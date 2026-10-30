@@ -121,7 +121,8 @@ async function readSnapshot(pool, roomId, manifest, options = {}) {
     const rows = legacy ? legacyRows.filter(row => wantedSet.has(row.uid)) : wanted.length ? (await db.query(`select uid, data from room_nodes
       where room_key=$1 and uid=any($2::text[]) and deleted_at is null`, [roomId, wanted])).rows : []
     const data = new Map(rows.map(row => [row.uid, row.data || {}]))
-    const attachments = wanted.length ? (await db.query(`select id, node_uid, file_name, status, extracted_text, content_hash, source_kind
+    const attachments = wanted.length ? (await db.query(`select id, node_uid, file_name, status, extracted_text,
+      char_length(extracted_text) as extracted_chars, content_hash, source_kind
       from node_attachments where room_key=$1 and (node_uid=any($2::text[]) or id=any($3::text[])) order by id`,
     [roomId, wanted, rows.map(row => row.data?.attachmentId).filter(Boolean)])).rows : []
     // A formerly unbound attachment can later be referenced by attachmentId.
