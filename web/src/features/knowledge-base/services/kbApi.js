@@ -46,8 +46,8 @@ export default {
 
   // 文件夹
   // 懒加载：每次只取某个父文件夹的直接子级；parentId 为空表示根
-  listFolders: ({ parentId, limit = 100, cursor } = {}) =>
-    http.get('/folders', { params: query({ parent_id: parentId || 'root', limit, cursor }) }).then(d => pickList(d, 'folders')),
+  listFolders: ({ parentId, q, limit = 100, cursor } = {}) =>
+    http.get('/folders', { params: query({ parent_id: parentId || (q ? undefined : 'root'), q, limit, cursor }) }).then(d => pickList(d, 'folders')),
   createFolder: body => http.post('/folders', body),
   renameFolder: (id, name) => http.patch(`/folders/${enc(id)}`, { name }),
   deleteFolder: id => http.delete(`/folders/${enc(id)}`),

@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { getUploadTicket, readTicketBytes } from './mcpUploadTickets.mjs'
 
 // JSON base64 upload shares the HTTP 32MiB body budget; leave headroom.
 export const MAX_MCP_UPLOAD_BYTES = 24 * 1024 * 1024
@@ -92,10 +93,45 @@ export async function resolveAttachmentUploadInput(input = {}) {
   const filePath = filePathRaw
     ? remapAttachmentFilePath(filePathRaw)
     : ''
-  const mimeType = String(input.mime_type || '').trim()
+  let mimeType = String(input.mime_type || '').trim()
   let fileName = fileNameHint
+  const uploadId = String(input.upload_id || '').trim()
+  const roomKey = String(input.room_key || '').trim()
+  let ticket = null
 
-  if (filePath) {
+  if (uploadId) {
+    ticket = getUploadTicket(uploadId)
+    if (!ticket) {
+      throw new Error(
+        `上传票据 ${uploadId} 不存在或已过期，请重新调用 create_upload_ticket`
+      )
+    }
+    if (!ticket.receivedAt) {
+      throw new Error(
+        `上传票据 ${uploadId} 尚未收到文件，请先把字节直传到 /mcp-upload/${uploadId}`
+      )
+    }
+    if (roomKey && ticket.roomKey && roomKey !== ticket.roomKey) {
+      throw new Error(
+        `上传票据绑定的房间是 ${ticket.roomKey}，与本次 room_key=${roomKey} 不一致`
+      )
+    }
+    const nodeRef = String(input.node || input.node_uid || '').trim()
+    if (nodeRef && ticket.nodeRef && nodeRef !== ticket.nodeRef) {
+      throw new Error(
+        `上传票据绑定的节点是 ${ticket.nodeRef}，与本次 node=${nodeRef} 不一致`
+      )
+    }
+    const buf = await readTicketBytes(ticket)
+    if (buf.length > MAX_MCP_UPLOAD_BYTES) {
+      throw new Error(
+        `文件过大（${buf.length} 字节，上限 ${MAX_MCP_UPLOAD_BYTES}），请改用较小文件`
+      )
+    }
+    contentBase64 = buf.toString('base64')
+    fileName = fileNameHint || ticket.fileName || 'file'
+    if (!mimeType) mimeType = ticket.mimeType || ''
+  } else if (filePath) {
     let buf
     try {
       buf = await fs.readFile(filePath)
@@ -141,8 +177,12 @@ export async function resolveAttachmentUploadInput(input = {}) {
     mimeType: mimeType || undefined,
     contentBase64: contentBase64 || undefined,
     sourceUrl: sourceUrl || undefined,
-    nodeUid: String(input.node || input.node_uid || '').trim(),
-    resolvedPath: filePath || undefined
+    nodeUid:
+      String(input.node || input.node_uid || '').trim() ||
+      (ticket && ticket.nodeRef) ||
+      '',
+    resolvedPath: filePath || undefined,
+    uploadId: ticket ? ticket.uploadId : undefined
   }
 }
 

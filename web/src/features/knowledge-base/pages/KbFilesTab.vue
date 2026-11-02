@@ -3,22 +3,25 @@
     <button v-if="isMobileViewport && foldersOpen" class="kb-folder-backdrop" aria-label="关闭文件夹面板" tabindex="-1" @click="closeFolders" />
     <aside v-show="!isMobileViewport || foldersOpen" class="kb-card kb-files-side" :role="isMobileViewport ? 'dialog' : null" :aria-modal="isMobileViewport ? 'true' : null" aria-label="文件夹导航" @keydown="onFolderKeydown">
       <button v-if="isMobileViewport" class="kb-folder-close" aria-label="关闭文件夹面板" @click="closeFolders"><i class="el-icon-close" /></button>
-      <KbFolderTree ref="tree" v-model="folderId" @path="onFolderPath" @acl="openAcl" @batch-acl="openBatchAcl('folder', $event)" />
+      <KbFolderTree ref="tree" v-model="folderId" :search-query="globalSearch" @search="onGlobalSearch" @path="onFolderPath" @acl="openAcl" @batch-acl="openBatchAcl('folder', $event)" />
     </aside>
     <section class="kb-files-main">
       <div class="kb-card">
         <div v-if="isMobileViewport" class="kb-section-heading"><h2>{{ folderId ? '分类文档' : '文档动态' }}</h2><button @click="mobileShowAll = !mobileShowAll">{{ mobileShowAll ? '收起列表' : '查看全部' }}<i class="el-icon-arrow-right" /></button></div>
         <div class="kb-toolbar">
           <div class="kb-crumb">
+            <span v-if="globalSearch.trim()" class="kb-crumb-sep">全部文件搜索：{{ globalSearch.trim() }}</span>
+            <template v-else>
             <span class="kb-crumb-item" @click="$refs.tree.select('')">全部文件</span>
             <template v-for="p in folderPath">
               <span :key="'s' + p.id" class="kb-crumb-sep">/</span>
               <span :key="p.id" class="kb-crumb-item" @click="$refs.tree.select(p.id)">{{ p.name }}</span>
             </template>
+            </template>
           </div>
           <button v-if="isMobileViewport" class="kb-folder-trigger" @click="openFolders"><i class="el-icon-folder-opened" />文件夹</button>
           <div class="kb-toolbar-actions">
-            <el-input v-model="q" size="small" prefix-icon="el-icon-search" placeholder="搜索文件名" clearable class="kb-search" @input="debouncedLoad" />
+            <el-input v-model="q" size="small" prefix-icon="el-icon-search" placeholder="搜索文件名" clearable class="kb-search" :disabled="!!globalSearch.trim()" @input="debouncedLoad" />
             <el-select v-model="status" size="small" placeholder="全部状态" clearable popper-class="kb-popper" class="kb-status-filter" @change="reload">
               <el-option v-for="(m, k) in statuses" :key="k" :label="m.label" :value="k" />
             </el-select>
@@ -103,7 +106,7 @@ export default {
   components: { KbFolderTree, KbUploadPanel, KbFileTable, KbStateBlock, KbCursorPager, KbPermissionDialog, KbBatchPermissionDialog, KbBatchDrawer },
   data() {
     return {
-      folderId: '', folderPath: [], files: [], total: null, limit: DEFAULT_LIMIT, q: '', status: '',
+      folderId: '', folderPath: [], files: [], total: null, limit: DEFAULT_LIMIT, q: '', globalSearch: '', status: '',
       cursor: createCursorState(), loading: false, loaded: false, error: null, showUpload: false,
       aclVisible: false, aclTarget: null, statuses: FILE_STATUS, reqSeq: 0, localActiveBatches: [],
       batchAclVisible: false, batchAclTargets: [],
@@ -132,7 +135,18 @@ export default {
     clearTimeout(this.timer)
   },
   methods: {
-    onFolderPath(path) { this.folderPath = path; this.closeFolders() },
+    onGlobalSearch(value) {
+      this.globalSearch = value
+      this.reqSeq += 1
+      this.debouncedLoad()
+    },
+    onFolderPath(path) {
+      const searching = !!this.globalSearch
+      this.globalSearch = ''
+      this.folderPath = path
+      this.closeFolders()
+      if (searching) { clearTimeout(this.timer); this.reload() }
+    },
     closeFolders() {
       this.foldersOpen = false
       this.$nextTick(() => { if (this._folderTrigger && this._folderTrigger.isConnected) this._folderTrigger.focus() })
@@ -166,7 +180,8 @@ export default {
       const seq = ++this.reqSeq
       this.loading = true
       try {
-        const res = await kbApi.listFiles({ folderId: this.folderId, q: this.q, status: this.status, limit: this.limit, cursor: currentCursor(this.cursor) })
+        const globalQuery = this.globalSearch.trim()
+        const res = await kbApi.listFiles({ folderId: globalQuery ? '' : this.folderId, q: globalQuery || this.q, status: this.status, limit: this.limit, cursor: currentCursor(this.cursor) })
         if (seq !== this.reqSeq) return
         this.files = res.items
         this.total = res.total
@@ -261,7 +276,7 @@ export default {
   align-items: flex-start;
 }
 .kb-files-side {
-  width: 240px;
+  width: clamp(280px, 24vw, 400px);
   flex: none;
   max-height: calc(100vh - 220px);
   overflow: auto;
