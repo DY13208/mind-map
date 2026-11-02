@@ -99,6 +99,8 @@ services:
       MCP_HOST: "127.0.0.1"
       MCP_PORT: "3847"
       MIND_MAP_API: "http://127.0.0.1:1234"
+      # MCP 直传票据的公开基地址（不带 /mcp）：create_upload_ticket / create_approval_upload_ticket 返回的 upload_url 由它拼出，空则只返 upload_path
+      MCP_PUBLIC_BASE_URL: ${MCP_PUBLIC_BASE_URL:-}
       COLLAB_RATE_LIMIT_PER_ROOM: "800"
       COLLAB_RATE_LIMIT_GLOBAL: "8000"
       COLLAB_V2: "1"
