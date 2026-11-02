@@ -155,3 +155,49 @@ test('upload panel and tree wire folder upload', () => {
   const tab = fs.readFileSync(path.join(kbDir, 'pages/KbFilesTab.vue'), 'utf8')
   assert.match(tab, /@folders-changed=/)
 })
+
+test('folder picker clicks do not bubble into the ordinary file picker', () => {
+  const compiler = require('vue-template-compiler')
+  const Vue = require('vue')
+  const source = compiler.parseComponent(fs.readFileSync(path.join(kbDir, 'components/KbUploadPanel.vue'), 'utf8'))
+  const component = load(source.script.content, {
+    '../services/kbApi': {},
+    '../services/kbSignals': {},
+    '../services/kbPolling': {},
+    '../utils/uploadQueue': uq,
+    '../utils/batchState': {},
+    '../utils/folderUpload': fu
+  }).default
+  const compiled = compiler.compile(source.template.content)
+  assert.deepEqual(compiled.errors, [])
+  // Render the real template without starting the network/polling lifecycle.
+  const vm = new Vue({
+    props: component.props,
+    beforeCreate: component.beforeCreate,
+    data: component.data,
+    computed: component.computed,
+    methods: component.methods,
+    render: new Function(compiled.render),
+    staticRenderFns: compiled.staticRenderFns.map(code => new Function(code))
+  })
+  const drop = vm._render().children.find(n => n.data && n.data.staticClass === 'kb-drop')
+  const input = ref => drop.children.find(n => n.data && n.data.ref === ref)
+  const calls = { input: 0, folder: 0 }
+  for (const ref of ['input', 'folder']) {
+    vm.$refs[ref] = { click() {
+      calls[ref]++
+      // Native input.click() dispatches a bubbling event, even on hidden inputs.
+      let stopped = false
+      const event = { stopPropagation() { stopped = true } }
+      const handler = input(ref).data.on && input(ref).data.on.click
+      if (handler) handler(event)
+      if (!stopped) drop.data.on.click(event)
+    } }
+  }
+  const button = drop.children.flatMap(n => n.children || []).find(n => n.tag === 'el-button')
+  button.data.on.click({ stopPropagation() {} })
+  assert.deepEqual(calls, { input: 0, folder: 1 }, 'folder selection must not open the ordinary file dialog')
+  drop.data.on.click({})
+  assert.deepEqual(calls, { input: 1, folder: 1 }, 'the drop area still opens the ordinary picker exactly once')
+  vm.$destroy()
+})

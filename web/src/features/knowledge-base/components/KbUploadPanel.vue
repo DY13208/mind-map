@@ -18,8 +18,8 @@
         <el-button type="text" size="mini" :disabled="folderBusy" @click.stop="pickFolder">选择文件夹</el-button>
         <span>（保留子目录结构，建在「{{ folderLabel }}」下；跳过隐藏和系统文件）</span>
       </div>
-      <input ref="input" type="file" multiple class="kb-hidden-input" @change="onPick" />
-      <input ref="folder" type="file" multiple webkitdirectory directory class="kb-hidden-input" @change="onPickFolder" />
+      <input ref="input" type="file" multiple class="kb-hidden-input" @click.stop @change="onPick" />
+      <input ref="folder" type="file" multiple webkitdirectory directory class="kb-hidden-input" @click.stop @change="onPickFolder" />
     </div>
     <div v-if="folderJob" class="kb-folder-job">
       <div class="kb-folder-job-main">

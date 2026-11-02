@@ -2,7 +2,6 @@
   <el-badge
     :value="count"
     :max="99"
-    :is-dot="avatar"
     :hidden="!count"
     class="notificationBadge"
     :class="{
@@ -156,14 +155,23 @@ export default {
   border-color: #e64b57;
   box-shadow: 0 0 0 3px rgba(230, 75, 87, 0.2);
 }
-.notificationBadge--avatar /deep/ .el-badge__content.is-dot {
-  top: 2px;
-  right: 3px;
-  width: 10px;
-  height: 10px;
-  background-color: #e64b57;
+.notificationBadge--avatar /deep/ .el-badge__content.is-fixed {
+  top: 0;
+  right: 0;
+  box-sizing: border-box;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 4px;
+  background-color: #d92d43;
+  color: #fff;
   border: 2px solid #fff;
-  transform: translate(50%, -50%);
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
+  box-shadow: 0 2px 5px rgba(130, 20, 35, 0.25);
+  transform: translate(10%, -20%);
+  pointer-events: none;
 }
 </style>
 <style lang="less">
@@ -174,7 +182,7 @@ body.isDark .notificationBadge .notificationButton:hover {
   background: #2c3036;
   color: #4cc596;
 }
-body.isDark .notificationBadge--avatar .el-badge__content.is-dot {
+body.isDark .notificationBadge--avatar .el-badge__content.is-fixed {
   border-color: #1f2329;
 }
 </style>

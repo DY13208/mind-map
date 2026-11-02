@@ -108,12 +108,16 @@ output/*.py
 !/simple-mind-map/e2e/performance/*.cjs
 /work/
 !/simple-mind-map/test/roomAclStartup.pg.test.js
+!/simple-mind-map/test/approvalAttachments.test.cjs
+!/simple-mind-map/test/approvalAttachments.mcp.test.mjs
+!/simple-mind-map/test/approvalAttachments.pg.integration.test.cjs
 !/services/file-kb/test/direct-links.test.js
 !/web/tests/kbDirectLink.test.cjs
 /output/
 
 !/web/tests/kbBatchPermissions.test.cjs
 !/web/tests/kbOrganization.test.cjs
+!/web/tests/approvalPerformance.test.cjs
 !/services/file-kb/test/download-url.test.js
 !/services/file-kb-mcp/test/download-url.test.mjs
 

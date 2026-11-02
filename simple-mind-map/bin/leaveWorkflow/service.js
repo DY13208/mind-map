@@ -5,6 +5,7 @@ const core = require('./core')
 const workflow = require('./workflowCore')
 const organization = require('./hrmsOrganization')
 const aiReview = require('./aiReview')
+const approvalAttachments = require('./attachments')
 const UUID = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i
 const SOURCE = {
   roomKey: process.env.WCPD_LEAVE_TEMPLATE_ROOM || 'room-yk3tz4aj',
@@ -586,6 +587,7 @@ function agentInputHash(tpl,fields,attachments){
   return core.digest({fields:cleanFields(fields,tpl),attachments:attachments.map(a=>[a.id,a.hash,a.fileName]).sort((a,b)=>a[0].localeCompare(b[0]))})
 }
 async function checkAttachments(db, row, fields) {
+  if (row.template.agentInput) return approvalAttachments.validate(db, row, fields)
   const result = []
   const nodes = await subtree(db, row.room_key, row.node_uid)
   const bound = new Set([row.node_uid])
@@ -849,7 +851,7 @@ async function prepare(pool, req, body) {
       ccResolved: route.resolved,
       publication: await publication(db, tpl, who)
     }
-    if(agentInput){report.attachments=await checkAttachments(db,{room_key:room,node_uid:node,template:tpl},fields);report.nodeInputHash=null;report.inputHash=agentInputHash(tpl,fields,report.attachments)}
+    if(agentInput){report.attachments=await checkAttachments(db,{id,room_key:room,node_uid:node,template:tpl},fields);report.nodeInputHash=null;report.inputHash=agentInputHash(tpl,fields,report.attachments)}
     const saved = await db.query(
       `insert into leave_requests(id,corp_id,requester_id,room_key,node_uid,source_room,source_uid,template,fields,report,steps,cc,input_mode) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) on conflict(corp_id,requester_id,room_key,node_uid,input_mode) where status in ('draft','pending','returned') do nothing returning *`,
       [
@@ -933,7 +935,7 @@ async function get(pool, req, id, options = {}) {
     : null
   let history = (
     await pool.query(
-      "select id,actor_id,action,revision,detail,created_at from leave_events where request_id=$1 and ($2::bigint is null or id<$2) and ($3::text is null or detail->>'round'=$3) order by id desc limit 51",
+      "select id,actor_id,action,revision,detail - 'snapshot' as detail,created_at from leave_events where request_id=$1 and ($2::bigint is null or id<$2) and ($3::text is null or detail->>'round'=$3) order by id desc limit 51",
       [id, before, historical ? String(row.round) : null]
     )
   ).rows
@@ -948,8 +950,8 @@ async function get(pool, req, id, options = {}) {
     row.fields.attachmentIds && row.fields.attachmentIds.length
       ? (
           await pool.query(
-            'select id,content_hash,file_name,left(extracted_text,1600) as text,length(extracted_text) as total_chars from node_attachments where room_key=$1 and id=any($2::text[]) limit 10',
-            [row.room_key, row.fields.attachmentIds]
+            'select id,content_hash,file_name,left(extracted_text,1600) as text,length(extracted_text) as total_chars from node_attachments where room_key=any($1::text[]) and id=any($2::text[]) limit 10',
+            [[row.room_key, ...(row.template.agentInput ? [approvalAttachments.scope(row)] : [])], row.fields.attachmentIds]
           )
         ).rows.map(a => {
           const bound = (row.report.attachments || []).find(
@@ -969,7 +971,7 @@ async function get(pool, req, id, options = {}) {
         })
       : []
   let definitionState = null
-  if (row.template.agentDefinition) {
+  if (row.template.agentDefinition && !['approved', 'rejected', 'withdrawn', 'historical'].includes(row.status)) {
     try {
       const current = await template(pool, req, row.template.source, false)
       const pub = await publication(pool, current, who)
@@ -1327,7 +1329,7 @@ async function list(pool, req, filters = {}) {
   }[scope]
   const rows = (
     await pool.query(
-      `select r.id,r.status,r.revision,r.round,r.current_step,r.steps,r.created_at,r.updated_at,(r.template->>'notificationOnly')='true' notification_only,coalesce(u.name,r.requester_id) requester_name,case when r.template->>'kind'='generic' then r.template->>'title' else '请假申请' end title from leave_requests r left join wecom_users u on u.user_id=r.requester_id and u.corp_id=r.corp_id where r.corp_id=$1 and ${condition} order by r.updated_at desc,r.id limit $3 offset $4`,
+      `select r.id,r.status,r.revision,r.round,r.current_step,coalesce((select jsonb_agg(jsonb_build_object('role',step->>'role')) from jsonb_array_elements(r.steps) as step),'[]'::jsonb) steps,r.created_at,r.updated_at,(r.template->>'notificationOnly')='true' notification_only,coalesce(u.name,r.requester_id) requester_name,case when r.template->>'kind'='generic' then r.template->>'title' else '请假申请' end title from leave_requests r left join wecom_users u on u.user_id=r.requester_id and u.corp_id=r.corp_id where r.corp_id=$1 and ${condition} order by r.updated_at desc,r.id limit $3 offset $4`,
       [who.corp_id, who.user_id, limit, offset]
     )
   ).rows
@@ -1380,15 +1382,55 @@ async function notices(pool, req, mark = false, seenIds = []) {
   ).rows
   return { unread, list }
 }
+async function authorizeAttachmentUpload(db, req, id, fieldKey) {
+  const who = await identity(db, req)
+  const row = await request(db, id, who)
+  approvalAttachments.assertUpload(row, who, req)
+  const f = approvalAttachments.field(row, fieldKey)
+  await acl.assertRoomAccess(db, { ...req, forceAcl: true }, row.source_room, 'view')
+  return { requestId: row.id, storageScope: approvalAttachments.scope(row), fieldKey: f.key }
+}
+async function uploadAttachment(pool, req, id, body) {
+  return transaction(pool, async db => {
+    const who = await identity(db, req)
+    const row = await request(db, id, who, true)
+    approvalAttachments.assertUpload(row, who, req)
+    const replay = await duplicate(db, row, who, 'upload_attachment', body)
+    if (replay.exists) return { ...row, duplicate: true }
+    expectRevision(row, body.expectedRevision)
+    await acl.assertRoomAccess(db, { ...req, forceAcl: true }, row.source_room, 'view')
+    const current = await template(db, req, { roomKey: row.source_room, nodeUid: row.source_uid })
+    const pub = await publication(db, current, who)
+    if (!pub.agent_mode || !pub.valid || String(pub.id) !== String(row.template.agentDefinition?.version))
+      throw fail('DEFINITION_VERSION_CHANGED', '审批模板已变化，请核对当前发布版本后上传', 409)
+    const uploaded = await approvalAttachments.ingest(db, row, who, body)
+    row.fields = cleanFields(uploaded.fields, row.template)
+    const attachments = await approvalAttachments.validate(db, row, row.fields)
+    row.report = {
+      ...row.report,
+      ...workflow.evaluate(row.template, row.fields),
+      attachments,
+      inputHash: agentInputHash(row.template, row.fields, attachments),
+      nodeInputHash: null
+    }
+    row.revision++
+    const saved = await update(db, row)
+    await event(db, saved, who, 'upload_attachment', replay, {
+      attachmentId: uploaded.attachmentId, fieldKey: uploaded.fieldKey, storage: 'approval_request'
+    })
+    return saved
+  })
+}
 async function attachment(pool, req, id, attachmentId) {
   const row = await get(pool, req, id)
   if (!(row.fields.attachmentIds || []).includes(attachmentId))
     throw fail('NOT_FOUND', '附件不属于当前申请', 404)
   const bound = (row.report.attachments || []).find(a => a.id === attachmentId)
+  const attachmentRoom = approvalAttachments.storageScope(row, bound)
   const meta = (
     await pool.query(
       'select content_hash from node_attachments where room_key=$1 and id=$2',
-      [row.room_key, attachmentId]
+      [attachmentRoom, attachmentId]
     )
   ).rows[0]
   if (!meta) throw fail('NOT_FOUND', '附件已不存在', 404)
@@ -1403,7 +1445,7 @@ async function attachment(pool, req, id, attachmentId) {
     )
   const content = await require('../nodeKnowledge/store').getContentById(
     pool,
-    row.room_key,
+    attachmentRoom,
     attachmentId,
     { maxBytes: 20 * 1024 * 1024 }
   )
@@ -1639,6 +1681,8 @@ module.exports = {
   list,
   notices,
   attachment,
+  authorizeAttachmentUpload,
+  uploadAttachment,
   project,
   transaction
 }
