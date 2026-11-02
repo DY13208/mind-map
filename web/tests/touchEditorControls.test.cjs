@@ -70,6 +70,20 @@ const menu = { ...menuOptions.data(), ...menuOptions.methods, $emit: (name, key)
 menu.open = true; menu.select('file'); assert.equal(menu.open, false); assert.deepEqual(selected, [['select', 'file']])
 menu.open = true; menu.close(); assert.equal(menu.open, false)
 assert.equal(menuOptions.computed.items.call(menu).length, 6)
+menu.viewport = () => ({ left: 0, top: 0, width: 390, height: 844 })
+menu.$refs.trigger.getBoundingClientRect = () => ({ left: 334, top: 788 })
+const capture = { setPointerCapture() {}, hasPointerCapture: () => true, releasePointerCapture() {} }
+menu.startDrag({ isPrimary: true, button: 0, pointerId: 1, clientX: 356, clientY: 810, currentTarget: capture })
+menu.moveDrag({ pointerId: 1, clientX: 358, clientY: 812 })
+assert.equal(menu.position, null, 'small tap jitter does not move the menu')
+menu.moveDrag({ pointerId: 1, clientX: -100, clientY: -100 })
+assert.equal(menu.position.x, 12); assert.equal(menu.position.y, 12, 'drag stays inside the viewport')
+menu.endDrag({ pointerId: 1, currentTarget: capture })
+menu.toggle({ detail: 1 }); assert.equal(menu.open, false, 'releasing a drag does not open the menu')
+menu.toggle({ detail: 1 }); assert.equal(menu.open, true, 'next tap opens the moved menu')
+menu.position = { x: 500, y: 900 }; menu.open = false; menu.fitViewport()
+assert.equal(menu.position.x, 334); assert.equal(menu.position.y, 788, 'resize brings menu back into view')
+
 const contextSource = compiler.parseComponent(fs.readFileSync(path.resolve(__dirname, '../src/pages/Edit/components/Contextmenu.vue'), 'utf8')).script.content
 const contextMenuScope = { MenuIcon: {}, mapState: () => ({}), mapMutations: () => ({}) }
 vm.runInNewContext(contextSource.replace(/^import[\s\S]*?from ['"][^'"]+['"];?\s*$/gm, '').replace('export default', 'component ='), contextMenuScope)

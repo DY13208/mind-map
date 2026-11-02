@@ -140,7 +140,7 @@ export default {
 }
 </style>
 <style lang="less">
-body.isDark .profilePage {
+:is(body.isDark, html.shellDark) .profilePage {
   color: #e6e8eb;
   .profileCard {
     background: #1f2329;

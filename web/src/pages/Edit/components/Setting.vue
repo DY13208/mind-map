@@ -5,6 +5,26 @@
       :class="{ isDark: isDark }"
       v-if="configData"
     >
+      <section class="appearanceSetting" aria-labelledby="appearance-label">
+        <h3 id="appearance-label" class="appearanceLabel">主题模式</h3>
+        <div class="appearanceModes" role="radiogroup" aria-label="主题模式">
+          <label v-for="mode in appearanceModes" :key="mode.value" :data-mode="mode.value" class="appearanceOption" :title="mode.label" :class="{ selected: localConfig.appearanceMode === mode.value }">
+            <input type="radio" name="appearance-mode" :value="mode.value" :checked="localConfig.appearanceMode === mode.value" :aria-label="mode.label" @change="changeAppearance(mode.value, $event)" />
+            <svg class="appearanceIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <template v-if="mode.value === 'light'">
+                <circle cx="12" cy="12" r="4" />
+                <path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.4 1.4m11.2 11.2L19 19M5 19l1.4-1.4M17.6 6.4 19 5" />
+              </template>
+              <path v-else-if="mode.value === 'dark'" d="M20.5 14A9 9 0 0 1 10 3.5 9 9 0 1 0 20.5 14Z" />
+              <template v-else>
+                <rect x="3" y="4" width="18" height="13" rx="2" />
+                <path d="M8 21h8m-4-4v4" />
+              </template>
+            </svg>
+            <span>{{ mode.value === 'system' ? '系统' : mode.label }}</span>
+          </label>
+        </div>
+      </section>
       <!-- 水印 -->
       <div class="row">
         <!-- 是否显示水印 -->
@@ -536,6 +556,8 @@
 
 <script>
 import Sidebar from './Sidebar.vue'
+import { revealEditorThemeChange, findThemeClickTarget } from '@/utils/editorThemeReveal'
+import { resolveThemeMode } from '@/utils/shellTheme'
 import { storeConfig, storeData } from '@/api'
 import { mapState, mapMutations } from 'vuex'
 import Color from './Color.vue'
@@ -601,6 +623,11 @@ export default {
           fontSize: 1
         }
       },
+      appearanceModes: [
+        { value: 'light', label: '浅色' },
+        { value: 'dark', label: '深色' },
+        { value: 'system', label: '跟随系统' }
+      ],
       updateWatermarkTimer: null,
       enableNodeRichText: true,
       localConfigs: {
@@ -673,6 +700,22 @@ export default {
   },
   methods: {
     ...mapMutations(['setLocalConfig']),
+
+    changeAppearance(mode, event) {
+      const element = event.currentTarget.closest('.appearanceModes')
+      const systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+      return revealEditorThemeChange({
+        element,
+        mindMap: this.mindMap,
+        animate: (resolveThemeMode(mode, systemDark) === 'dark') !== this.isDark,
+        update: () => this.setLocalConfig({ appearanceMode: mode }),
+        nextTick: () => this.$nextTick(),
+        onRepeat: click => {
+          const target = findThemeClickTarget(element, click, '[data-mode]')
+          if (target) this.changeAppearance(target.dataset.mode, { currentTarget: target })
+        }
+      })
+    },
 
     compactLayoutChange(value) {
       this.updateOtherConfig('compactLayout', value)
@@ -945,6 +988,79 @@ export default {
 
 <style lang="less" scoped>
 .sidebarContent {
+  .appearanceSetting {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin: 2px 0 14px;
+  }
+  .appearanceLabel {
+    flex-shrink: 0;
+    margin: 0;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 20px;
+    color: #364152;
+  }
+  .appearanceModes {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    flex: 0 0 174px;
+    gap: 2px;
+    padding: 3px;
+    box-sizing: border-box;
+    border: 0;
+    border-radius: 999px;
+    background: #f0f2f5;
+  }
+  .appearanceOption {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    min-width: 0;
+    min-height: 26px;
+    padding: 0 4px;
+    margin: 0;
+    box-sizing: border-box;
+    border: 0;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+    color: #7a8491;
+    cursor: pointer;
+    transition: background .15s ease, color .15s ease, border-color .15s ease;
+    &:hover { color: #364152; background: #e7ebf0; }
+    &.selected {
+      color: #2774c8;
+      background: #fff;
+      box-shadow: 0 1px 4px rgba(20, 40, 65, .10);
+      font-weight: 600;
+    }
+    &:has(input:focus-visible) { outline: 2px solid #409eff; outline-offset: 2px; }
+    input {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+    }
+  }
+  .appearanceIcon { width: 13px; height: 13px; flex-shrink: 0; }
+  &.isDark {
+    .appearanceLabel { color: #e1e7ef; }
+    .appearanceModes { background: #1c2229; }
+    .appearanceOption {
+      color: #a6b3c2;
+      &:hover { color: #e3ebf5; background: #303945; }
+      &.selected { color: #9acaff; background: #354355; box-shadow: 0 1px 4px #00000020; }
+    }
+  }
   padding: 20px;
   padding-top: 10px;
 

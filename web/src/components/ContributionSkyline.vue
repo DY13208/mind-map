@@ -337,7 +337,7 @@ export default {
     detectDark() {
       const b = document.body.classList
       const h = document.documentElement.classList
-      return b.contains('isDark') || h.contains('dark') || h.contains('isDark') || document.documentElement.getAttribute('data-theme') === 'dark'
+      return b.contains('isDark') || h.contains('shellDark') || h.contains('dark') || h.contains('isDark') || document.documentElement.getAttribute('data-theme') === 'dark'
     },
     targetColors() {
       const theme = this.dark ? THEMES.dark : THEMES.light

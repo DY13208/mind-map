@@ -77,6 +77,8 @@ output/*.py
 /tests/performance/*.log
 !/simple-mind-map/test/
 /simple-mind-map/test/*
+!/simple-mind-map/test/collabTitleWatch.test.cjs
+!/simple-mind-map/test/shortNodeLinks.pg.test.cjs
 !/simple-mind-map/test/performanceBackendHarness.js
 !/simple-mind-map/test/backendPerformanceSample.js
 !/simple-mind-map/test/backendCountSample.js
@@ -96,6 +98,10 @@ output/*.py
 !/simple-mind-map/test/historyTreeCounts.pg.test.js
 !/web/tests/
 /web/tests/*
+!/web/tests/mapTitleSync.test.cjs
+!/web/tests/shortNodeLink.test.cjs
+!/web/tests/appearanceMode.test.cjs
+!/web/tests/themeReveal.test.cjs
 !/web/tests/helpers/
 !/web/tests/helpers/**
 !/web/tests/cardPreviewQueue.test.cjs

@@ -1,7 +1,7 @@
 import themeList from 'simple-mind-map-plugin-themes/themeList'
 
 export const DEFAULT_LIGHT_THEME = 'default'
-export const DEFAULT_DARK_THEME = 'classic'
+export const DEFAULT_DARK_THEME = 'lateNightOffice'
 
 const BUILTIN_THEMES = [
   {
@@ -48,20 +48,11 @@ export function resolveAppearanceTheme({
     heldDarkTheme && isDarkThemeValue(heldDarkTheme, extendThemeGroupList)
 
   if (nextDark) {
-    if (currentIsDark) {
-      return {
-        theme: currentTheme,
-        heldLightTheme: heldLightOk ? heldLightTheme : null,
-        heldDarkTheme: currentTheme,
-        changed: false
-      }
-    }
-    const theme = heldDarkOk ? heldDarkTheme : DEFAULT_DARK_THEME
     return {
-      theme,
-      heldLightTheme: currentTheme,
-      heldDarkTheme: theme,
-      changed: true
+      theme: DEFAULT_DARK_THEME,
+      heldLightTheme: currentIsDark ? (heldLightOk ? heldLightTheme : null) : currentTheme,
+      heldDarkTheme: DEFAULT_DARK_THEME,
+      changed: currentTheme !== DEFAULT_DARK_THEME
     }
   }
 

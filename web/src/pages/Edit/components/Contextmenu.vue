@@ -365,6 +365,10 @@
           <MenuIcon name="network" />
           <span class="name">{{ $t('contextmenu.mapRef') }}</span>
         </div>
+        <div class="item" data-testid="share-node-full" @click="shareNode(true)">
+          <MenuIcon name="share" />
+          <span class="name">复制节点全文与链接</span>
+        </div>
         <div
           class="item"
           @click="openMapRefInSource"
@@ -487,8 +491,8 @@ import { transformToMarkdown } from 'simple-mind-map/src/parse/toMarkdown'
 import { transformToTxt } from 'simple-mind-map/src/parse/toTxt'
 import { setDataToClipboard, setImgToClipboard, copy } from '@/utils'
 import { numberTypeList, numberLevelList } from '@/config'
-import { buildInviteUrl, roomFromLocation } from '@/utils/roomLocation'
-import { getRuntimeConfig } from '@/utils/runtimeConfig'
+import { roomFromLocation } from '@/utils/roomLocation'
+import { createShortNodeLink, formatNodeLinkText, copyNodeLinkText } from '@/utils/shortNodeLink'
 import {
   getSafeArea,
   getViewport,
@@ -888,7 +892,7 @@ export default {
       }
     },
 
-    async shareNode() {
+    async shareNode(fullText = false) {
       const node = this.node
       const uid = node && node.getData && node.getData('uid')
       const room = roomFromLocation(this.$route)
@@ -897,28 +901,18 @@ export default {
         this.$message.warning('请先打开已保存的脑图')
         return
       }
-      const link = `${buildInviteUrl(room, getRuntimeConfig().appUrl)}&focus=${encodeURIComponent(uid)}`
+      // Capture the clicked node before the asynchronous link request or a
+      // subsequent selection change. The pasted text is a copy-time snapshot.
+      const raw = String(node.getData('text') || '')
+      const text = node.getData('richText')
+        ? getTextFromHtml(raw.replace(/<br\s*\/?\s*>/gi, '\n').replace(/<\/(p|div|li|h[1-6])>/gi, '$&\n'))
+        : raw
       try {
-        try {
-          if (!navigator.clipboard || !navigator.clipboard.writeText) throw new Error('clipboard unavailable')
-          await navigator.clipboard.writeText(link)
-        } catch (err) {
-          // HTTP deployments and denied clipboard permissions use the legacy API.
-          const input = document.createElement('textarea')
-          input.value = link
-          input.style.position = 'fixed'
-          input.style.opacity = '0'
-          document.body.appendChild(input)
-          try {
-            input.select()
-            if (!document.execCommand('copy')) throw new Error('copy failed')
-          } finally {
-            document.body.removeChild(input)
-          }
-        }
-        this.$message.success('节点链接已复制，仅有文件访问权限的人可打开。')
+        const link = await createShortNodeLink(room, uid)
+        await copyNodeLinkText(formatNodeLinkText(text, link, fullText === true))
+        this.$message.success('节点文本和短链接已复制，仅有文件访问权限的人可打开。')
       } catch (err) {
-        this.$message.error('复制失败，请重试')
+        this.$message.error(err.message || '复制失败，请重试')
       }
     },
 

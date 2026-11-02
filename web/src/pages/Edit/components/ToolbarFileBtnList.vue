@@ -7,6 +7,8 @@
       :content="item.title || item.label"
       placement="bottom"
       effect="dark"
+      popper-class="wcpdActionTooltip"
+      :visible-arrow="false"
       :open-delay="280"
       append-to-body
     >
