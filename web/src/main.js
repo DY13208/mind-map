@@ -15,7 +15,8 @@ import { installMobileViewport } from '@/utils/visualViewport'
 import 'viewerjs/dist/viewer.css'
 import VueViewer from 'v-viewer'
 import i18n from './i18n'
-import { getLang } from '@/api'
+import { getLang, getLocalConfig } from '@/api'
+import { shellTheme } from '@/utils/shellTheme'
 // import VConsole from 'vconsole'
 // const vConsole = new VConsole()
 
@@ -37,6 +38,12 @@ Vue.use(ElementUI)
 Vue.use(VueViewer)
 
 const initApp = () => {
+  store.commit('setLocalConfig', { ...(getLocalConfig() || {}), appearanceMode: shellTheme.mode, isDark: shellTheme.theme === 'dark' })
+  const appearanceWatcher = new Vue()
+  appearanceWatcher.$watch(() => shellTheme.mode + ':' + shellTheme.theme, () => {
+    store.commit('setLocalConfig', { appearanceMode: shellTheme.mode, isDark: shellTheme.theme === 'dark' })
+  })
+  if (module.hot) module.hot.dispose(() => appearanceWatcher.$destroy())
   i18n.locale = getLang()
   new Vue({
     render: h => h(App),

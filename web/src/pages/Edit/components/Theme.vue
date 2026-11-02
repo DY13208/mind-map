@@ -14,7 +14,8 @@
           class="themeItem"
           v-for="item in currentList"
           :key="item.value"
-          @click="useTheme(item)"
+          @click="useTheme(item, $event)"
+          :data-theme="item.value"
           :class="{ active: item.value === theme }"
         >
           <div class="imgBox">
@@ -29,6 +30,7 @@
 
 <script>
 import Sidebar from './Sidebar.vue'
+import { revealEditorThemeChange, findThemeClickTarget } from '@/utils/editorThemeReveal'
 import { storeData } from '@/api'
 import { mapState, mapMutations } from 'vuex'
 import themeImgMap from 'simple-mind-map-plugin-themes/themeImgMap'
@@ -153,10 +155,9 @@ export default {
       this.activeName = this.defaultGroupList[0].name
     },
 
-    useTheme(theme) {
-      if (theme.value === this.theme) return
-      this.theme = theme.value
-      this.syncDarkModeFromTheme(theme)
+    useTheme(theme, event) {
+      const element = event ? event.currentTarget.closest('.themeListTheme') : this.$el
+      const apply = config => this.changeTheme(theme, config, element)
       const customThemeConfig = this.mindMap.getCustomThemeConfig()
       const hasCustomThemeConfig = Object.keys(customThemeConfig).length > 0
       if (hasCustomThemeConfig) {
@@ -167,25 +168,35 @@ export default {
           distinguishCancelAndClose: true,
           callback: action => {
             if (action === 'confirm') {
-              this.mindMap.setThemeConfig({}, true)
-              this.data.theme.config = {}
-              this.changeTheme(theme, {})
+              apply({})
             } else if (action === 'cancel') {
-              this.changeTheme(theme, customThemeConfig)
+              apply(customThemeConfig)
             }
           }
         })
       } else {
-        this.changeTheme(theme, customThemeConfig)
+        apply(customThemeConfig)
       }
     },
 
-    changeTheme(theme, config) {
-      this.mindMap.setTheme(theme.value)
-      storeData({
-        theme: {
-          template: theme.value,
-          config
+    changeTheme(theme, config, element) {
+      return revealEditorThemeChange({
+        element,
+        mindMap: this.mindMap,
+        animate: theme.value !== this.theme,
+        update: () => {
+          this.theme = theme.value
+          this.mindMap.setThemeConfig(config, true)
+          this.mindMap.setTheme(theme.value)
+          this.syncDarkModeFromTheme(theme)
+          if (this.data && this.data.theme) this.data.theme.config = config
+          storeData({ theme: { template: theme.value, config } })
+        },
+        nextTick: () => this.$nextTick(),
+        onRepeat: click => {
+          const target = findThemeClickTarget(element, click, '[data-theme]')
+          const next = target && this.currentList.find(item => item.value === target.dataset.theme)
+          if (next) this.useTheme(next, { currentTarget: target })
         }
       })
     },
@@ -225,6 +236,7 @@ export default {
     /deep/ .el-tabs__nav-wrap {
       display: flex;
       justify-content: center;
+      &::after { display: none; }
     }
   }
 

@@ -230,18 +230,6 @@ export default {
 }
 </style>
 <style lang="less">
-.el-tooltip__popper.wcpdActionTooltip {
-  padding: 7px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
-  background: #29352f;
-  color: #f5f8f6;
-  box-shadow: 0 4px 14px rgba(17, 30, 23, 0.14);
-  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  font-size: 12px;
-  font-weight: 400;
-  line-height: 18px;
-}
 body.isDark .notificationBadge .notificationButton {
   color: #b4bac0;
 }

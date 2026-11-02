@@ -80,11 +80,15 @@ export default {
     }
   },
   async created() {
+    this.$bus.$on('room_title_updated', this.onRoomTitleUpdated)
     // activeSidebar 是全局运行态。离开编辑器再返回时必须从关闭状态开始，
     // 否则触发条会预留侧栏宽度，而新创建的侧栏组件仍处于关闭状态。
     this.setActiveSidebar('')
     this.initLocalConfig()
+    // Apply appearance before creating the fullscreen mask, not after the room loads.
+    this.setBodyDark()
     const loading = this.$loading({
+      customClass: 'editorLoadingMask',
       lock: true,
       text: this.$t('other.loading')
     })
@@ -113,6 +117,7 @@ export default {
     this.setBodyDark()
   },
   beforeDestroy() {
+    this.$bus.$off('room_title_updated', this.onRoomTitleUpdated)
     this.setHistoryInteractionPaused(false)
     if (typeof this._finishRoomCanvasWait === 'function') {
       this._finishRoomCanvasWait()
@@ -122,6 +127,10 @@ export default {
     this.setActiveSidebar('')
   },
   methods: {
+    onRoomTitleUpdated(update) {
+      if (!update || update.roomKey !== this.roomKey || !update.title || !this.historyRoom) return
+      this.historyRoom = { ...this.historyRoom, title: update.title, name: update.title }
+    },
     setHistoryInteractionPaused(value) {
       const editor = this.$refs.editor
       const map = editor && editor.mindMap

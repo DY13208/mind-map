@@ -263,3 +263,64 @@ html.shellDark {
     transition-duration: 0.01ms !important;
   }
 }
+
+// Unified hover hints, including poppers mounted outside the product shell.
+.el-tooltip__popper.is-dark,
+.el-tooltip__popper.wcpdActionTooltip {
+  max-width: 260px;
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 255, 255, .08);
+  border-radius: 8px;
+  background: #293b33;
+  color: #f4f8f5;
+  box-shadow: 0 4px 12px rgba(20, 35, 28, .12), 0 1px 3px rgba(20, 35, 28, .08);
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 18px;
+  letter-spacing: .1px;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  .popper__arrow { border-top-color: #293b33; border-bottom-color: #293b33; }
+  .popper__arrow::after { border-top-color: #293b33; border-bottom-color: #293b33; }
+}
+.shellDark .el-tooltip__popper.is-dark,
+body.isDark .el-tooltip__popper.is-dark {
+  background: #354352;
+  border-color: rgba(182, 204, 225, .16);
+  color: #f0f5fa;
+  box-shadow: 0 5px 16px rgba(0, 0, 0, .22);
+  .popper__arrow { border-top-color: #354352; border-bottom-color: #354352; }
+  .popper__arrow::after { border-top-color: #354352; border-bottom-color: #354352; }
+}
+
+// Theme changes reveal the next palette from the toolbar button.
+html::view-transition,
+html::view-transition-group(*),
+html::view-transition-image-pair(*),
+html::view-transition-old(*),
+html::view-transition-new(*) { pointer-events: none !important; }
+html.themeModeReveal::view-transition-old(root),
+html.themeModeReveal::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+html.themeModeReveal::view-transition-group(root) { animation: none; }
+html.themeModeReveal::view-transition-old(root) { z-index: 1; }
+html.themeModeReveal::view-transition-new(root) { z-index: 2; }
+html.themeModeReveal .el-tooltip__popper { visibility: hidden !important; }
+html.themeModeReveal .productShell,
+html.themeModeReveal .productShell *,
+html.themeModeReveal .container,
+html.themeModeReveal .container * { transition: none !important; }
+
+// The editor's fullscreen loading service is mounted under body.
+.el-loading-mask.editorLoadingMask {
+  background-color: rgba(255, 255, 255, .94);
+}
+:is(body.isDark, html.shellDark) .el-loading-mask.editorLoadingMask {
+  background-color: #202531;
+  .el-loading-text { color: #9acaff; }
+  .el-loading-spinner .path { stroke: #9acaff; }
+  .el-loading-spinner i { color: #9acaff; }
+}

@@ -119,6 +119,12 @@ function attachCollabV2(httpServer, options = {}) {
     for (const socket of sockets.values()) {
       const cache = socket.data && socket.data.editAccess
       if (cache && cache.has(roomKey)) cache.delete(roomKey)
+      if (socket.data && socket.data.watchedRooms && socket.data.watchedRooms.has(roomKey)) {
+        const req = Object.assign(socket.request, { authUser: socket.authUser, forceAcl: !!socket.testAcl })
+        Promise.resolve(roomAcl.assertRoomAccess(getPool(), req, roomKey, 'view')).catch(() => {
+          socket.disconnect(true)
+        })
+      }
     }
   }
   roomAcl.aclChangeEvents.on('changed', onAclChanged)
@@ -199,6 +205,7 @@ function attachCollabV2(httpServer, options = {}) {
   io.on('connection', socket => {
     socket.data.rooms = new Set()
     socket.data.bridgeRooms = new Set()
+    socket.data.watchedRooms = new Set()
     socket.data.clientId = String(
       (socket.handshake &&
         socket.handshake.auth &&
@@ -243,6 +250,42 @@ function attachCollabV2(httpServer, options = {}) {
       }
       return hit.access
     }
+
+    // Read-only observers receive committed changes without appearing as editors
+    // or writing presence. Used by embedded-map titles in other rooms.
+    socket.on('map:watch', async (body, cb) => {
+      const reply = typeof cb === 'function' ? cb : () => {}
+      try {
+        const roomKey = safeRoomKey(body && body.roomKey)
+        if (!roomKey || isDeletedRoom(roomKey)) throw Object.assign(new Error('not found'), { statusCode: 404 })
+        if (socket.data.watchedRooms.size >= 100 && !socket.data.watchedRooms.has(roomKey)) {
+          throw Object.assign(new Error('Too many watched maps'), { statusCode: 429 })
+        }
+        const req = Object.assign(socket.request, { authUser: socket.authUser, forceAcl: !!socket.testAcl })
+        const access = await roomAcl.assertRoomAccess(getPool(), req, roomKey, 'view')
+        if (!socket.connected) return
+        await socket.join('v2:' + roomKey)
+        socket.data.watchedRooms.add(roomKey)
+        if (access.shareId) socket.data.shareRooms.add(roomKey)
+        const version = await getRoomVersion(roomKey)
+        if (operationEventBridge) {
+          operationEventBridge.activateRoom(roomKey, Number(version) || 0)
+          socket.data.bridgeRooms.add(roomKey)
+        }
+        reply({ ok: true, roomKey })
+      } catch (err) {
+        reply({ ok: false, code: err.code || 'FORBIDDEN', statusCode: err.statusCode || 403 })
+      }
+    })
+    socket.on('map:unwatch', body => {
+      const roomKey = safeRoomKey(body && body.roomKey)
+      socket.data.watchedRooms.delete(roomKey)
+      if (!socket.data.rooms.has(roomKey)) {
+        socket.leave('v2:' + roomKey)
+        socket.data.bridgeRooms.delete(roomKey)
+        socket.data.shareRooms.delete(roomKey)
+      }
+    })
 
     socket.on('join', async (body, cb) => {
       const reply = typeof cb === 'function' ? cb : () => {}

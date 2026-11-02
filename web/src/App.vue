@@ -1101,3 +1101,14 @@ body,
   border-radius: 10px;
 }
 </style>
+
+<style lang="less">
+html[data-app-appearance='dark'] .authScreen--loading {
+  color-scheme: dark;
+  background: #202531;
+  .authSpinner {
+    border-color: rgba(154, 202, 255, .18);
+    border-top-color: #9acaff;
+  }
+}
+</style>

@@ -1,16 +1,16 @@
 <template>
   <div class="fileToolbar">
-    <el-tooltip v-if="shellMode === 'focus'" content="显示侧边栏" placement="bottom" popper-class="wcpdActionTooltip" :open-delay="250" :visible-arrow="false" :offset="10">
+    <ActionTooltip v-if="shellMode === 'focus'" content="显示侧边栏">
       <button type="button" class="iconGhost sidebarRestore" aria-label="显示左侧侧边栏" aria-haspopup="dialog" data-testid="shell-open-navigation" @click="showProductSidebar">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <rect x="3" y="4" width="18" height="16" rx="2" />
           <path d="M9 4v16" />
         </svg>
       </button>
-    </el-tooltip>
+    </ActionTooltip>
     <div class="toolbarTitle"><slot name="title">脑图</slot></div>
     <div class="toolbarActions">
-    <el-tooltip v-if="shellMode !== 'embed'" :content="shellMode === 'focus' ? '退出专注模式' : '专注模式'" placement="bottom" popper-class="wcpdActionTooltip" :open-delay="250" :visible-arrow="false" :offset="10">
+    <ActionTooltip v-if="shellMode !== 'embed'" :content="shellMode === 'focus' ? '退出专注模式' : '专注模式'">
       <button
         type="button"
         class="iconGhost"
@@ -21,74 +21,40 @@
       >
         <i class="el-icon-full-screen" aria-hidden="true" />
       </button>
-    </el-tooltip>
+    </ActionTooltip>
     <FileSearch
       class="toolbarSearch"
       :value="search"
       @input="$emit('update:search', $event)"
     />
+    <ActionTooltip v-if="showFavorites" :content="favoritesActive ? '查看全部' : '只看收藏'">
     <button
-      v-if="showFavorites"
       type="button"
       class="iconGhost"
       :class="{ active: favoritesActive }"
-      :title="favoritesActive ? '查看全部' : '只看收藏'"
       :aria-label="favoritesActive ? '查看全部' : '只看收藏'"
       :aria-pressed="favoritesActive ? 'true' : 'false'"
       @click="$emit('toggle-favorites')"
     >
       <i :class="favoritesActive ? 'el-icon-star-on' : 'el-icon-star-off'" aria-hidden="true" />
     </button>
-    <button
-      type="button"
-      class="iconGhost themeToggle"
-      :title="isDark ? '切换到浅色模式' : '切换到深色模式'"
-      :aria-label="isDark ? '切换到浅色模式' : '切换到深色模式'"
-      @click="toggleTheme"
-    >
-      <svg
-        v-if="isDark"
-        viewBox="0 0 24 24"
-        width="18"
-        height="18"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linecap="round"
-        aria-hidden="true"
-      >
-        <circle cx="12" cy="12" r="4" />
-        <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
-      </svg>
-      <svg
-        v-else
-        viewBox="0 0 24 24"
-        width="18"
-        height="18"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        aria-hidden="true"
-      >
-        <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
-      </svg>
-    </button>
+    </ActionTooltip>
+    <ThemeModeToggle />
 
     <el-dropdown
       v-if="showCreate || showCreateFolder"
       trigger="click"
       @command="create"
     >
+      <ActionTooltip content="新建">
       <button
         type="button"
         class="iconGhost createBtn"
-        title="新建"
         aria-label="新建"
       >
         <i class="el-icon-plus" aria-hidden="true" />
       </button>
+      </ActionTooltip>
       <el-dropdown-menu slot="dropdown">
         <el-dropdown-item
           v-if="showCreate"
@@ -114,13 +80,14 @@
   </div>
 </template>
 <script>
+import ActionTooltip from '@/components/ActionTooltip.vue'
 import FileSearch from './FileSearch.vue'
-import { shellTheme, toggleShellTheme } from '@/utils/shellTheme'
+import ThemeModeToggle from './ThemeModeToggle.vue'
 import { resolveShellMode } from '@/utils/shellMode'
 export default {
   name: 'FileToolbar',
   inject: { showProductSidebar: { default: () => {} } },
-  components: { FileSearch },
+  components: { FileSearch, ThemeModeToggle, ActionTooltip },
   props: {
     search: String,
     showFavorites: { type: Boolean, default: false },
@@ -132,9 +99,6 @@ export default {
   computed: {
     shellMode() {
       return resolveShellMode(this.$route)
-    },
-    isDark() {
-      return shellTheme.theme === 'dark'
     }
   },
   methods: {
@@ -144,9 +108,6 @@ export default {
         query: { ...this.$route.query, shell: this.shellMode === 'focus' ? 'full' : 'focus' },
         hash: this.$route.hash
       })
-    },
-    toggleTheme() {
-      toggleShellTheme()
     },
     create(command) {
       if (command === 'folder') this.$emit('create-folder')

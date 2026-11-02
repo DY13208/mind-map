@@ -343,6 +343,8 @@ export default {
       // light/dark use different frame widths (--mm-frame-width), so re-measure the canvas
       this.$nextTick(() => this.resizeMindMapSafely())
       if (this.appearanceTransitioning) return
+      // A chosen theme preset already supplies its own light/dark palette.
+      if (this.isCurrentThemeDark() !== !!this.isDark) this.ensureAppearanceThemeAligned()
       this.syncCanvasDarkBackground()
     },
     openNodeRichText() {
@@ -857,6 +859,7 @@ export default {
         }
 
         if (resolved.changed) {
+          this.mindMap.setThemeConfig({}, true)
           this.mindMap.setTheme(resolved.theme, true)
           if (typeof this.mindMap.initTheme === 'function') {
             this.mindMap.initTheme()
@@ -980,6 +983,7 @@ export default {
       if (this.mindMap.getTheme() === template) return
       this.adaptingAppearanceTheme = true
       try {
+        this.mindMap.setThemeConfig({}, true)
         this.mindMap.setTheme(template)
         const config = this.mindMap.getCustomThemeConfig
           ? this.mindMap.getCustomThemeConfig()

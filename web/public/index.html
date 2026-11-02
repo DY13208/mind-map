@@ -3,6 +3,24 @@
   <head>
     <meta charset="utf-8" />
     <script>
+      // Resolve appearance before external styles, fonts or application chunks load.
+      ;(function () {
+        var mode = 'system'
+        try {
+          var saved = localStorage.getItem('product-shell-theme')
+          if (saved === 'light' || saved === 'dark' || saved === 'system') mode = saved
+        } catch (_) {}
+        var dark = mode === 'dark' || (mode === 'system' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)
+        document.documentElement.setAttribute('data-app-appearance', dark ? 'dark' : 'light')
+      })()
+    </script>
+    <style>
+      html { background: #f7f9f8; }
+      html[data-app-appearance="dark"],
+      html[data-app-appearance="dark"] body,
+      html[data-app-appearance="dark"] #app { background-color: #202531; color-scheme: dark; }
+    </style>
+    <script>
       if (window.location.pathname.startsWith('/node-share/')) {
         const referrerPolicy = document.createElement('meta')
         referrerPolicy.name = 'referrer'
@@ -26,7 +44,7 @@
       window.externalPublicPath =
         (window.__MIND_MAP_RUNTIME__ &&
           window.__MIND_MAP_RUNTIME__.publicPath) ||
-        './dist/'
+        '<%= BASE_URL %>'
       // 接管应用
       window.takeOverApp = false
     </script>

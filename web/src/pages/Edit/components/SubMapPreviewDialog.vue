@@ -103,12 +103,19 @@ export default {
   },
   created() {
     this.$bus.$on('showSubMapPreview', this.open)
+    this.$bus.$on('room_title_updated', this.onRoomTitleUpdated)
   },
   beforeDestroy() {
     this.$bus.$off('showSubMapPreview', this.open)
+    this.$bus.$off('room_title_updated', this.onRoomTitleUpdated)
     this.teardownPreview()
   },
   methods: {
+    onRoomTitleUpdated(update) {
+      if (this.dialogVisible && this.normalizedRef && update && update.roomKey === this.normalizedRef.mapId) {
+        this.mapTitle = update.title
+      }
+    },
     async open(ref, meta = {}) {
       const normalized = normalizeMapRef(ref)
       if (!normalized) {
@@ -130,6 +137,7 @@ export default {
           this.loading = false
           return
         }
+        this.mapTitle = info.title || this.mapTitle
         if (!this.mapTitle) {
           try {
             const metaRes = await getFileMeta(normalized.mapId)
