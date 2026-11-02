@@ -1,6 +1,11 @@
 const {createHash} = require('crypto')
 const organization = require('./hrmsOrganization')
 const workers = new WeakMap()
+// 脑图模板标题 → 人事系统入口。未列出的模板不同步。
+const SYNC_TARGETS = {
+  '转正申请表': 'approval_import.import_approved',
+  '录用': 'approval_import.import_hired'
+}
 function config(env = process.env) {
   const cfg = organization.config({HRMS_ORG_API_BASE:env.HRMS_SYNC_API_BASE,HRMS_ORG_API_KEY:env.HRMS_SYNC_API_KEY,HRMS_ORG_API_SECRET:env.HRMS_SYNC_API_SECRET,HRMS_ORG_COMPANY:env.HRMS_SYNC_COMPANY,HRMS_ORG_CORP_ID:env.HRMS_SYNC_CORP_ID})
   return {...cfg,enabled:env.HRMS_SYNC_ENABLED === '1'}
@@ -16,7 +21,7 @@ async function initSchema(db) {
 }
 async function enqueue(db,row) {
   const cfg=config()
-  if (!cfg.enabled || row.status !== 'approved' || row.template.title !== '转正申请表' || row.corp_id !== cfg.corpId) return
+  if (!cfg.enabled || row.status !== 'approved' || !SYNC_TARGETS[row.template.title] || row.corp_id !== cfg.corpId) return
   const person=(await db.query('select wecom_userid,name from wecom_users where corp_id=$1 and user_id=$2',[row.corp_id,row.requester_id])).rows[0]
   const audit=(await db.query('select actor_id,action,detail,created_at from leave_events where request_id=$1 and detail->>\'round\'=$2 order by id',[row.id,String(row.round)])).rows
   const fields=Object.fromEntries(row.template.fields.map(f=>[f.label,row.fields[f.key] || '']))
@@ -31,14 +36,19 @@ async function state(db,id,round) {
 async function send(payload,options={}) {
   const cfg=config(options.env)
   if (!cfg.enabled || !cfg.ready || cfg.company !== payload.company || cfg.corpId !== payload.corpId) throw new Error('人事同步连接未配置或企业不匹配')
-  const response=await (options.fetchImpl || fetch)(new URL('/api/method/employee_roster.integrations.approval_import.import_approved',cfg.base),{
-    method:'POST',redirect:'error',signal:AbortSignal.timeout(60000),headers:{'Content-Type':'application/json',Authorization:`token ${cfg.apiKey}:${cfg.apiSecret}`},body:JSON.stringify({payload})
+  const target = SYNC_TARGETS[payload.title]
+  if (!target) throw new Error(`模板「${payload.title}」没有人事系统对接的同步接口`)
+  const response=await (options.fetchImpl || fetch)(new URL(`/api/method/employee_roster.integrations.${target}`,cfg.base),{
+    method:'POST',redirect:'error',signal:AbortSignal.timeout(payload.title === '录用' ? 120000 : 60000),headers:{'Content-Type':'application/json',Authorization:`token ${cfg.apiKey}:${cfg.apiSecret}`},body:JSON.stringify({payload})
   })
   if(!response.ok) throw new Error(`人事系统同步失败（HTTP ${response.status}）`)
   const result=(await response.json()).message
   if(!result || result.sourceKey!==`${payload.requestId}:${payload.round}` || !result.name || result.status !== '已通过') throw new Error('人事系统未确认单据同步成功')
-  return {name:result.name,applicationNo:result.applicationNo,status:result.status}
-}
+  // 录用会多返建档与开户结果，转正没有这些键。
+  const extra = {}
+  for (const key of ['employee','employeeCreated','loginAccount','profileComplete','problems'])
+    if (result[key] !== undefined) extra[key] = result[key]
+  return {...extra,name:result.name,applicationNo:result.applicationNo,status:result.status}}
 async function run(pool,options={}) {
   if(!config(options.env).enabled) return
   const db=await pool.connect()
