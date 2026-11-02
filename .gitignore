@@ -130,6 +130,10 @@ output/*.py
 
 # Wiki 数据备份
 /tmp/wiki-backup/
+# 远端部署包（只在本机留存，用于拷贝到服务器，不入库）
+/docker/deploy-mcp-upload/
+/docker/deploy-mcp-upload.zip
+
 
 # Read-only cross-map automatic D discovery regression.
 !/simple-mind-map/test/automaticDNodes.pg.test.cjs

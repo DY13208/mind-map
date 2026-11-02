@@ -16,6 +16,13 @@ import {
   resolveAttachmentUploadInput,
   uploadAttachmentAndMountNode
 } from './mcpAttachmentUpload.mjs'
+import {
+  createUploadTicket,
+  getUploadTicket,
+  saveTicketBytes,
+  discardUploadTicket,
+  MAX_UPLOAD_BYTES as MAX_TICKET_UPLOAD_BYTES
+} from './mcpUploadTickets.mjs'
 import { deleteNodeAttachment } from './mcpAttachmentDelete.mjs'
 import mcpSubmitGateModule from './mcpSubmitGate.js'
 import mcpHyperlink from './mcpHyperlink.js'
@@ -1148,8 +1155,41 @@ function createServer(authorization) {
   )
 
   server.tool(
+    'create_upload_ticket',
+    '给「agent 侧本地文件」签发一次性直传票据。当文件在 MCP 进程所在容器里读不到时（远端部署、WorkBuddy 本机产物），走这条路：① 本工具返回 upload_id 与 upload_url；② 用 curl -s -X POST --data-binary @<本地文件绝对路径> "<upload_url>" 把原始字节直传（不要 base64）；③ 调 upload_attachment 并传入 upload_id 完成挂载。票据一次性使用、默认 15 分钟过期，且绑定 room_key 与节点，不能跨房间或跨节点使用。字节流不经由模型生成，因此不会像 content_base64 那样在大文件上出错。',
+    {
+      room_key: z.string().describe('房间号'),
+      node: z
+        .string()
+        .describe('要挂载的节点 uid，或完整标题/路径（与 update_node 相同）')
+        .optional(),
+      file_name: z.string().describe('文件名（含扩展名）').optional(),
+      mime_type: z.string().describe('可选 MIME，缺省按扩展名推断').optional(),
+      ttl_sec: z
+        .number()
+        .describe('票据有效期秒数，60-3600，默认 900')
+        .optional()
+    },
+    async ({ room_key, node, file_name, mime_type, ttl_sec }) => {
+      try {
+        return ok(
+          createUploadTicket({
+            roomKey: room_key,
+            nodeRef: node,
+            fileName: file_name,
+            mimeType: mime_type,
+            ttlSec: ttl_sec
+          })
+        )
+      } catch (err) {
+        return attachmentUploadFail(err)
+      }
+    }
+  )
+
+  server.tool(
     'upload_attachment',
-    '与网页工具栏「附件」相同：上传文件并挂到节点，节点出现可点击回形针，人类可直接预览/下载。若节点已有附件，本次上传会替换节点当前指向：相同内容复用附件 id，不同内容生成新 id；旧文件保留在房间文件库和历史中。产物必须用本工具，禁止把路径或「请拖到节点」写进 note/text。提供 file_path（WorkBuddy 目录或仓库 output）、content_base64 或 source_url 之一。支持 txt/md/csv/pdf/docx/xlsx/html 与常见图片。只有确认节点字段已持久化后才报告成功，并返回 attachment.id 与 content_url；附件已保存但挂载失败时返回 attachment_id 供诊断，不会重复上传或删除文件。',
+    '与网页工具栏「附件」相同：上传文件并挂到节点，节点出现可点击回形针，人类可直接预览/下载。若节点已有附件，本次上传会替换节点当前指向：相同内容复用附件 id，不同内容生成新 id；旧文件保留在房间文件库和历史中。产物必须用本工具，禁止把路径或「请拖到节点」写进 note/text。提供 file_path（MCP 进程可读路径）、content_base64、source_url 或 upload_id 之一。支持 txt/md/csv/pdf/docx/xlsx/html 与常见图片。只有确认节点字段已持久化后才报告成功，并返回 attachment.id 与 content_url；附件已保存但挂载失败时返回 attachment_id 供诊断，不会重复上传或删除文件。',
     {
       room_key: z.string().describe('房间号'),
       node: z
@@ -1172,7 +1212,15 @@ function createServer(authorization) {
         .optional(),
       source_url: z
         .string()
-        .describe('可下载的 http(s) URL；与 file_path、content_base64 三选一')
+        .describe(
+          '可下载的 http(s) URL；与 file_path、content_base64、upload_id 四选一'
+        )
+        .optional(),
+      upload_id: z
+        .string()
+        .describe(
+          'create_upload_ticket 签发且已直传完字节的票据 id；与 file_path、content_base64、source_url 四选一。MCP 部署在远端、文件在 agent 本机时走这条'
+        )
         .optional(),
       confirm_sop_change: z
         .boolean()
@@ -1187,29 +1235,35 @@ function createServer(authorization) {
       file_path,
       content_base64,
       source_url,
+      upload_id,
       confirm_sop_change
     }) => {
       try {
         const resolved = await resolveAttachmentUploadInput({
+          room_key,
           node,
           file_name,
           mime_type,
           file_path,
           content_base64,
-          source_url
+          source_url,
+          upload_id
         })
-        return ok(
-          await uploadAttachmentAndMountNode({
-            api,
-            roomKey: room_key,
-            nodeRef: resolved.nodeUid || node,
-            uploadInput: resolved,
-            confirmSopChange: confirm_sop_change === true,
-            operationId: randomUUID()
-          })
-        )
+        const result = await uploadAttachmentAndMountNode({
+          api,
+          roomKey: room_key,
+          nodeRef: resolved.nodeUid || node,
+          uploadInput: resolved,
+          confirmSopChange: confirm_sop_change === true,
+          operationId: randomUUID()
+        })
+        if (resolved.uploadId) result.upload_id = resolved.uploadId
+        return ok(result)
       } catch (err) {
         return attachmentUploadFail(err)
+      } finally {
+        // 票据一次性：无论挂载成败都释放临时文件，重试须重新签发
+        if (upload_id) discardUploadTicket(upload_id)
       }
     }
   )
@@ -2297,6 +2351,87 @@ function readJson(req) {
   })
 }
 
+// 一次性直传票据的 HTTP 入口：POST/PUT /mcp-upload/<id>，body 为原始字节。
+// 票据在 create_upload_ticket 签发、upload_attachment 消费，成功落盘后
+// 通知 agent 下一步带 upload_id 调 upload_attachment。
+async function handleTicketUpload(req, res, url) {
+  const sendJson = (code, payload) => {
+    res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' })
+    res.end(JSON.stringify(payload))
+  }
+  if (req.method !== 'POST' && req.method !== 'PUT') {
+    sendJson(405, { error: 'method not allowed, use POST or PUT' })
+    return
+  }
+  const uploadId = decodeURIComponent(url.pathname.slice('/mcp-upload/'.length))
+  const ticket = getUploadTicket(uploadId)
+  if (!ticket) {
+    sendJson(404, {
+      error: 'TICKET_NOT_FOUND',
+      message: '上传票据不存在或已过期，请重新调用 create_upload_ticket'
+    })
+    return
+  }
+  if (ticket.receivedAt) {
+    sendJson(409, { error: 'TICKET_ALREADY_USED', message: '该票据已接收过文件，请重新签发' })
+    return
+  }
+  const declared = Number(req.headers['content-length'] || 0)
+  if (declared > MAX_TICKET_UPLOAD_BYTES) {
+    sendJson(413, {
+      error: 'PAYLOAD_TOO_LARGE',
+      message: `文件过大（${declared} 字节，上限 ${MAX_TICKET_UPLOAD_BYTES}）`
+    })
+    return
+  }
+
+  const chunks = []
+  let received = 0
+  let aborted = false
+  await new Promise((resolve, reject) => {
+    req.on('data', chunk => {
+      if (aborted) return
+      received += chunk.length
+      if (received > MAX_TICKET_UPLOAD_BYTES) {
+        aborted = true
+        chunks.length = 0
+        req.resume() // 排空剩余字节，避免连接被粗暴截断
+        resolve()
+        return
+      }
+      chunks.push(chunk)
+    })
+    req.on('end', resolve)
+    req.on('error', reject)
+  })
+  if (aborted) {
+    sendJson(413, {
+      error: 'PAYLOAD_TOO_LARGE',
+      message: `文件超过上限（${MAX_TICKET_UPLOAD_BYTES} 字节），传输已中止`
+    })
+    return
+  }
+
+  const result = await saveTicketBytes(uploadId, Buffer.concat(chunks))
+  if (!result.ok) {
+    const code = result.code === 'PAYLOAD_TOO_LARGE' ? 413 : 400
+    sendJson(code, { error: result.code, message: result.message })
+    return
+  }
+  sendJson(200, {
+    ok: true,
+    upload_id: uploadId,
+    bytes: result.ticket.bytes,
+    file_name: ticket.fileName || undefined,
+    next:
+      '字节已接收。调用 upload_attachment 时传 upload_id="' +
+      uploadId +
+      '"（加上 room_key' +
+      (ticket.nodeRef ? ' 和 node="' + ticket.nodeRef + '"' : '') +
+      '）完成挂载；本票据为一次性，挂载后即作废。'
+  })
+}
+
 async function startHttp() {
   const transports = new Map()
 
@@ -2316,6 +2451,11 @@ async function startHttp() {
     if (url.pathname === '/health') {
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
       res.end(JSON.stringify({ ok: true, api: API }))
+      return
+    }
+
+    if (url.pathname.startsWith('/mcp-upload/')) {
+      await handleTicketUpload(req, res, url)
       return
     }
 
