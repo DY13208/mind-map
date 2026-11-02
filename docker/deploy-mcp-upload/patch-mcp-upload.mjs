@@ -16,6 +16,25 @@ function fail(message, extra) {
 
 if (!fs.existsSync(target)) fail('找不到 mcpServer.mjs', { target })
 
+// ---- 0) 前置检查：桥接依赖的两个条件必须成立，否则运行时才崩（node --check 查不出） ----
+for (const need of ['mcpUploadTickets.mjs', 'mcpUploadBridge.mjs']) {
+  if (!fs.existsSync(path.join(BIN, need))) {
+    fail(`缺少 ${need}，请先把部署包里的模块拷进容器 bin 目录`, { want: path.join(BIN, need) })
+  }
+}
+const attachmentSrc = (() => {
+  try {
+    return fs.readFileSync(path.join(BIN, 'mcpAttachmentUpload.mjs'), 'utf8')
+  } catch {
+    return ''
+  }
+})()
+if (!/resolveAttachmentUploadInput/.test(attachmentSrc)) {
+  fail('mcpAttachmentUpload.mjs 里没有 resolveAttachmentUploadInput，桥接无法生效，未做任何修改', {
+    hint: '请把该文件内容发回来，我按实际函数名调整桥接模块'
+  })
+}
+
 const original = fs.readFileSync(target, 'utf8')
 const stamp = new Date().toISOString().replace(/[:.]/g, '-')
 const backup = `${target}.bak-${stamp}`
@@ -79,7 +98,14 @@ fs.writeFileSync(target, patched)
 const check = spawnSync(process.execPath, ['--check', target], { encoding: 'utf8' })
 if (check.status !== 0) {
   fs.writeFileSync(target, original)
-  fail('node --check 未通过，已恢复原文件', { stderr: String(check.stderr).slice(0, 1200) })
+  const stderr = String(check.stderr)
+  const awaitIssue = /await is only valid|Unexpected reserved word/.test(stderr)
+  fail('node --check 未通过，已恢复原文件', {
+    stderr: stderr.slice(0, 1200),
+    hint: awaitIssue
+      ? '多半是 /mcp 判定所在的函数不是 async。把该函数的源码发回来，我改成回调式插入'
+      : '把报错原文发回来'
+  })
 }
 
 console.log(
