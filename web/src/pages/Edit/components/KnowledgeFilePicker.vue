@@ -2,7 +2,7 @@
   <div>
     <el-dialog title="文件知识库" :visible="visible" append-to-body width="760px" custom-class="node-knowledge-picker" :close-on-click-modal="!busy" :close-on-press-escape="!busy" :show-close="!busy" @close="$emit('close')">
       <p class="picker-hint">按文件夹展开并勾选文件，可跨文件夹多选（最多 {{ maxFiles }} 个）。挂载保留知识库引用及解析摘要，不替换节点原有附件。点击“查看解析”可读取完整解析信息和原文。</p>
-      <el-input v-model="query" clearable placeholder="搜索知识库文件" prefix-icon="el-icon-search" :disabled="busy" @input="search" />
+      <el-input v-model="query" clearable placeholder="搜索文件夹或文件名" prefix-icon="el-icon-search" :disabled="busy" @input="search" />
       <div v-if="error" class="picker-error" role="alert">{{ error }} <el-button type="text" @click="reload">重试</el-button></div>
       <div class="picker-tree" v-loading="loading">
         <el-tree v-if="visible" :key="treeKey" ref="tree" node-key="key" lazy show-checkbox check-strictly :load="loadNode" :props="treeProps" :default-checked-keys="selectedKeys" :expand-on-click-node="false" @check-change="checkFile" @node-click="clickNode">
@@ -41,9 +41,10 @@ export default {
     search() { clearTimeout(this.timer); this.request++; this.timer = setTimeout(this.reload, 300) },
     reload() { this.request++; this.error = ''; this.treeKey++; },
     async fetchChildren(folderId, folderCursor, fileCursor, foldersDone = false, filesDone = false) {
-      const search = this.query.trim()
+      // 搜索根结果同时匹配文件夹和文件；展开命中的文件夹时展示其完整内容。
+      const search = folderId ? '' : this.query.trim()
       const [folders, files] = await Promise.all([
-        search || foldersDone ? { items: [] } : kbApi.listFolders({ parentId: folderId, cursor: folderCursor, limit: 100 }),
+        foldersDone ? { items: [] } : kbApi.listFolders({ parentId: folderId, q: search, cursor: folderCursor, limit: 100 }),
         filesDone ? { items: [] } : kbApi.listFiles({ folderId: folderId || undefined, q: search, cursor: fileCursor, limit: 50 })
       ])
       const visibleFiles = folderId || search ? files.items : files.items.filter(file => !file.folderId && !file.folder_id)
