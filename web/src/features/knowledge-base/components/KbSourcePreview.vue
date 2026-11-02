@@ -1,6 +1,11 @@
 <template>
   <div class="kb-preview">
     <div v-if="!file" class="kb-preview-hint">请选择文件</div>
+    <template v-else-if="kind === 'html'">
+      <div v-if="textLoading" v-loading="true" class="kb-preview-loading" />
+      <div v-else-if="textError" class="kb-preview-hint" role="alert">{{ textError }} <el-button size="mini" @click="loadMarkdown">重试</el-button></div>
+      <iframe v-else :srcdoc="plainText" class="kb-preview-frame" :title="file.name || 'HTML 文件预览'" sandbox="allow-scripts" referrerpolicy="no-referrer" />
+    </template>
     <template v-else-if="kind === 'pdf'">
       <iframe :key="pdfSrc" :src="pdfSrc" class="kb-preview-frame" title="PDF 原文预览" />
     </template>
@@ -120,7 +125,7 @@ export default {
       this.textError = ''
       this.textLoading = false
       this.$emit('markdown-source', null)
-      if (this.file && ['markdown', 'text'].includes(this.kind)) this.loadMarkdown()
+      if (this.file && ['markdown', 'text', 'html'].includes(this.kind)) this.loadMarkdown()
       this.imgError = false
       this.workbook = null
       this.sheetError = ''
@@ -128,7 +133,7 @@ export default {
     },
     async loadMarkdown() {
       const request = ++this.textRequest
-      const isPlainText = this.kind === 'text'
+      const isPlainText = this.kind === 'text' || this.kind === 'html'
       this.textLoading = true
       this.textError = ''
       try {
@@ -142,7 +147,7 @@ export default {
           this.$nextTick(this.scrollToMarkdown)
         }
       } catch (e) {
-        if (request === this.textRequest) this.textError = `${isPlainText ? 'TXT' : 'Markdown'} 原文加载失败，请重试或下载原文件`
+        if (request === this.textRequest) this.textError = `${this.kind === 'html' ? 'HTML' : isPlainText ? 'TXT' : 'Markdown'} 原文加载失败，请重试或下载原文件`
       } finally {
         if (request === this.textRequest) this.textLoading = false
       }

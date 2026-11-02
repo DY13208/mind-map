@@ -12,7 +12,7 @@
       </template>
     </div>
     <div v-if="file && file.error" class="kb-parse-error"><i class="el-icon-warning" aria-hidden="true" />{{ file.error }}</div>
-    <KbHeaderMap v-if="file && ['xlsx', 'xls'].includes(file.ext)" :file-id="fileId" :file-size="Number(file.size) || 0" :active="active" @submitted="refreshFile" @done="refreshFile" />
+    <KbHeaderMap v-if="!sourceOnly && file && ['xlsx', 'xls'].includes(file.ext)" :file-id="fileId" :file-size="Number(file.size) || 0" :active="active" @submitted="refreshFile" @done="refreshFile" />
     <KbStateBlock
       :loading="loadingFile"
       :error="fileError"
@@ -22,12 +22,12 @@
       empty-icon="el-icon-document"
       @retry="loadFile"
     >
-      <div v-if="file" class="kb-parse-panes">
+      <div v-if="file" class="kb-parse-panes" :class="{ 'kb-source-only': sourceOnly }">
         <div class="kb-card kb-pane">
           <div class="kb-pane-title">原文预览</div>
           <KbSourcePreview :file="file" :block="previewBlock" @markdown-source="markdownSource = $event" />
         </div>
-        <div class="kb-card kb-pane">
+        <div v-if="!sourceOnly" class="kb-card kb-pane">
           <div class="kb-pane-title">
             解析结果<span v-if="blocks.length" class="kb-muted">（{{ blocks.length }} 块，点击定位原文）</span>
           </div>
@@ -70,6 +70,7 @@ export default {
     return { markdownSource: null, file: null, fileError: null, loadingFile: false, blocks: [], blocksCursor: null, loadingMore: false, blocksError: null, loadingBlocks: false, activeId: null, activeBlock: null, reparsing: false }
   },
   computed: {
+    sourceOnly() { return this.$route.query.view === 'source' },
     locatedBlocks() { return locateMarkdownBlocks(this.blocks, this.markdownSource) },
     previewBlock() { return this.locatedBlocks.find(b => this.activeBlock && b.id === this.activeBlock.id) || this.activeBlock },
     fileId() { return String(this.$route.query.file || '') },
@@ -207,6 +208,7 @@ export default {
   i { margin-right: 6px; font-weight: 700; }
 }
 .kb-parse-panes {
+  &.kb-source-only { grid-template-columns: minmax(0, 1fr); }
   display: grid;
   grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
   gap: 16px;

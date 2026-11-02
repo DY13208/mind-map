@@ -119,6 +119,10 @@ output/*.py
 !/web/tests/kbOrganization.test.cjs
 !/services/file-kb/test/download-url.test.js
 !/services/file-kb-mcp/test/download-url.test.mjs
+!/services/file-kb/test/folder-mount.test.cjs
+!/web/tests/knowledgeFolderMount.test.cjs
+!/web/tests/knowledgeFileOpen.test.cjs
+!/web/tests/knowledgeFilePickerSearch.test.cjs
 
 # 环境配置与备份
 .env
