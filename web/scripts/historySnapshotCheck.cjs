@@ -16,6 +16,10 @@ async function loadSnapshotApi() {
       'simple-mind-map/src/utils/collabPaste': path.join(
         repo,
         'simple-mind-map/src/utils/collabPaste.js'
+      ),
+      'simple-mind-map/src/utils/historyTreeCounts': path.join(
+        repo,
+        'simple-mind-map/src/utils/historyTreeCounts.js'
       )
     }
   })
@@ -106,6 +110,12 @@ async function main() {
   } = await loadSnapshotApi()
 
   const source = makeTree()
+  source.data.childCount = 999
+  source.data.descendantCount = 999
+  source.data.hasMore = true
+  source.children[0].data.childCount = 999
+  source.children[0].data.descendantCount = 999
+  source.children[0].data.hasMore = true
   const before = JSON.stringify(source)
   const snapshot = prepareHistorySnapshot(source, {})
   assert.notEqual(snapshot.tree, source)
@@ -123,6 +133,17 @@ async function main() {
   )
   assert.equal(snapshot.tree.children[0].children[0].data.attachmentId, 'attachment-history')
   assert.equal(snapshot.tree.children[0].data.generalization[0].isActive, undefined)
+  assert.equal(snapshot.tree.data.childCount, 55)
+  assert.equal(snapshot.tree.data.descendantCount, 58)
+  assert.equal(snapshot.tree.data.hasMore, undefined)
+  assert.equal(snapshot.tree.children[0].data.childCount, 1)
+  assert.equal(snapshot.tree.children[0].data.descendantCount, 2)
+  assert.equal(snapshot.tree.children[0].data.hasMore, undefined)
+  assert.deepEqual(
+    snapshot.tree.data.__fv,
+    source.data.__fv,
+    'history count normalization must preserve field versions'
+  )
 
   const summary = summarizeHistoryBranches(snapshot, [
     'leaf-0',

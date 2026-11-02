@@ -4,7 +4,7 @@ const { KnowledgeCompiler } = require('../knowledge/compiler')
 const { readCanonical } = require('../knowledge/adapters/canonicalInput')
 const { readSnapshot } = require('../knowledge/snapshot')
 const { initSchema } = require('../knowledge/sourceChanges')
-const { markdown, renderDocument } = require('../knowledge/markdownRenderer')
+const { markdown, renderDocument, ATTACHMENT_SOURCE_INDEX_VERSION } = require('../knowledge/markdownRenderer')
 const { safeId, hash } = require('../knowledge/utils')
 const { publishRoom, removeRoom, readJson, atomicJson } = require('./compiler')
 const { parseContractTree, mergeContractSpec, renderTopic } = require('./contracts')
@@ -123,7 +123,10 @@ class WikiCompiler {
       const body = doc.text.replace(/^---\n[\s\S]*?\n---\n/, '').trim()
       const nodeUid = doc.rootUid || rootUid
       return { nodeUid, title: doc.file === 'README.md' ? '概览' : (body.match(/^# (.+)$/m)?.[1] || '未命名主题'),
-        parentUid: doc.file === 'README.md' ? null : rootUid, markdown: body }
+        parentUid: doc.file === 'README.md' ? null : rootUid, markdown: body,
+        attachmentSourceIndexVersion: doc.attachmentSourceIndexVersion,
+        attachmentSources: doc.attachmentSourceIndexVersion === ATTACHMENT_SOURCE_INDEX_VERSION && Array.isArray(doc.attachmentSources)
+          ? doc.attachmentSources : undefined }
     })
     let supplementHash = ''
     if (roomId === this.companyRoom) {
@@ -147,7 +150,11 @@ class WikiCompiler {
             for (const [uid, list] of children) children.set(uid, list.filter(child => child !== parsed.anchorUid))
             const rendered = renderDocument({ ...input, model: { ...input.model, children } }, owner, null)
             const topic = topics.find(t => t.nodeUid === owner)
-            if (topic) topic.markdown = rendered.text.replace(/^---\n[\s\S]*?\n---\n/, '').trim()
+            if (topic) {
+              topic.markdown = rendered.text.replace(/^---\n[\s\S]*?\n---\n/, '').trim()
+              topic.attachmentSourceIndexVersion = rendered.attachmentSourceIndexVersion
+              topic.attachmentSources = rendered.attachmentSources
+            }
           }
         }
         const overview = topics.find(t => t.nodeUid === rootUid)
@@ -163,7 +170,11 @@ class WikiCompiler {
     if (Number(latest.version) !== Number(meta.version) || Number(latest.revision) !== Number(meta.revision)) {
       this.scheduler.notify(roomId); return
     }
-    const published = await publishRoom(this.outputDir, { roomId, title, version: Number(meta.version), revision: Number(meta.revision), supplementHash, topics })
+    const attachmentSourceIndexVersion = canonical.documents.every(doc =>
+      doc.attachmentSourceIndexVersion === ATTACHMENT_SOURCE_INDEX_VERSION && Array.isArray(doc.attachmentSources))
+      ? ATTACHMENT_SOURCE_INDEX_VERSION : 0
+    const published = await publishRoom(this.outputDir, { roomId, title, version: Number(meta.version), revision: Number(meta.revision),
+      attachmentSourceIndexVersion, supplementHash, topics })
     if (published.changed) this.log(`[WikiCompiler][room=${roomId}] version=${meta.version} generation=${published.generation} topics=${topics.length}`)
   }
   async start({ operationEvents, bus } = {}) {

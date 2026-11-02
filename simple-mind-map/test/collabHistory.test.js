@@ -13,6 +13,7 @@ const {
   isVersionRestoreEvent
 } = require('../bin/collabHistory')
 const { historyChecksum, toBusinessTree, canonicalMetadata } = require('../bin/collabHistory/canonical')
+const { normalizeHistoryGraph } = require('../src/utils/historyTreeCounts')
 const { replayOperations } = require('../bin/collabHistory/replayer')
 const { isTerminalError } = require('../src/utils/collabReliability')
 
@@ -437,7 +438,10 @@ function mockRes() {
   const liveAfter = await store.getLiveState(ROOM)
   assert.strictEqual(liveAfter.revision, restored.newRevision)
   const histTarget = await engine.getRoomStateAtRevision(ROOM, targetRev)
-  assert.strictEqual(historyChecksum(liveAfter.nodes, liveAfter.metadata), histTarget.checksum)
+  assert.strictEqual(
+    historyChecksum(liveAfter.nodes, liveAfter.metadata),
+    historyChecksum(normalizeHistoryGraph(histTarget.tree), histTarget.metadata)
+  )
   const stillHaveOld = await engine.getRoomStateAtRevision(ROOM, currentBefore.revision)
   assert.ok(stillHaveOld.checksum)
   const pre = await engine.getVersion(ROOM, restored.preRestoreVersionId)

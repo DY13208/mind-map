@@ -6,6 +6,7 @@
     "test:kb-mapping": "node --test scripts/testKbHeaderMapping.cjs",
     "test:mobile": "node scripts/testTouchEvent.cjs && node scripts/testTouchInsertAck.cjs && node scripts/testMobileFilesUi.cjs",
     "test:attachment-preview": "node tests/nodeAttachmentPreview.test.cjs && node tests/delimitedAttachmentPreview.test.cjs && node tests/attachmentPreviewSource.test.cjs && node scripts/testAttachmentViewerInteraction.cjs && node scripts/testPresentationPreview.cjs",
+    "test:attachment-restore-race": "node scripts/testNodeAttachmentRestoreRace.cjs && node scripts/testNodeAttachmentRestoreRace.browser.cjs",
     "test:touch-editor": "node tests/touchEditorControls.test.cjs",
     "test:product-navigation": "node scripts/testProductNavigation.cjs && node --test tests/shellMode.test.cjs",
     "serve": "vue-cli-service serve",

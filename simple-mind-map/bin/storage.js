@@ -1872,6 +1872,7 @@ async function initSchemaOnce() {
   await fileSystemSchema.initFileSystemSchema(pool)
   const roomAcl = require('./roomAcl')
   await roomAcl.initSchema(pool)
+  await pool.query(require('./automaticDNodes').INDEX_SQL)
   await require('./accessRequests').initSchema(pool)
   await require('./leaveWorkflow/service').initSchema(pool)
   await require('./hrmsAgent/service').initSchema(pool)

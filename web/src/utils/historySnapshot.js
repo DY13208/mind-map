@@ -1,4 +1,5 @@
 import collabPaste from 'simple-mind-map/src/utils/collabPaste'
+import { normalizeHistoryTree } from 'simple-mind-map/src/utils/historyTreeCounts'
 
 const MORE_UID = '__history_preview_more__'
 const RUNTIME_NODE_KEYS = new Set([
@@ -301,6 +302,11 @@ export function prepareHistorySnapshot(graph, metadata = {}) {
   if (!tree || !tree.data || typeof tree.data !== 'object') {
     throw historyError('HISTORY_SNAPSHOT_INVALID', '历史版本树格式无效')
   }
+
+  // The history graph is complete, while these counters may have been copied
+  // from live-map lazy loading metadata. Normalize the isolated snapshot before
+  // indexing it so preview, export, and branch copy share the same tree.
+  tree = normalizeHistoryTree(tree)
 
   const resolvedImgMap = Object.assign({}, imgMap, resolveImageMap(tree, metadata))
   if (Object.keys(resolvedImgMap).length) {

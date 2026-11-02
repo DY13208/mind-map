@@ -14,6 +14,7 @@ const { readManifest, recover } = require('../bin/knowledge/manifestStore')
 const { hash } = require('../bin/knowledge/utils')
 const { readCanonical } = require('../bin/knowledge/adapters/canonicalInput')
 const { semantic, markdown } = require('../bin/knowledge/markdownRenderer')
+const { readSubtreeRows, subtreeToken } = require('../bin/subtreeToken')
 const dir = process.env.KNOWLEDGE_TEST_OUTPUT || '/app/knowledge/.test-' + randomUUID()
 const roomId = 'kc-test-' + randomUUID()
 const otherRoom = 'kc-test-' + randomUUID()
@@ -45,9 +46,81 @@ async function seed(id, count = 0) {
     from jsonb_to_recordset($2::jsonb) as x(uid text,parent_uid text,position text,data jsonb,is_root boolean)`, [id, JSON.stringify(rows)])
 }
 async function op(type, payload, client = a) {
+  payload = await withWritePreconditions(type, payload, client.roomKey)
   const { result } = await h.submitOp(client, type, payload)
   assert.strictEqual(result.ok, true, JSON.stringify(result))
   return result
+}
+
+async function readNodeRow(uid, targetRoom = roomId) {
+  const result = await pool.query(
+    `select uid, parent_uid, position, data
+     from room_nodes where room_key=$1 and uid=$2 and deleted_at is null`,
+    [targetRoom, uid]
+  )
+  return result.rows[0] || null
+}
+
+async function withWritePreconditions(type, payload, targetRoom = roomId) {
+  if (!payload || !payload.uid) return payload
+  if (type === 'node.update') {
+    const patch = payload.patch || payload.data || {}
+    const groups = new Set(Object.keys(patch).map(key => {
+      if (key === 'hyperlinkTitle' || key === 'hyperlink') return 'hyperlink'
+      return key
+    }).filter(key => ['text', 'note', 'hyperlink'].includes(key)))
+    if (!groups.size) return payload
+    const row = await readNodeRow(payload.uid, targetRoom)
+    assert.ok(row, 'node.update baseline missing: ' + payload.uid)
+    const data = typeof row.data === 'string' ? JSON.parse(row.data) : (row.data || {})
+    const expected = { uid: payload.uid }
+    for (const group of groups) expected[`__fv.${group}`] = Number(data.__fv && data.__fv[group]) || 0
+    return { ...payload, expected }
+  }
+
+  if (type === 'node.delete') {
+    const rows = await readSubtreeRows(pool, targetRoom, payload.uid)
+    assert.ok(rows.length, 'node.delete baseline missing: ' + payload.uid)
+    return { ...payload, expected: { uid: payload.uid, subtree_token: subtreeToken(rows) } }
+  }
+
+  if (type === 'node.move' || type === 'node.reorder') {
+    const source = await readNodeRow(payload.uid, targetRoom)
+    assert.ok(source, 'node.move baseline missing: ' + payload.uid)
+    const targetUid = String(payload.parentUid || payload.parent_uid || payload.parent || source.parent_uid || '')
+    const target = await readNodeRow(targetUid, targetRoom)
+    assert.ok(target, 'node.move target missing: ' + targetUid)
+    const targetData = typeof target.data === 'string' ? JSON.parse(target.data) : (target.data || {})
+    const expected = {
+      uid: payload.uid,
+      parent_uid: source.parent_uid == null ? null : String(source.parent_uid),
+      position: String(source.position || ''),
+      target_uid: targetUid,
+      target_parent_uid: target.parent_uid == null ? null : String(target.parent_uid),
+      target_position: String(target.position || '')
+    }
+    if (payload.index !== undefined) {
+      const siblings = await pool.query(
+        `select uid, parent_uid, position from room_nodes
+         where room_key=$1 and parent_uid=$2 and deleted_at is null and uid<>$3
+         order by position, uid`,
+        [targetRoom, targetUid, payload.uid]
+      )
+      const list = siblings.rows
+      if (!list.length) {
+        expected.target_empty = true
+      } else {
+        const index = Math.max(0, Math.min(Math.floor(Number(payload.index) || 0), list.length))
+        const anchor = list[Math.min(index, list.length - 1)]
+        expected.anchor_uid = String(anchor.uid)
+        expected.anchor_parent_uid = anchor.parent_uid == null ? null : String(anchor.parent_uid)
+        expected.anchor_position = String(anchor.position || '')
+        expected.anchor_side = index >= list.length ? 'after' : 'before'
+      }
+    }
+    return { ...payload, expected }
+  }
+  return payload
 }
 async function test(label, task) {
   await task()
@@ -202,11 +275,14 @@ async function main() {
     assert.deepStrictEqual((await compiler().compile(roomId)).changedFiles, [])
   })
   await test('operation log gap explicitly triggers full baseline', async () => {
+    // Use a fresh compiler after the prior injected write failure so its
+    // intentional cooldown does not mask this independent recovery case.
+    kc = compiler()
     await op('node.update', { uid: 'h1', patch: { note: 'LOG_GAP' } })
     const v = Number((await pool.query('select version from rooms where room_key=$1', [roomId])).rows[0].version)
     await pool.query('delete from room_operations where room_key=$1 and version=$2', [roomId, v])
     const result = await kc.compile(roomId)
-    assert.strictEqual(result.mode, 'full'); assert.strictEqual(result.reason, 'operation_log_gap')
+    assert.strictEqual(result.mode, 'full', JSON.stringify(result)); assert.strictEqual(result.reason, 'operation_log_gap')
   })
   await test('async extraction invalidates referenced document without a V2 operation', async () => {
     const id = randomUUID()
@@ -341,7 +417,7 @@ async function main() {
 }
 main().catch(err => { console.error(err.stack); process.exitCode = 1 }).finally(async () => {
   if (a) a.socket.disconnect(); if (b) b.socket.disconnect()
-  if (server) { server.presence?.close?.(); await new Promise(resolve => server.server.close(resolve)) }
+  if (server) await server.close()
   if (pool) {
     for (const id of roomIds) {
       for (const table of ['node_attachments', 'knowledge_source_changes', 'knowledge_source_state', 'room_outbox', 'room_operations', 'room_operations_archive', 'room_snapshots', 'room_nodes', 'room_members', 'room_tombstones', 'rooms']) {

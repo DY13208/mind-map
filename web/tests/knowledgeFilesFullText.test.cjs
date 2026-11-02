@@ -60,11 +60,11 @@ async function run() {
   let copied = '', readError = ''
   const copyVm = { node, getNodeAiReference: () => '节点引用', hide() { this.node = null }, copyAiInstruction: async text => { copied = text }, $message: { error: message => { readError = message } } }
   await componentModule.exports.default.methods.copyNodeForAi.call(copyVm)
-  assert.equal(copied, '执行这个SOP：节点引用')
+  assert.equal(copied, '节点引用')
   api.getBlocks = async () => { throw new Error('读取失败') }
   copied = ''; copyVm.node = node
   await componentModule.exports.default.methods.copyNodeForAi.call(copyVm)
-  assert.equal(copied, '执行这个SOP：节点引用', 'copying a reference must not depend on reading file content')
+  assert.equal(copied, '节点引用', 'copying a reference must not depend on reading file content')
   assert.equal(readError, '')
   console.log('Full KB context tests passed: pagination, complete text, records, access failure, limits, parse consistency, deduplication')
 }

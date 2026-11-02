@@ -55,7 +55,8 @@ function queryFingerprintForRequest(request) {
     level: request.level,
     level_mode: request.level_mode,
     page_size: request.page_size,
-    byte_limit: request.byte_limit
+    byte_limit: request.byte_limit,
+    attachment_content: request.attachment_content
   }
   if (request.include_subtree_token) value.include_subtree_token = true
   if (request.include_write_hints) value.include_write_hints = true
@@ -101,6 +102,10 @@ function normalizeRequest(input = {}) {
     ? DEFAULT_BYTE_LIMIT
     : positiveInt(input.byte_limit, DEFAULT_BYTE_LIMIT, DEFAULT_BYTE_LIMIT)
   if (!byteLimit) throw queryError('byte_limit 必须大于 0', 'INVALID_QUERY')
+  const attachmentContent = String(input.attachment_content || 'preview')
+  if (!['metadata', 'preview'].includes(attachmentContent)) {
+    throw queryError('attachment_content 仅支持 metadata 或 preview', 'INVALID_QUERY')
+  }
 
   let selector = input.selector || null
   if (selector != null && (typeof selector !== 'object' || Array.isArray(selector))) {
@@ -166,6 +171,7 @@ function normalizeRequest(input = {}) {
     level_mode: levelMode,
     page_size: pageSize,
     byte_limit: byteLimit,
+    attachment_content: attachmentContent,
     cursor: input.cursor ? String(input.cursor) : null,
     include_subtree_token: includeSubtreeToken,
     include_write_hints: includeWriteHints
@@ -477,8 +483,17 @@ function cloneData(data) {
   return JSON.parse(JSON.stringify(data && typeof data === 'object' ? data : {}))
 }
 
-function cleanData(data, omitted) {
-  const next = cloneData(data)
+function cleanData(data, omitted, request) {
+  let projected = data
+  if (
+    request && request.attachment_content === 'metadata' && data &&
+    Object.prototype.hasOwnProperty.call(data, 'attachmentExtractedText')
+  ) {
+    projected = { ...data }
+    delete projected.attachmentExtractedText
+    omitted.add('data.attachmentExtractedText')
+  }
+  const next = cloneData(projected)
   if (Object.prototype.hasOwnProperty.call(next, 'imgMap')) {
     delete next.imgMap
     omitted.add('data.imgMap')
@@ -501,7 +516,7 @@ function itemFromRow(row, pathInfo, targetDepth, omitted, request) {
     position: row.position || '',
     node_version: Number(row.node_version) || 0,
     path: (pathInfo && pathInfo.path) || [],
-    data: cleanData(row.data, omitted)
+    data: cleanData(row.data, omitted, request)
   }
   if (request && request.include_write_hints) {
     const result = buildNodeWriteHints(uid, item.data)

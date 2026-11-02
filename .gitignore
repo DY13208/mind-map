@@ -91,6 +91,9 @@ output/*.py
 !/simple-mind-map/test/directHttpParity.pg.test.js
 !/simple-mind-map/test/cardPreview.pg.test.js
 !/simple-mind-map/test/teamRoomsPaging.pg.test.js
+!/simple-mind-map/test/historyTreeCounts.test.js
+!/simple-mind-map/test/historyTreeCounts.engine.test.js
+!/simple-mind-map/test/historyTreeCounts.pg.test.js
 !/web/tests/
 /web/tests/*
 !/web/tests/helpers/
@@ -134,3 +137,14 @@ output/*.py
 # 远端部署包（只在本机留存，用于拷贝到服务器，不入库）
 /docker/deploy-mcp-upload/
 /docker/deploy-mcp-upload.zip
+
+
+# Read-only cross-map automatic D discovery regression.
+!/simple-mind-map/test/automaticDNodes.pg.test.cjs
+!/simple-mind-map/test/attachmentQuery.benchmark.cjs
+!/simple-mind-map/test/mcpAttachmentKnowledge.test.mjs
+!/simple-mind-map/test/mcpAttachmentKnowledge.fallback.test.mjs
+!/simple-mind-map/bin/wikiCompiler/api.test.js
+!/simple-mind-map/bin/knowledge/attachmentSourceIndex.test.js
+!/integrations/wiki-graph/attachments.test.cjs
+!/integrations/wiki-graph/attachments.pg.test.cjs

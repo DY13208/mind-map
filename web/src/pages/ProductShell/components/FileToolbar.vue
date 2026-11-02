@@ -1,7 +1,27 @@
 <template>
   <div class="fileToolbar">
+    <el-tooltip v-if="shellMode === 'focus'" content="显示侧边栏" placement="bottom" popper-class="wcpdActionTooltip" :open-delay="250" :visible-arrow="false" :offset="10">
+      <button type="button" class="iconGhost sidebarRestore" aria-label="显示左侧侧边栏" aria-haspopup="dialog" data-testid="shell-open-navigation" @click="showProductSidebar">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="3" y="4" width="18" height="16" rx="2" />
+          <path d="M9 4v16" />
+        </svg>
+      </button>
+    </el-tooltip>
     <div class="toolbarTitle"><slot name="title">脑图</slot></div>
     <div class="toolbarActions">
+    <el-tooltip v-if="shellMode !== 'embed'" :content="shellMode === 'focus' ? '退出专注模式' : '专注模式'" placement="bottom" popper-class="wcpdActionTooltip" :open-delay="250" :visible-arrow="false" :offset="10">
+      <button
+        type="button"
+        class="iconGhost"
+        :aria-label="shellMode === 'focus' ? '退出专注模式' : '进入专注模式'"
+        :aria-pressed="shellMode === 'focus' ? 'true' : 'false'"
+        data-testid="shell-focus-mode"
+        @click="toggleFocusMode"
+      >
+        <i class="el-icon-full-screen" aria-hidden="true" />
+      </button>
+    </el-tooltip>
     <FileSearch
       class="toolbarSearch"
       :value="search"
@@ -96,8 +116,10 @@
 <script>
 import FileSearch from './FileSearch.vue'
 import { shellTheme, toggleShellTheme } from '@/utils/shellTheme'
+import { resolveShellMode } from '@/utils/shellMode'
 export default {
   name: 'FileToolbar',
+  inject: { showProductSidebar: { default: () => {} } },
   components: { FileSearch },
   props: {
     search: String,
@@ -108,11 +130,21 @@ export default {
     showImport: { type: Boolean, default: true }
   },
   computed: {
+    shellMode() {
+      return resolveShellMode(this.$route)
+    },
     isDark() {
       return shellTheme.theme === 'dark'
     }
   },
   methods: {
+    toggleFocusMode() {
+      this.$router.push({
+        path: this.$route.path,
+        query: { ...this.$route.query, shell: this.shellMode === 'focus' ? 'full' : 'focus' },
+        hash: this.$route.hash
+      })
+    },
     toggleTheme() {
       toggleShellTheme()
     },
@@ -170,6 +202,7 @@ export default {
   .toolbarSearch {
     margin-right: 4px;
   }
+  .sidebarRestore { flex-shrink: 0; margin-right: -4px; }
 
   .iconGhost {
     width: 36px;

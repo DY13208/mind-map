@@ -4,7 +4,7 @@ const { randomUUID } = require('crypto')
 const { safeId, branchPath, hash } = require('./utils')
 const store = require('./manifestStore')
 const { readSnapshot } = require('./snapshot')
-const { renderDocument } = require('./markdownRenderer')
+const { renderDocument, ATTACHMENT_SOURCE_INDEX_VERSION } = require('./markdownRenderer')
 const { ChangeTracker } = require('./changeTracker')
 
 class KnowledgeCompiler {
@@ -121,8 +121,15 @@ class KnowledgeCompiler {
         affectedMarkdown.push(file)
         if (!rendered.unchanged) {
           writes.set(file, rendered.text)
-          next.documents[file] = { rootUid: file === 'README.md' ? null : rootUid, sourceHash: rendered.sourceHash,
-            fileHash: hash(rendered.text), syncVersion: input.snapshotVersion, generatedAt: next.lastCompiledAt }
+        }
+        next.documents[file] = {
+          rootUid: file === 'README.md' ? null : rootUid,
+          sourceHash: rendered.sourceHash,
+          fileHash: rendered.unchanged ? oldDocument?.fileHash : hash(rendered.text),
+          syncVersion: input.snapshotVersion,
+          generatedAt: rendered.unchanged ? oldDocument?.generatedAt : next.lastCompiledAt,
+          attachmentSourceIndexVersion: rendered.attachmentSourceIndexVersion,
+          attachmentSources: rendered.attachmentSources.map(source => ({ ...source, document_path: file }))
         }
       }
       // An empty graph still exports an explicit empty README, never stale nodes.
@@ -130,7 +137,8 @@ class KnowledgeCompiler {
         const text = '# 空导图\n'
         if (next.documents['README.md']?.fileHash !== hash(text)) writes.set('README.md', text)
         next.nodes = {}
-        next.documents['README.md'] = { rootUid: null, sourceHash: hash(text), fileHash: hash(text), syncVersion: input.snapshotVersion }
+        next.documents['README.md'] = { rootUid: null, sourceHash: hash(text), fileHash: hash(text), syncVersion: input.snapshotVersion,
+          attachmentSourceIndexVersion: ATTACHMENT_SOURCE_INDEX_VERSION, attachmentSources: [] }
       }
       for (const [file, doc] of Object.entries(next.documents)) if (doc.rootUid && !existingRoots.has(doc.rootUid)) {
         deletes.push(file); delete next.documents[file]

@@ -34,11 +34,13 @@ async function run() {
     $message: Object.fromEntries(['success', 'warning', 'error'].map(key => [key, text => messages.push([key, text])]))
   }
   vm.nodeUid = methods.nodeUid.bind(vm)
+  vm.getNodeAiReference = methods.getNodeAiReference.bind(vm)
+  vm.copyAiInstruction = methods.copyAiInstruction.bind(vm)
   Object.defineProperty(global, 'navigator', { configurable: true, value: {
     clipboard: { writeText: async text => writes.push(text) }
   } })
   await methods.copyNodeForAi.call(vm)
-  const expected = '执行这个SOP：张建强日常工作 CPD / C: 面护部订单交付 / D: 每日检查 并审核销售订单（room_key=room-wsdvc82x，node_uid=target）'
+  const expected = '张建强日常工作 CPD / C: 面护部订单交付 / D: 每日检查 并审核销售订单（room_key=room-wsdvc82x，node_uid=target）'
   assert.deepEqual(writes, [expected])
   assert.equal(messages.pop()[0], 'success')
   // HTTP/权限拒绝时使用实际文本回退，失败不能提示成功。
