@@ -378,6 +378,7 @@ services:
     image: nginx:1.27-alpine
     volumes:
       - ./docker/tls/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./docker/tls/proxy.conf:/etc/nginx/mind-map-proxy.conf:ro
       - ./certs:/etc/nginx/certs:ro
     ports:
       - "${MIND_MAP_PORT:-8989}:443"

@@ -8,6 +8,7 @@ dist_electron
 utools
 .env
 .secrets
+certs
 knowledge
 .mcp.json
 **/.DS_Store

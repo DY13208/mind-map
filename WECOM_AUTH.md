@@ -4,6 +4,8 @@
 
 企业微信官方参考：[构造扫码登录链接](https://developer.work.weixin.qq.com/document/path/91019)、[网页授权登录](https://developer.work.weixin.qq.com/document/path/91022)、[获取访问用户身份](https://developer.work.weixin.qq.com/document/path/91023)、[获取 access_token](https://developer.work.weixin.qq.com/document/path/91039)。
 
+仅迁移脑图到 `ai.stillgroup.net:8989`、保留其他系统旧域名时，使用 [第一阶段部署说明](docs/deployment/ai-domain-phase1.md)，不要全局替换旧域名。
+
 ## 1. 企业微信管理后台
 
 1. 进入 **应用管理**，创建或选择一个自建应用，记录 `AgentId` 和 `Secret`。

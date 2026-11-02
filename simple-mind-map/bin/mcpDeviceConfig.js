@@ -1,5 +1,6 @@
 const crypto = require('crypto')
 const { issueMcpUserToken } = require('./mcpUserToken')
+const { publicAppOrigin } = require('./publicAppOrigin')
 
 const BASE = '/api/mcp-config/device'
 const TTL = 5 * 60 * 1000
@@ -42,7 +43,7 @@ function createMcpDeviceConfigHandler({ authenticateRequest, now = Date.now, sec
     const error = (status, code) => send(res, status, { error: code })
     const proto = String(req.headers['x-forwarded-proto'] || 'http').split(',')[0].trim()
     const host = String(req.headers['x-forwarded-host'] || req.headers.host).split(',')[0].trim()
-    const origin = new URL(`${proto}://${host}`).origin
+    const origin = publicAppOrigin(process.env, `${proto}://${host}`)
     if (url.pathname === BASE && req.method === 'POST') {
       if (!String(secret() || '').trim()) { error(503, 'mcp_token_missing'); return true }
       const ip = req.socket.remoteAddress

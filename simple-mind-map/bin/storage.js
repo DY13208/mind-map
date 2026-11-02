@@ -1070,12 +1070,8 @@ function isLiveDocAllowed(nodes) {
 }
 
 function shareUrl(roomKey) {
-  const host = process.env.PUBLIC_HOST || '127.0.0.1'
-  const webPort = Number(process.env.WEB_PORT || 8989)
-  const gateway = process.env.GATEWAY === '1' || process.env.GATEWAY === 'true'
-  const portPart =
-    gateway && (webPort === 80 || webPort === 443) ? '' : `:${webPort}`
-  return `http://${host}${portPart}/?room=${encodeURIComponent(roomKey)}`
+  const { publicAppOrigin } = require('./publicAppOrigin')
+  return `${publicAppOrigin()}/?room=${encodeURIComponent(roomKey)}`
 }
 
 async function getRoom(roomKey) {

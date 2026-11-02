@@ -138,7 +138,8 @@ function detectHost() {
 }
 
 function writeMcpConfig(host) {
-  const url = `http://${host}:${PORT}/mcp`
+  const { publicAppOrigin } = require('../simple-mind-map/bin/publicAppOrigin')
+  const url = `${publicAppOrigin(process.env, `http://${host}:${PORT}`)}/mcp`
   // 与 scripts/launcher.js 的 mcpServerEntry 保持一致：设了 MCP_TOKEN 就必须
   // 带上 Authorization，否则网关一律 401，导图 MCP 在 WorkBuddy 里连不上。
   const entry = {
