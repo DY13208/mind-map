@@ -1,5 +1,7 @@
 // Keep MCP responses within a bounded context; full audit history stays in the UI.
 import { createRequire } from 'module'
+import { resolveAttachmentUploadInput } from '../mcpAttachmentUpload.mjs'
+import { createUploadTicket, discardUploadTicket } from '../mcpUploadTickets.mjs'
 const requireCjs = createRequire(import.meta.url)
 const aiReview = requireCjs('./aiReview')
 function routingAndSync(row, limit = 30) {
@@ -342,8 +344,71 @@ function compactTemplate(tpl) {
 }
 export function registerApprovalTools(server, { api, z, ok, fail }) {
   server.tool(
+    'create_approval_upload_ticket',
+    '为本次 Agent 审批申请签发附件直传票据，不挂到脑图节点。先 approval_request prepare(input_mode=agent) 取得 request_id；仅申请人、草稿或退回状态可用。指定模板附件字段 field_key，curl --data-binary @本地文件 POST upload_url 后，用 upload_approval_attachment 带 upload_id 完成登记。单文件上限20MiB，默认15分钟有效。',
+    {
+      request_id: z.string().uuid(),
+      field_key: z.string().describe('审批模板的附件字段 key 或准确名称'),
+      file_name: z.string(),
+      mime_type: z.string().optional()
+    },
+    async input => {
+      try {
+        const authorized = await api(`/api/workflow-requests/${encodeURIComponent(input.request_id)}/attachment-ticket`, {
+          method: 'POST', body: JSON.stringify({ fieldKey: input.field_key })
+        })
+        const target = authorized.item || authorized
+        return ok({ ...createUploadTicket({
+          roomKey: target.storageScope, nodeRef: target.fieldKey,
+          fileName: input.file_name, mimeType: input.mime_type
+        }), request_id: input.request_id, field_key: target.fieldKey, max_bytes: 20 * 1024 * 1024,
+        hint: 'curl -X POST --data-binary @<本地文件> "<upload_url>"；再调 upload_approval_attachment(request_id, field_key, upload_id, expected_revision, operation_id)，禁止调用节点 upload_attachment' })
+      } catch (error) { return fail(error) }
+    }
+  )
+  server.tool(
+    'upload_approval_attachment',
+    '上传本次审批申请专属附件并登记到指定材料字段，只在审批详情展示，不挂节点、不修改脑图或模板。仅申请人的 Agent 材料草稿/退回申请可用；先 prepare 得到 request_id。file_path 必须是 MCP 服务器可读路径；远程本机文件用 create_approval_upload_ticket 直传后传 upload_id。单文件20MiB，最多10份。成功返回最新 revision、fields 和 validation.inputHash；提交前展示更新后的材料并取得明确确认。不要使用会挂脑图节点的 upload_attachment。网络结果未知先 status 核对；同一操作重试保持原参数和 operation_id。',
+    {
+      request_id: z.string().uuid(),
+      field_key: z.string().describe('附件字段 key 或准确名称，如待入职人员简历'),
+      expected_revision: z.number().int(),
+      operation_id: z.string().uuid(),
+      file_name: z.string().optional(),
+      mime_type: z.string().optional(),
+      file_path: z.string().optional(),
+      content_base64: z.string().optional(),
+      source_url: z.string().optional(),
+      upload_id: z.string().optional()
+    },
+    async input => {
+      try {
+        const sources = [input.file_path, input.content_base64, input.source_url, input.upload_id].filter(Boolean)
+        if (sources.length !== 1) throw new Error('file_path、content_base64、source_url、upload_id 必须且只能提供一种')
+        const base = `/api/workflow-requests/${encodeURIComponent(input.request_id)}`
+        const authorized = await api(base + '/attachment-ticket', {
+          method: 'POST', body: JSON.stringify({ fieldKey: input.field_key })
+        })
+        const target = authorized.item || authorized
+        const resolved = await resolveAttachmentUploadInput({
+          ...input, room_key: target.storageScope, node: target.fieldKey
+        })
+        const result = await api(base + '/attachments', {
+          method: 'POST', timeoutMs: 180000,
+          body: JSON.stringify({
+            fieldKey: target.fieldKey, expectedRevision: input.expected_revision, operationId: input.operation_id,
+            fileName: resolved.fileName, mimeType: resolved.mimeType,
+            contentBase64: resolved.contentBase64, sourceUrl: resolved.sourceUrl
+          })
+        })
+        if (input.upload_id) discardUploadTicket(input.upload_id)
+        return ok(compactLeaveResult(result))
+      } catch (error) { return fail(error) }
+    }
+  )
+  server.tool(
     'approval_request',
-    '通用脑图原生审批。已发布审批节点的publication.agent_mode=true时必须确认publication.valid=true，并在prepare和submit带expected_definition_version=publication.id；草稿禁止执行，confirm_rules不能替代重新发布。evaluate只读判断execution.mode：notification_only表示仅登记抄送、无需审核，材料完整且用户确认后submit直接完成并通知抄送人，不生成审核待办；automatic_by_published_rule可按原规则自动通过，human_required须submit创建实际审批人的待办并展示execution.handoff中的@人员；blocked须先补齐信息。禁止伪造审批决定或猜测未能核验的业务事实。用户已指定room_key/node_uid时，直接用该节点作为template_source调用template核对，不必再匹配意图；否则resolve或catalog分页发现模板（hasMore须继续nextCursor），多候选由用户选择。两种入口：用户在脑图填写时input_mode=node，prepare传use_source_node=true及原节点，随后import读取；用户直接在对话提供材料时input_mode=agent，prepare传template_source、fields，可省略room_key/node_uid。agent模式不读取节点示例值，不向脑图创建任何节点；补充或修改用save传完整fields，禁止import；缺项要追问，附件只能引用服务器可核验的授权附件，不能把文件名当证明。agent模式prepare/save/submit均带input_mode=agent。返回cc_resolved是后台按人事组织解析的实际抄送人，HRBP/IT等动态角色不要求手工填姓名，不猜人员；configurationRequired非空时须处理。submit前展示本次字段、附件、抄送人与流程，取得用户明确提交指令，带当前revision、唯一operation_id及confirm_submission=true；脑图入口携带validation.nodeInputHash，对话入口携带expected_input_hash=validation.inputHash；仅执行SOP或核对不等于授权提交。结果未知先status，不能换ID盲重试。首次执行或规则变化时，requires_rule_confirmation=true；展示policy_fingerprint对应规则并取得用户明确确认后，submit同时传confirm_rules=true和expected_policy_fingerprint，只为本次申请确认版本，不必单独发布，也不全局发布给其他人。直属角色的默认同意含拒绝或须确认条件时仍由实际审核人核验，不能由AI判定条件已满足。auto_approve仅代表本次已确认或已发布的原节点自动同意规则，不是AI代批；人工审批仍由审核人登录页面办理。status的hrms_sync返回等待、失败重试或已同步及单号，审批已通过不等于人事已同步；null表示未入队，不可声称同步成功。analysis仅为辅助建议。',
+    '通用脑图原生审批。已发布审批节点的publication.agent_mode=true时必须确认publication.valid=true，并在prepare和submit带expected_definition_version=publication.id；草稿禁止执行，confirm_rules不能替代重新发布。evaluate只读判断execution.mode：notification_only表示仅登记抄送、无需审核，材料完整且用户确认后submit直接完成并通知抄送人，不生成审核待办；automatic_by_published_rule可按原规则自动通过，human_required须submit创建实际审批人的待办并展示execution.handoff中的@人员；blocked须先补齐信息。禁止伪造审批决定或猜测未能核验的业务事实。用户已指定room_key/node_uid时，直接用该节点作为template_source调用template核对，不必再匹配意图；否则resolve或catalog分页发现模板（hasMore须继续nextCursor），多候选由用户选择。两种入口：用户在脑图填写时input_mode=node，prepare传use_source_node=true及原节点，随后import读取；用户直接在对话提供材料时input_mode=agent，prepare传template_source、fields，可省略room_key/node_uid。agent模式不读取节点示例值，不向脑图创建任何节点；补充或修改用save传完整fields，禁止import；缺项要追问，附件必须先prepare取得request_id，再用upload_approval_attachment上传到本次申请的附件字段；远程本机文件先create_approval_upload_ticket直传。禁止使用节点upload_attachment或把文件名当证明，不向脑图挂附件。agent模式prepare/save/submit均带input_mode=agent。返回cc_resolved是后台按人事组织解析的实际抄送人，HRBP/IT等动态角色不要求手工填姓名，不猜人员；configurationRequired非空时须处理。submit前展示本次字段、附件、抄送人与流程，取得用户明确提交指令，带当前revision、唯一operation_id及confirm_submission=true；脑图入口携带validation.nodeInputHash，对话入口携带expected_input_hash=validation.inputHash；仅执行SOP或核对不等于授权提交。结果未知先status，不能换ID盲重试。首次执行或规则变化时，requires_rule_confirmation=true；展示policy_fingerprint对应规则并取得用户明确确认后，submit同时传confirm_rules=true和expected_policy_fingerprint，只为本次申请确认版本，不必单独发布，也不全局发布给其他人。直属角色的默认同意含拒绝或须确认条件时仍由实际审核人核验，不能由AI判定条件已满足。auto_approve仅代表本次已确认或已发布的原节点自动同意规则，不是AI代批；人工审批仍由审核人登录页面办理。status的hrms_sync返回等待、失败重试或已同步及单号，审批已通过不等于人事已同步；null表示未入队，不可声称同步成功。analysis仅为辅助建议。',
     {
       action: z.enum([
         'catalog',
@@ -378,7 +443,7 @@ export function registerApprovalTools(server, { api, z, ok, fail }) {
         .describe('prepare时申请节点；use_source_node=true时使用template_source原流程节点'),
       use_source_node: z.boolean().optional().describe('仅prepare：true时直接核对原流程提交要求，不新增申请资料分支；必须提供相同的room_key/node_uid和template_source'),
       input_mode: z.enum(['node','agent']).optional().describe('两种材料入口：node读取脑图；agent使用对话材料、不写回脑图。agent模式的prepare/save/submit均须携带；prepare可省略room_key/node_uid，使用template_source'),
-      fields: z.record(z.union([z.string(),z.array(z.string())])).optional().describe('仅agent模式prepare/save：完整本次申请资料，键为template字段key或准确名称；文本/日期/金额用字符串，附件用已授权服务器附件ID数组。缺项须追问，不能借用脑图示例值或伪造文件引用'),
+      fields: z.record(z.union([z.string(),z.array(z.string())])).optional().describe('仅agent模式prepare/save：完整本次申请资料，键为template字段key或准确名称；文本/日期/金额用字符串，附件用upload_approval_attachment返回的本申请附件ID数组，不能跨申请引用。缺项须追问，不能借用脑图示例值或伪造文件引用'),
       expected_input_hash: z.string().optional().describe('agent模式submit须传最新validation.inputHash，绑定用户已核对的申请材料和附件快照'),
       confirm_rules: z.boolean().optional().describe('仅submit：用户明确核对字段、规则、审核人与抄送人后确认本次申请使用当前版本，不是全局发布；不能由Agent自行代确认'),
       expected_policy_fingerprint: z.string().optional().describe('submit确认规则时传最新prepare/import/status返回的policy_fingerprint；规则变化后必须重新核对'),

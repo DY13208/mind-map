@@ -50,8 +50,8 @@ async function evidence(db, row) {
   const ids = (row.fields && row.fields.attachmentIds) || []
   if (!ids.length) return []
   const { rows } = await db.query(
-    'select id,file_name,left(extracted_text,1600) as text from node_attachments where room_key=$1 and id=any($2::text[]) limit 10',
-    [row.room_key, ids]
+    'select id,file_name,left(extracted_text,1600) as text from node_attachments where room_key=any($1::text[]) and id=any($2::text[]) limit 10',
+    [[row.room_key, ...(row.template.agentInput ? [require('./attachments').scope(row)] : [])], ids]
   )
   return rows.map(r => ({ id: r.id, fileName: r.file_name, text: r.text || '' }))
 }

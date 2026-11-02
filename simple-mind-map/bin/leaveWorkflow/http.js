@@ -121,14 +121,18 @@ async function handle(req, res, { url, db, writer, readBody, sendJson }) {
       result = await service.get(db, req, result.id)
     } else {
       const hit = path.match(
-        /^\/api\/leave-requests\/([^/]+)(?:\/(save|import|submit|withdraw|decide|analysis|attachments)(?:\/([^/]+))?)?$/
+        /^\/api\/leave-requests\/([^/]+)(?:\/(save|import|submit|withdraw|decide|analysis|attachments|attachment-ticket)(?:\/([^/]+))?)?$/
       )
       if (!hit) return false
       if (req.method === 'GET' && !hit[2])
         result = await service.get(db, req, hit[1], {
           before: url.searchParams.get('before')
         })
-      else if (req.method === 'POST' && hit[2] && hit[2] !== 'attachments')
+      else if (req.method === 'POST' && hit[2] === 'attachments' && !hit[3])
+        result = await service.uploadAttachment(db, req, hit[1], await readBody(req, { maxBytes: 32 * 1024 * 1024 }))
+      else if (req.method === 'POST' && hit[2] === 'attachment-ticket' && !hit[3])
+        result = await service.authorizeAttachmentUpload(db, req, hit[1], (await readBody(req)).fieldKey)
+      else if (req.method === 'POST' && hit[2] && !['attachments', 'attachment-ticket'].includes(hit[2]))
         result = await service.mutate(
           db,
           req,

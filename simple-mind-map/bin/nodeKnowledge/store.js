@@ -679,11 +679,12 @@ function decodeContentBase64(value) {
   // and empty files legitimately have no payload after the comma.
   const dataUrl = /^data:[^,]*;base64,/i.test(raw)
   const cleaned = dataUrl ? raw.replace(/^data:[^,]*;base64,/i, '') : raw
+  const padding = cleaned.endsWith('==') ? 2 : cleaned.endsWith('=') ? 1 : 0
+  // Avoid repeated groups: V8 can overflow its regexp stack on multi-MiB files.
   if (
     cleaned &&
-    !/^(?:[a-z0-9+/]{4})*(?:[a-z0-9+/]{2}==|[a-z0-9+/]{3}=)?$/i.test(
-      cleaned
-    )
+    (cleaned.length % 4 !== 0 ||
+      /[^a-z0-9+/]/i.test(cleaned.slice(0, cleaned.length - padding)))
   ) {
     const err = new Error('contentBase64 无效')
     err.statusCode = 400
@@ -703,11 +704,12 @@ function decodeContentBase64(value) {
 }
 
 async function ingestUpload(db, roomKey, body, actor = {}) {
+  const maxBytes = Math.min(MAX_BYTES, Number(actor.maxBytes) > 0 ? Number(actor.maxBytes) : MAX_BYTES)
   let buffer = decodeContentBase64(body && body.contentBase64)
   let mimeType = body && body.mimeType
   let fileName = (body && body.fileName) || 'file'
   if (!buffer && body && body.sourceUrl) {
-    const downloaded = await fetchSafeUrl(body.sourceUrl, { maxBytes: MAX_BYTES })
+    const downloaded = await fetchSafeUrl(body.sourceUrl, { maxBytes })
     buffer = downloaded.buffer
     mimeType = mimeType || downloaded.mimeType
     if (!body.fileName) {
@@ -725,6 +727,7 @@ async function ingestUpload(db, roomKey, body, actor = {}) {
     err.code = 'MISSING_CONTENT'
     throw err
   }
+  if (buffer.length > maxBytes) throw binary.fileTooLargeError(maxBytes)
   return createFromBuffer(db, {
     roomKey,
     buffer,
@@ -733,6 +736,7 @@ async function ingestUpload(db, roomKey, body, actor = {}) {
     nodeUid: body && body.nodeUid,
     sourceKind: (body && body.sourceKind) || 'attachment',
     createdBy: actor.id || '',
+    waitExtract: actor.waitExtract,
     forceExtract: !!(body && body.forceExtract)
   })
 }

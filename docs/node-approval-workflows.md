@@ -141,7 +141,29 @@ HRMS接口源码在 `scripts/hrms/approval_import.py`，专用身份初始化在
 
 连接使用独立的 `HRMS_ORG_*` 配置。Frappe 端只读接口源码在 `scripts/hrms/approval_directory.py`，部署至 employee_roster.integrations；`scripts/hrms/setup_org_reader.py` 是当前本地站点的初始化脚本，执行前应核对其中站点、公司及企微企业 ID。专用角色不授予 Employee/Department 文档 CRUD 权限，接口按公司 User Permission 检查范围，仅返回员工部门与已登记 HRBP 的必要身份字段。凭据只能存于忽略的环境文件或密钥存储，禁止提交到版本库。
 
-沿用现有认证、脑图权限、审批存储、版本、事务、消息/SSE、历史和可信节点写入，不改附件存储/上传/下载接口，不新增依赖。
+沿用现有认证、脑图权限、审批存储、版本、事务、消息/SSE、历史和可信节点写入。Agent 对话材料使用独立的审批附件上传接口，普通节点附件接口保持原行为；不新增依赖。
+
+### Agent 审批申请专属附件
+
+对话材料使用 `approval_request.prepare(input_mode="agent")` 创建申请。取得 `request_id` 后，用 `upload_approval_attachment` 上传到模板中指定的附件字段（`field_key` 支持 key 或准确名称，如“待入职人员简历”）。文件仅属于本次申请，在审批详情的附件列表中下载；不调用节点附件挂载、节点更新或脑图投影写入。禁止使用通用节点 `upload_attachment` 上传这些材料。
+
+- 服务器可读文件：`upload_approval_attachment(request_id, field_key, file_path, expected_revision, operation_id)`；也支持 `content_base64` 或 `source_url`，内容来源必须且只能指定一种。
+- Agent 本机文件：先 `create_approval_upload_ticket(request_id, field_key, file_name)`，再用 `curl -X POST --data-binary @本地文件 "upload_url"` 直传，最后 `upload_approval_attachment(..., upload_id, expected_revision, operation_id)`。配置 `MCP_PUBLIC_BASE_URL` 为对外站点地址（不带 `/mcp`），代理须转发 `/mcp-upload/`。
+- 每份文件最多 20 MiB，每次申请最多 10 份；必须配置既有私有对象存储。文件存储成功且解析可读后才登记材料字段，更新 revision、附件内容哈希和 `validation.inputHash`。提交时使用最新 inputHash，经用户确认后提交。重新连接 MCP 才能发现新增工具。
+- 只接受本企业申请人的个人 MCP 身份，申请须为 Agent 材料模式且状态为草稿或退回，保留模板查看权限与已发布版本检查。正式提交后禁止追加、修改材料；退回或撤回后再补充。
+- 存储复用二进制存储底层，但按 `approval-request:<request UUID>` 隔离，`node_uid` 留空。该命名空间包含普通脑图房间号不允许的冒号，不能通过房间附件接口访问；不写入共享模板房间的文件库。引用其他申请或普通脑图附件时返回 `ATTACHMENT_NOT_BOUND`。
+- 下载沿用 `/api/workflow-requests/:requestId/attachments/:attachmentId` 的审批身份权限：申请人、有权查看该申请的实际审批人、办结后的抄送人；历史审核人仍按既有审批快照授权。正式材料下载和人事同步重新核验快照内容哈希。既有节点模式审批与历史附件下载保持兼容；旧 Agent 草稿若引用节点附件，补充材料时应重新上传为申请专属附件。
+- 上传写入审批审计事件（附件 ID、字段、版本，不含文件字节）。同一 `operation_id` 和相同内容重放不重复上传；相同编号不同参数或过期 revision 被拒绝。超时结果未知先查询 status，确认附件、字段及版本；直传票据在成功登记后释放，失败时保留至过期以便核对重试。
+
+验证：`node --test simple-mind-map/test/approvalAttachments.test.cjs simple-mind-map/test/approvalAttachments.mcp.test.mjs`。隔离 PostgreSQL 集成测试使用 `APPROVAL_ATTACHMENT_TEST_DB_URL` 指向本机专用测试数据库，再执行 `node --test simple-mind-map/test/approvalAttachments.pg.integration.test.cjs`；测试会创建并清理独立 schema，仅替换外部对象存储和提取服务，使用真实数据库事务、ACL、审批模板、上传/下载入口和提交校验，并断言脑图节点没有变化。
+
+### 审批查看与操作性能
+
+审批详情打开时直接复用首次 GET/prepare 的结果，错误恢复也复用已读取的版本，不重复请求详情。AI 辅助分析由用户点击启动，查看或刷新不再自动调用模型。列表独立于通知读取、已读回执加载，已读通知不重复提交；同一批变更通知合并刷新。
+
+历史列表在 SQL 中剔除 `detail.snapshot`，完整快照仍保留在审计库供历史授权读取。审批列表在 SQL 中仅投影步骤角色，不传输审核正文。已结束申请展示保存的材料，不重新编译当前模板；提交和正式同意时的实时模板、权限、版本及附件哈希校验保持不变，不缓存或跳过这些检查。
+
+前端请求次数与异步等待回归：`node --test web/tests/approvalPerformance.test.cjs`。上述隔离数据库集成测试中的大材料样本，历史查询结果从 2,100,389 字节降至 1,005 字节；审批列表样本 290 字节，已结束详情的模板子树查询为 0 次。这是固定测试样本的传输量和查询次数，不能当作线上响应耗时承诺。
 
 模板发现使用 `room_nodes` 中明确的“流程标识”元数据及部分索引，分页读取名称/触发词；不拉取整张脑图。选定流程后才定向读取最多500节点的模板子树。普通成员只能发现自己有权查看的模板；正式审核人按本次申请授权查看固定材料，无须获准查看申请人的整张脑图。
 
