@@ -14,5 +14,7 @@ module.exports = {
   extractBuffer: extract.extractBuffer,
   limits,
   ssrf,
-  isTusPath: http.isTusPath
+  isTusPath: http.isTusPath,
+  resumeStaleProcessing: store.resumeStaleProcessing,
+  startStaleProcessingRecovery: store.startStaleProcessingRecovery
 }

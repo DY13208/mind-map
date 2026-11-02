@@ -116,8 +116,11 @@ export class AttachmentService {
         });
       }
 
-      // Only index PDF, DOCX and TXT files
-      if (['.pdf', '.docx', '.txt'].includes(attachment.fileExt.toLowerCase())) {
+      // Keep the existing optional EE indexing job for its supported formats.
+      // The processor falls back to our Docling extractor when that module is
+      // absent. Raster images use the same built-in queue directly.
+      const extension = attachment.fileExt.toLowerCase();
+      if (['.pdf', '.docx', '.txt'].includes(extension)) {
         await this.attachmentQueue.add(
           QueueJob.ATTACHMENT_INDEX_CONTENT,
           {
@@ -129,6 +132,15 @@ export class AttachmentService {
               type: 'exponential',
               delay: 10000,
             },
+          },
+        );
+      } else if (['.png', '.jpg', '.jpeg', '.tif', '.tiff', '.bmp', '.webp'].includes(extension)) {
+        await this.attachmentQueue.add(
+          QueueJob.ATTACHMENT_EXTRACT_CONTENT,
+          { attachmentId },
+          {
+            attempts: 2,
+            backoff: { type: 'exponential', delay: 10000 },
           },
         );
       }

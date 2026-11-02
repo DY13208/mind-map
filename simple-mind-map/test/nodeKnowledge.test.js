@@ -5,9 +5,11 @@ const ssrf = require('../bin/nodeKnowledge/ssrf')
 const extract = require('../bin/nodeKnowledge/extract')
 const store = require('../bin/nodeKnowledge/store')
 const attachmentFileName = require('../src/utils/attachmentFileName')
+const attachmentFileType = require('../src/utils/attachmentFileType')
 
 function createMemoryDb() {
   const rows = new Map()
+  const queries = []
   let hashMisses = 0
   let uniqueInsertFailures = 0
   let nextFileNameUpdateBehavior = ''
@@ -16,13 +18,42 @@ function createMemoryDb() {
     rows.delete(`hash:${row.room_key}:${row.content_hash}`)
   }
   return {
+    queries,
+    rows,
     forceNextHashMiss() { hashMisses += 1 },
     failNextInsertAsUniqueConflict() { uniqueInsertFailures += 1 },
     setNextFileNameUpdateBehavior(behavior) { nextFileNameUpdateBehavior = behavior },
+    setAttachmentState(roomKey, id, patch = {}) {
+      const row = rows.get(id)
+      if (row && row.room_key === roomKey) Object.assign(row, patch)
+    },
     async query(sql, params = []) {
       const text = String(sql).replace(/\s+/g, ' ').trim().toLowerCase()
+      queries.push({ text, params })
       if (text.startsWith('create') || text.startsWith('alter')) {
         return { rows: [] }
+      }
+      if (text.startsWith('select id, room_key, updated_at::text as lease_token from node_attachments')) {
+        const [cutoff, limit] = params
+        const selected = [...new Map([...rows.values()].map(row => [row.id, row])).values()]
+          .filter(row => row.status === 'processing' && new Date(row.updated_at) < new Date(cutoff))
+          .sort((a, b) => new Date(a.updated_at) - new Date(b.updated_at))
+          .slice(0, Number(limit))
+        return { rows: selected.map(({ id, room_key, lease_token }) => ({ id, room_key, lease_token })) }
+      }
+      if (text.startsWith('update node_attachments set updated_at = now() where id = $1 and status = \'processing\' and updated_at = $2::text::timestamptz')) {
+        const row = rows.get(params[0])
+        if (!row || row.status !== 'processing' || row.lease_token !== params[1]) {
+          return { rows: [] }
+        }
+        row.updated_at = new Date()
+        return { rows: [{ id: row.id }] }
+      }
+      if (text.startsWith('update node_attachments set updated_at = now() where id = $1 and status =')) {
+        const row = rows.get(params[0])
+        if (!row || row.status !== 'processing') return { rows: [] }
+        row.updated_at = new Date()
+        return { rows: [{ id: row.id }] }
       }
       if (text.includes('insert into node_attachments')) {
         if (uniqueInsertFailures > 0) {
@@ -40,12 +71,12 @@ function createMemoryDb() {
           mime_type: params[5],
           byte_size: params[6],
           cos_key: params[7],
-          status: 'processing',
+          status: params[8],
           error_message: '',
           extracted_text: '',
           extracted_chars: 0,
-          source_kind: params[8],
-          created_by: params[9],
+          source_kind: params[9],
+          created_by: params[10],
           created_at: new Date(),
           updated_at: new Date()
         }
@@ -195,6 +226,29 @@ async function main() {
   assert.equal(limits.isAllowedFile('a.html', ''), true)
   assert.equal(limits.isAllowedFile('a.htm', 'text/html'), true)
   assert.equal(limits.isAllowedFile('a.exe', 'application/octet-stream'), false)
+  assert.deepEqual(attachmentFileType.ARCHIVE_EXTENSIONS, [
+    '.zip', '.rar', '.7z', '.tar', '.gz', '.bz2', '.xz',
+    '.tar.gz', '.tar.bz2', '.tar.xz', '.tgz', '.tbz2', '.txz'
+  ])
+  for (const fileName of attachmentFileType.ARCHIVE_EXTENSIONS) {
+    assert.equal(limits.isAllowedFile(`资料${fileName.toUpperCase()}`, 'application/octet-stream'), true)
+    assert.equal(limits.kindOf(`资料${fileName.toUpperCase()}`, ''), 'archive')
+  }
+  for (const mimeType of attachmentFileType.ARCHIVE_MIME_TYPES) {
+    assert.equal(limits.isAllowedFile('downloaded-package', mimeType), true, mimeType)
+    assert.equal(limits.kindOf('downloaded-package', mimeType), 'archive', mimeType)
+  }
+  assert.equal(limits.normalizeMime('', '备份.tar.gz'), 'application/gzip')
+  assert.equal(limits.normalizeMime('application/octet-stream', '备份.tar.bz2'), 'application/x-bzip2')
+  assert.equal(limits.kindOf('报告.docx', 'application/zip'), 'docx')
+  assert.equal(limits.kindOf('模型.xlsx', 'application/x-zip-compressed'), 'xlsx')
+  assert.equal(attachmentFileType.getAttachmentFileType('资料.ZIP', 'text/plain'), 'archive')
+  assert.equal(attachmentFileType.getAttachmentFileIconType('资料.ZIP', 'text/plain'), 'archive')
+  assert.equal(attachmentFileType.getAttachmentFileType('报告.docx', 'application/zip'), 'word')
+  assert.equal(limits.isAllowedFile('a.exe', 'application/zip'), true)
+  assert.equal(limits.isAllowedFile('a.exe', 'application/octet-stream'), false)
+  assert.equal(limits.attachmentResponseHeaders('资料.tar.xz')['Content-Disposition'].startsWith('attachment;'), true)
+  assert.equal(limits.attachmentResponseHeaders('资料.tar.xz')['Content-Type'], 'application/x-xz')
   assert.equal(limits.kindOf('x.md', ''), 'text')
   assert.equal(limits.kindOf('x.html', ''), 'html')
   assert.equal(limits.kindOf('page.htm', 'text/html'), 'html')
@@ -203,6 +257,14 @@ async function main() {
   assert.equal(limits.kindOf('x.ods', ''), 'xlsx')
   assert.equal(limits.kindOf('x.pptx', ''), 'pptx')
   assert.equal(limits.kindOf('x.doc', ''), 'doc')
+
+  const opaqueArchive = await extract.extractBuffer(Buffer.from('encrypted or malformed bytes'), {
+    fileName: '加密备份.ZIP',
+    mimeType: 'application/octet-stream'
+  })
+  assert.deepEqual(opaqueArchive, {
+    kind: 'archive', status: 'ready', extractedText: '', errorMessage: ''
+  })
 
   assert.throws(() => ssrf.assertSafeHttpUrl('file:///etc/passwd'), /http/)
   assert.throws(() => ssrf.assertSafeHttpUrl('http://127.0.0.1/a'), /本地|私网/)
@@ -264,6 +326,19 @@ async function main() {
   assert.equal(docx.status, 'ready')
   assert.match(docx.extractedText, /合同金额/)
 
+  const sameContentDb = createMemoryDb()
+  const storedDocx = await store.createFromBuffer(sameContentDb, {
+    roomKey: 'room-same-content', buffer: docxBuf,
+    fileName: '合同.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+  })
+  const archiveNamedDuplicate = await store.createFromBuffer(sameContentDb, {
+    roomKey: 'room-same-content', buffer: docxBuf,
+    fileName: '合同.zip', mimeType: 'application/zip', forceExtract: true
+  })
+  assert.equal(archiveNamedDuplicate.id, storedDocx.id)
+  assert.equal(archiveNamedDuplicate.fileName, '合同.docx')
+  assert.match(archiveNamedDuplicate.extractedText, /合同金额/)
+
   const pdf = await extract.extractBuffer(
     Buffer.from('%PDF-1.4\nBT\n(Hello PDF Text) Tj\nET\n%%EOF', 'latin1'),
     { fileName: 'a.pdf', mimeType: 'application/pdf' }
@@ -288,6 +363,44 @@ async function main() {
   })
   assert.equal(first.status, 'ready')
   assert.match(first.extractedText, /hello knowledge/)
+
+  const archiveBytes = Buffer.from('opaque archive bytes')
+  const archive = await store.createFromBuffer(db, {
+    roomKey: 'room-demo',
+    buffer: archiveBytes,
+    fileName: '业务资料.TAR.GZ',
+    mimeType: 'application/octet-stream',
+    createdBy: 'tester'
+  })
+  assert.equal(archive.status, 'ready')
+  assert.equal(archive.kind, 'archive')
+  assert.equal(archive.extractedText, '')
+  assert.equal(archive.extractedChars, 0)
+  assert.equal(archive.errorMessage, '')
+  assert.equal((await store.getById(db, 'room-demo', archive.id)).status, 'ready')
+
+  db.setAttachmentState('room-demo', archive.id, {
+    status: 'failed', error_message: 'legacy archive parser failure',
+    extracted_text: 'must be cleared', extracted_chars: 16
+  })
+  const archiveDeduped = await store.createFromBuffer(db, {
+    roomKey: 'room-demo',
+    buffer: archiveBytes,
+    fileName: '业务资料.tar.gz',
+    mimeType: 'application/gzip',
+    forceExtract: true
+  })
+  assert.equal(archiveDeduped.deduped, true)
+  assert.equal(archiveDeduped.status, 'ready')
+  assert.equal(archiveDeduped.extractedText, '')
+
+  db.setAttachmentState('room-demo', archive.id, {
+    status: 'failed', error_message: 'legacy parser failure', extracted_text: ''
+  })
+  const archiveReextracted = await store.reextractStored(db, 'room-demo', archive.id)
+  assert.equal(archiveReextracted.status, 'ready')
+  assert.equal(archiveReextracted.errorMessage, '')
+  assert.equal(archiveReextracted.extractedText, '')
   assert.equal(first.deduped, false)
 
   const second = await store.createFromBuffer(db, {
@@ -526,6 +639,31 @@ async function main() {
   assert.equal(fromFile.status, 'ready')
   assert.match(fromFile.extractedText, /from disk file/)
   assert.equal(fs.existsSync(tmp), false)
+
+  const archivePath = path.join(os.tmpdir(), `mm-att-test-${Date.now()}.tar.bz2`)
+  fs.writeFileSync(archivePath, Buffer.from('opaque compressed payload'))
+  const originalReadFile = fs.promises.readFile
+  let archiveReadCount = 0
+  fs.promises.readFile = function (filePath, ...args) {
+    if (path.resolve(String(filePath)) === path.resolve(archivePath)) archiveReadCount += 1
+    return originalReadFile.call(this, filePath, ...args)
+  }
+  let archiveFromFile
+  try {
+    archiveFromFile = await store.createFromBuffer(db, {
+      roomKey: 'room-demo',
+      filePath: archivePath,
+      fileName: '文件资料.tar.bz2',
+      mimeType: 'application/octet-stream',
+      cleanupFile: true
+    })
+  } finally {
+    fs.promises.readFile = originalReadFile
+  }
+  assert.equal(archiveFromFile.status, 'ready')
+  assert.equal(archiveFromFile.extractedText, '')
+  assert.equal(archiveReadCount, 0, 'archive uploads must not load the full local file for extraction')
+  assert.equal(fs.existsSync(archivePath), false)
 
   const { Readable } = require('stream')
   const payload = Buffer.from('streamed attachment text', 'utf8')
@@ -852,6 +990,90 @@ async function testListMetaAndTextSlice() {
   })
   assert.equal(clamped.calls[0].params[2], 0)
   assert.equal(clamped.calls[0].params[3], limits.MAX_TEXT_SLICE_CHARS)
+
+  // Stale processing recovery claims only a small bounded batch and does not
+  // fetch attachment bodies in the recovery scan itself.
+  const recoveryDb = createMemoryDb()
+  await store.initSchema(recoveryDb)
+  const staleLeaseTokens = [
+    '2000-01-02 03:04:05.123456+00',
+    '2000-01-02 03:04:05.123457+00',
+    '2000-01-02 03:04:05.123458+00',
+    '2000-01-02 03:04:05.123459+00'
+  ]
+  for (let index = 0; index < 4; index += 1) {
+    const row = {
+      id: `stale-${index}`, room_key: 'room-stale', node_uid: '',
+      content_hash: `hash-${index}`, file_name: `stale-${index}.pdf`,
+      mime_type: 'application/pdf', byte_size: 1, cos_key: `missing-${index}`,
+      status: 'processing', error_message: '', extracted_text: '', extracted_chars: 0,
+      source_kind: 'attachment', created_by: '', created_at: new Date(staleLeaseTokens[index]),
+      updated_at: new Date(staleLeaseTokens[index]), lease_token: staleLeaseTokens[index]
+    }
+    recoveryDb.rows.set(row.id, row)
+    recoveryDb.rows.set(`hash:${row.room_key}:${row.content_hash}`, row)
+  }
+  const recoveryQueued = await store.resumeStaleProcessing(recoveryDb)
+  assert.equal(recoveryQueued, Math.min(limits.EXTRACT_CONCURRENCY, 2))
+  const recoveryScan = recoveryDb.queries.find(query => query.text.startsWith('select id, room_key, updated_at::text as lease_token from node_attachments'))
+  assert.equal(recoveryScan.params[1], Math.min(limits.EXTRACT_CONCURRENCY, 2))
+  const recoveryClaim = recoveryDb.queries.find(query => query.text.startsWith('update node_attachments set updated_at = now() where id = $1 and status = \'processing\' and updated_at = $2::text::timestamptz'))
+  assert.equal(typeof recoveryClaim.params[1], 'string')
+  assert.match(recoveryClaim.params[1], /\.\d{6}\+00$/)
+  assert.ok(recoveryDb.queries.filter(query => query.text.startsWith('select * from node_attachments where room_key = $1 and id = $2')).length <= Math.min(limits.EXTRACT_CONCURRENCY, 2),
+    'recovery should fetch only the bounded batch after scheduling')
+  const recoveryDeadline = Date.now() + 2000
+  while (Date.now() < recoveryDeadline) {
+    const recovered = ['stale-0', 'stale-1'].every(id => recoveryDb.rows.get(id).status === 'failed')
+    if (recovered) break
+    await new Promise(resolve => setTimeout(resolve, 10))
+  }
+  assert.equal(recoveryDb.rows.get('stale-0').status, 'failed')
+  assert.equal(recoveryDb.rows.get('stale-1').status, 'failed')
+  assert.equal(recoveryDb.rows.get('stale-2').status, 'processing')
+
+  if (process.env.NODE_KNOWLEDGE_PG_TEST === '1') {
+    const { Pool } = require('pg')
+    const pool = new Pool()
+    const client = await pool.connect()
+    try {
+      await client.query('begin')
+      const exactToken = '2000-01-02 03:04:05.123456+00'
+      const roundedDate = new Date('2000-01-02T03:04:05.123Z')
+      await client.query(`
+        create temporary table node_knowledge_lease_test (
+          id integer primary key,
+          updated_at timestamptz not null
+        ) on commit drop
+      `)
+      await client.query(
+        'insert into node_knowledge_lease_test (id, updated_at) values ($1, $2::timestamptz)',
+        [1, exactToken]
+      )
+      const result = await client.query(
+        `select id, updated_at,
+                updated_at::text as lease_token,
+                updated_at = $1::timestamptz as date_matches_exact
+           from node_knowledge_lease_test where id = $2`,
+        [roundedDate, 1]
+      )
+      const row = result.rows[0]
+      assert.ok(row.updated_at instanceof Date)
+      assert.match(row.lease_token, /\.123456/)
+      assert.equal(row.date_matches_exact, false)
+      const claim = await client.query(
+        `update node_knowledge_lease_test set updated_at = now()
+          where id = $1 and updated_at = $2::text::timestamptz
+          returning id`,
+        [row.id, row.lease_token]
+      )
+      assert.equal(claim.rowCount, 1, 'the exact text token must claim the microsecond timestamp')
+    } finally {
+      await client.query('rollback').catch(() => {})
+      client.release()
+      await pool.end()
+    }
+  }
 }
 
 main().catch(err => {

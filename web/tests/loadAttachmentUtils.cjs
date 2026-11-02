@@ -12,7 +12,10 @@ module.exports = function loadAttachmentUtils(name = 'nodeAttachmentPreview') {
   const ref = { exports: {} }
   new Function('require', 'module', 'exports', code)(
     name => name === 'simple-mind-map/src/utils/attachmentIconState'
-      ? require('../../simple-mind-map/src/utils/attachmentIconState') : require(name),
+      ? require('../../simple-mind-map/src/utils/attachmentIconState')
+      : name === 'simple-mind-map/src/utils/attachmentFileType'
+        ? require('../../simple-mind-map/src/utils/attachmentFileType')
+        : require(name),
     ref, ref.exports
   )
   return ref.exports

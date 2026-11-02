@@ -18,6 +18,12 @@ const {
   normalizeAttachmentFileName,
   sanitizeAttachmentFileName
 } = require('../../src/utils/attachmentFileName')
+const {
+  ARCHIVE_EXTENSIONS,
+  ARCHIVE_MIME_TYPES,
+  ARCHIVE_MIME_BY_EXTENSION,
+  isArchiveAttachment
+} = require('../../src/utils/attachmentFileType')
 // Attachment text is handed to MCP clients in slices so a single response
 // cannot blow past their output budget.
 const DEFAULT_TEXT_SLICE_CHARS = 4000
@@ -72,7 +78,8 @@ const MIME_BY_EXT = {
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
   '.webp': 'image/webp',
-  '.gif': 'image/gif'
+  '.gif': 'image/gif',
+  ...ARCHIVE_MIME_BY_EXTENSION
 }
 
 function extOf(name) {
@@ -104,6 +111,7 @@ function isHtmlMime(mimeType) {
 function isAllowedFile(fileName, mimeType) {
   const ext = extOf(fileName)
   const mime = normalizeMime(mimeType, fileName)
+  if (isArchiveAttachment(fileName, mime)) return true
   if (
     TEXT_EXTS.has(ext) ||
     HTML_EXTS.has(ext) ||
@@ -135,6 +143,7 @@ function isAllowedFile(fileName, mimeType) {
 function kindOf(fileName, mimeType) {
   const ext = extOf(fileName)
   const mime = normalizeMime(mimeType, fileName)
+  if (isArchiveAttachment(fileName, mime)) return 'archive'
   if (HTML_EXTS.has(ext) || isHtmlMime(mime)) return 'html'
   if (IMAGE_EXTS.has(ext) || /^image\//.test(mime)) return 'image'
   if (ext === '.pdf' || mime === 'application/pdf') return 'pdf'
@@ -207,6 +216,10 @@ module.exports = {
   HTML_EXTS,
   DOC_EXTS,
   IMAGE_EXTS,
+  ARCHIVE_EXTENSIONS,
+  ARCHIVE_MIME_TYPES,
+  ARCHIVE_MIME_BY_EXTENSION,
+  isArchiveAttachment,
   isHtmlMime,
   MIME_BY_EXT,
   extOf,

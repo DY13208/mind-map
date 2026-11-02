@@ -41,6 +41,9 @@ function loadVue(file, mocks = {}) {
     if (name === 'simple-mind-map/src/utils/attachmentFileName') {
       return require(path.join(__dirname, '../../simple-mind-map/src/utils/attachmentFileName'))
     }
+    if (name === 'simple-mind-map/src/utils/attachmentFileType') {
+      return require(path.join(__dirname, '../../simple-mind-map/src/utils/attachmentFileType'))
+    }
     return {}
   }, mod, mod.exports)
   return mod.exports.default
@@ -880,6 +883,9 @@ async function run() {
       readKnowledgeFileReference: file => { referenceReads++; return referenceResult(file) }
     } }
   )
+  assert.match(knowledgeComponent.computed.fileAccept.call({}), /\.zip/)
+  assert.match(knowledgeComponent.computed.fileAccept.call({}), /\.tar\.gz/)
+  assert.match(knowledgeComponent.computed.fileAccept.call({}), /\.txz/)
   const knowledgeNode = node('kb-node', { attachmentId: 'original', attachmentName: 'original.txt' })
   const knowledgeVm = makeAttachmentVm(knowledgeComponent, api, [knowledgeNode])
   knowledgeVm.onSelectKnowledgeFile([knowledgeNode])

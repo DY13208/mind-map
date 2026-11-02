@@ -1079,7 +1079,7 @@ function createServer(authorization) {
 
   server.tool(
     'read_attachment',
-    '低层回退读取指定附件已解析正文。通常先用 search_attachment_knowledge 检索 Wiki；需要相关正文时用 read_attachment_knowledge。仅 Wiki 未就绪/不可用且任务确实需要附件正文时，或用户明确要求核验此原附件时，按需调用本工具。返回按字符分页；has_more=true 时用 next_offset 继续。status 不是 ready 表示尚未解析成功，按 status 和 error_message 说明情况。读完只表示读完服务端解析文本，不保证原文件或 OCR 内容完整。不会修改导图。',
+    '低层回退读取指定附件已解析正文。通常先用 search_attachment_knowledge 检索 Wiki；需要相关正文时用 read_attachment_knowledge。仅 Wiki 未就绪/不可用且任务确实需要附件正文时，或用户明确要求核验此原附件时，按需调用本工具。返回按字符分页；has_more=true 时用 next_offset 继续。status 不是 ready 表示尚未解析成功，按 status 和 error_message 说明情况。压缩包不会读取包内内容，正文为空表示未解析，不可称已读取压缩包；其他附件读完只表示读完服务端解析文本，不保证原文件或 OCR 内容完整。不会修改导图。',
     {
       room_key: z.string().describe('房间号'),
       attachment_id: z
@@ -1189,7 +1189,7 @@ function createServer(authorization) {
 
   server.tool(
     'upload_attachment',
-    '与网页工具栏「附件」相同：上传文件并挂到节点，节点出现可点击回形针，人类可直接预览/下载。Agent审批申请材料禁止使用本工具，请用upload_approval_attachment，只保存到本次申请。若节点已有附件，本次上传会替换节点当前指向：相同内容复用附件 id，不同内容生成新 id；旧文件保留在房间文件库和历史中。产物必须用本工具，禁止把路径或「请拖到节点」写进 note/text。提供 file_path（MCP 进程可读路径）、content_base64、source_url 或 upload_id 之一。支持 txt/md/csv/pdf/docx/xlsx/html 与常见图片。只有确认节点字段已持久化后才报告成功，并返回 attachment.id 与 content_url；附件已保存但挂载失败时返回 attachment_id 供诊断，不会重复上传或删除文件。',
+    '与网页工具栏「附件」相同：上传文件并挂到节点，节点出现可点击回形针，人类可直接预览/下载。Agent审批申请材料禁止使用本工具，请用upload_approval_attachment，只保存到本次申请。若节点已有附件，本次上传会替换节点当前指向：相同内容复用附件 id，不同内容生成新 id；旧文件保留在房间文件库和历史中。产物必须用本工具，禁止把路径或「请拖到节点」写进 note/text。提供 file_path（MCP 进程可读路径）、content_base64、source_url 或 upload_id 之一。支持 txt/md/csv/pdf/docx/xlsx/html、常见图片及 ZIP/RAR/7Z/TAR/GZ/BZ2/XZ、TGZ/TBZ2/TXZ 压缩包（含 tar.gz、tar.bz2、tar.xz）；压缩包仅存储原文件，点击附件可下载，不解压或读取包内内容。只有确认节点字段已持久化后才报告成功，并返回 attachment.id 与 content_url；附件已保存但挂载失败时返回 attachment_id 供诊断，不会重复上传或删除文件。',
     {
       room_key: z.string().describe('房间号'),
       node: z

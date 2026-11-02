@@ -1,8 +1,12 @@
+import attachmentFileType from '../src/utils/attachmentFileType.js'
+
 const SEARCH_RESPONSE_BYTES = 12 * 1024
 const READ_RESPONSE_BYTES = 20 * 1024
 const DIRECT_PAGE_CHARS = 4000
 const MAX_ATTACHMENT_REFERENCES = 20
 const NO_FALLBACK_STATUSES = new Set(['forbidden', 'unauthorized', 'not_attached', 'not_found'])
+const { isArchiveAttachment } = attachmentFileType
+const ARCHIVE_TEXT_WARNING = '此压缩包未提取正文，本次没有读取压缩包内部文件。'
 
 const jsonBytes = value => Buffer.byteLength(JSON.stringify(value), 'utf8')
 const hasValue = value => value !== undefined && value !== null && String(value).trim() !== ''
@@ -198,6 +202,10 @@ function makeDirectPageResult(context, attachment, slice, options) {
   const points = Array.from(String(slice.text || ''))
   const status = meta.status === 'ready' ? 'ok' : meta.status || 'unavailable'
   const fallbackReason = options.fallbackReason || 'attachment_selected'
+  const mimeType = slice.attachment?.mimeType || slice.attachment?.mime_type || attachment.mimeType || attachment.mime_type || ''
+  const archiveWarning = isArchiveAttachment(meta.file_name || normalizedMeta(attachment).file_name, mimeType)
+    ? ARCHIVE_TEXT_WARNING
+    : ''
   const base = {
     status,
     room_key: context.room_key,
@@ -213,7 +221,11 @@ function makeDirectPageResult(context, attachment, slice, options) {
     is_excerpt: true,
     matches_query: options.searchPreview ? false : undefined,
     preview_only: options.searchPreview ? true : undefined,
-    ...(options.searchPreview ? { warning: '这是原附件已解析文本的首段预览，不是检索命中；未搜索其他附件。' } : {})
+    ...(archiveWarning
+      ? { warning: archiveWarning }
+      : options.searchPreview
+        ? { warning: '这是原附件已解析文本的首段预览，不是检索命中；未搜索其他附件。' }
+        : {})
   }
   const canPage = status === 'ok' && meta.content_hash && hasValue(currentRevision(context))
   const make = count => {
@@ -557,6 +569,10 @@ export async function readAttachmentKnowledge(api, input, options = {}) {
     return wikiRestartRequired(result, roomKey, nodeUid, attachmentId, versionWarning ? 'stale' : status, versionWarning)
   }
   if (status === 'ok' && !versionWarning) {
+    const archiveWarning = isArchiveAttachment(
+      normalizedMeta(attachment).file_name || result?.source?.name,
+      attachment.mimeType || attachment.mime_type || result?.source?.mime_type || ''
+    )
     return {
       ...result,
       room_key: roomKey,
@@ -565,7 +581,8 @@ export async function readAttachmentKnowledge(api, input, options = {}) {
       source_backend: 'wiki',
       is_excerpt: true,
       complete_scope: 'parsed_text',
-      complete: !!result.complete
+      complete: !!result.complete,
+      ...(archiveWarning ? { warning: ARCHIVE_TEXT_WARNING } : {})
     }
   }
 

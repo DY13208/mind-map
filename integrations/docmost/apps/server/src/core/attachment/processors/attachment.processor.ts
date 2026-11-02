@@ -4,6 +4,7 @@ import { Job } from 'bullmq';
 import { AttachmentService } from '../services/attachment.service';
 import { QueueJob, QueueName } from 'src/integrations/queue/constants';
 import { ModuleRef } from '@nestjs/core';
+import { DoclingAttachmentService } from '../services/docling-attachment.service';
 
 @Processor(QueueName.ATTACHMENT_QUEUE)
 export class AttachmentProcessor extends WorkerHost implements OnModuleDestroy {
@@ -11,6 +12,7 @@ export class AttachmentProcessor extends WorkerHost implements OnModuleDestroy {
   constructor(
     private readonly attachmentService: AttachmentService,
     private moduleRef: ModuleRef,
+    private readonly doclingAttachmentService: DoclingAttachmentService,
   ) {
     super();
   }
@@ -43,8 +45,11 @@ export class AttachmentProcessor extends WorkerHost implements OnModuleDestroy {
           AttachmentEeModule = require('./../../../ee/attachments-ee/attachment-ee.service');
         } catch (err) {
           this.logger.debug(
-            'Attachment enterprise module requested but EE module not bundled in this build',
+            'Attachment enterprise module is not available; using the built-in Docling extractor where applicable',
           );
+          if (job.name === QueueJob.ATTACHMENT_INDEX_CONTENT) {
+            await this.doclingAttachmentService.extractAttachment(job.data.attachmentId);
+          }
           return;
         }
         const attachmentEeService = this.moduleRef.get(
@@ -59,6 +64,9 @@ export class AttachmentProcessor extends WorkerHost implements OnModuleDestroy {
             job.data.workspaceId,
           );
         }
+      }
+      if (job.name === QueueJob.ATTACHMENT_EXTRACT_CONTENT) {
+        await this.doclingAttachmentService.extractAttachment(job.data.attachmentId);
       }
     } catch (err) {
       throw err;

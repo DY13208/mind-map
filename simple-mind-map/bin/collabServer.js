@@ -298,6 +298,14 @@ server.on('upgrade', async (request, socket, head) => {
 
 Promise.all([initSchema(), initAuth()])
   .then(async () => {
+    try {
+      const nodeKnowledge = require('./nodeKnowledge')
+      const recovered = await nodeKnowledge.resumeStaleProcessing(getPool())
+      if (recovered) console.info(`[nodeKnowledge] queued ${recovered} stale attachment extractions`)
+      nodeKnowledge.startStaleProcessingRecovery(getPool())
+    } catch (err) {
+      console.warn('[nodeKnowledge] stale attachment recovery unavailable', err && err.message)
+    }
     if (isAuthEnabled()) {
       await require('./teamSpace').initCorpConstraints(getPool())
     }

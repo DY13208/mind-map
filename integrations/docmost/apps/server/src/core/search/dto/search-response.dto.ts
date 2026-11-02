@@ -9,6 +9,8 @@ export class SearchResponseDto {
   rank: number;
   highlight: string;
   matchedText: string[];
+  matchSource?: 'page' | 'attachment';
+  matchedAttachmentName?: string | null;
   wholeWord: boolean;
   createdAt: Date;
   updatedAt: Date;

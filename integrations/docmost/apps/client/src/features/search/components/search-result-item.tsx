@@ -140,7 +140,13 @@ export function SearchResultItem({
               </Badge>
             )}
 
-            {pageResult?.highlight && (
+            {pageResult.matchSource === 'attachment' && pageResult.matchedAttachmentName && (
+              <Text size="xs" c="dimmed" truncate>
+                附件命中：{pageResult.matchedAttachmentName}
+              </Text>
+            )}
+
+            {pageResult.matchSource !== 'attachment' && pageResult?.highlight && (
               <Text
                 opacity={0.6}
                 size="xs"

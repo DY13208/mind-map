@@ -80,6 +80,13 @@ assert.equal(
   '标题\n甲,乙'
 )
 assert.equal(attachmentPreviewKind('archive.zip'), 'archive')
+for (const file of [
+  '附件.zip', '附件.RAR', '附件.7z', '附件.tar', '附件.gz', '附件.bz2', '附件.xz',
+  '附件.tar.gz', '附件.tar.bz2', '附件.tar.xz', '附件.tgz', '附件.tbz2', '附件.txz'
+]) assert.equal(attachmentPreviewKind(file), 'archive', 'archive extension should download as an archive: ' + file)
+assert.equal(attachmentPreviewKind('资料.zip', 'text/markdown'), 'archive')
+assert.equal(attachmentPreviewKind('压缩包', 'application/x-rar-compressed'), 'archive')
+assert.equal(attachmentPreviewKind('文件.docx', 'application/zip'), 'office')
 
 assert.equal(canPreviewOriginalAttachment({ attachmentId: 'a', attachmentName: '图.png', attachmentStatus: 'failed' }), true)
 assert.equal(canPreviewOriginalAttachment({ attachmentId: 'a', attachmentName: '图.png', attachmentStatus: 'uploading' }), false)

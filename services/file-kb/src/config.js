@@ -108,4 +108,4 @@ function loadConfig(env = process.env) {
   }
 }
 
-module.exports = { loadConfig, flag }
+module.exports = { loadConfig, flag, doclingOcrConfig }

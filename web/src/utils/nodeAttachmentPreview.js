@@ -1,4 +1,5 @@
 import attachmentState from 'simple-mind-map/src/utils/attachmentIconState'
+import { isArchiveAttachment } from 'simple-mind-map/src/utils/attachmentFileType'
 
 export const canPreviewOriginalAttachment = attachmentState.canPreviewOriginalAttachment
 export const TEXT_PREVIEW_MAX_BYTES = 256 * 1024
@@ -82,11 +83,12 @@ export function attachmentPreviewKind(fileName, mimeType = '') {
     if (['mp3', 'wav', 'm4a', 'ogg', 'aac', 'flac'].includes(suffix)) return 'audio'
     if (['mp4', 'webm', 'mov', 'm4v'].includes(suffix)) return 'video'
     if (suffix === 'pptx') return 'presentation'
-    if (suffix === 'zip') return 'archive'
+    if (isArchiveAttachment(name, mimeType)) return 'archive'
     if (TEXT_EXT.test(name)) return 'text'
     // An explicit unknown extension must not be mistaken for extracted Markdown.
     if (String(mimeType || '').toLowerCase().split(';')[0].trim() === 'text/markdown') return 'unsupported'
   }
+  if (isArchiveAttachment(name, mimeType)) return 'archive'
   const mime = String(mimeType || '').toLowerCase().split(';')[0].trim()
   if (/^image\/(png|jpe?g|webp|gif)$/.test(mime)) return 'image'
   if (mime === 'application/pdf') return 'pdf'

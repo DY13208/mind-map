@@ -17,6 +17,7 @@ export enum QueueJob {
   SEND_EMAIL = 'send-email',
   DELETE_SPACE_ATTACHMENTS = 'delete-space-attachments',
   ATTACHMENT_INDEX_CONTENT = 'attachment-index-content',
+  ATTACHMENT_EXTRACT_CONTENT = 'attachment-extract-content',
   ATTACHMENT_INDEXING = 'attachment-indexing',
   DELETE_PAGE_ATTACHMENTS = 'delete-page-attachments',
   DELETE_AI_CHAT_ATTACHMENTS = 'delete-ai-chat-attachments',

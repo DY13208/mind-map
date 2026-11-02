@@ -12,7 +12,7 @@ const moduleRef = { exports: {} }
 new Function('require', 'module', 'exports', code)(name => {
   if (name === '@/utils/roomLocation') return { roomFromLocation: route => route.query.room }
   if (name === '@/utils/nodeAttachmentApi') return {
-    getNodeAttachment: (room, id) => new Promise(resolve => pending.push({ room, id, resolve })),
+    getNodeAttachment: (room, id) => new Promise((resolve, reject) => pending.push({ room, id, resolve, reject })),
     nodeAttachmentContentUrl: (room, id, options = {}) => 'http://fixture/' + room + '/' + id + (options.download ? '?download=1' : '')
   }
   if (name === '@/utils/nodeAttachmentPreview') return require('./loadAttachmentUtils.cjs')()
@@ -25,6 +25,11 @@ function makeVm() {
   const value = { ...component.data(), $route: { query: { room: 'room-1' } }, $message: { info() {}, warning() {} } }
   for (const [key, method] of Object.entries(component.methods)) value[key] = method.bind(value)
   return value
+}
+async function flush() {
+  await Promise.resolve()
+  await Promise.resolve()
+  await new Promise(resolve => setImmediate(resolve))
 }
 async function main() {
   const vm = makeVm()
@@ -55,15 +60,21 @@ async function main() {
   const previousDocument = global.document
   global.window = { open: (...args) => tabs.push(args) }
   let downloaded
+  let downloadedName
   global.document = {
     body: { appendChild() {} },
-    createElement: () => ({ click() { downloaded = this.href }, remove() {} })
+    createElement: () => ({ click() { downloaded = this.href; downloadedName = this.download }, remove() {} })
   }
   try {
     vm.attachmentId = 'download'
     vm.source = { roomKey: 'room-1' }
     vm.download()
     assert.equal(downloaded, 'http://fixture/room-1/download?download=1')
+    const pendingBeforeArchiveClick = pending.length
+    vm.onAttachmentClick({ getData: () => ({ attachmentId: 'archive', attachmentName: '资料.tar.gz' }) })
+    assert.equal(downloaded, 'http://fixture/room-1/archive?download=1', 'archive click downloads original content directly')
+    assert.equal(downloadedName, '资料.tar.gz', 'archive download keeps the original filename')
+    assert.equal(pending.length, pendingBeforeArchiveClick, 'archive click skips metadata and preview loading')
     vm.onAttachmentClick({ getData: () => ({ attachmentId: 'html', attachmentName: '说明.html' }) })
     assert.equal(tabs[0][0], 'http://fixture/room-1/html')
     vm.openExternalAttachment({ attachmentName: '旧附件.pdf', attachmentUrl: 'https://example.test/a.pdf' })
@@ -97,7 +108,8 @@ async function main() {
   rowRequests[2].resolve({ rows: [['stale Sheet1']] })
   await switched
   assert.equal(sheetVm.rows.length, 0, 'switching sheets invalidates in-flight row requests')
-  // Failed attachments open the error action dialog instead of a toast or preview.
+  // Failed office attachments keep the explicit error actions because their
+  // original file cannot be previewed here.
   const emitted = []
   const infos = []
   const errVm = makeVm()
@@ -112,6 +124,60 @@ async function main() {
   assert.equal(errVm.errorDialog.data.attachmentError, 'Word 解析失败')
   assert.equal(pending.length, pendingBefore, 'failed click does not start a preview request')
   assert.equal(infos.length, 0)
+  // PDF text extraction failure does not block opening the original PDF.
+  errVm.errorDialog.visible = false
+  errVm._previewModuleLoaders = {
+    AttachmentPdfPreview: async () => ({ render() {} })
+  }
+  const pendingBeforePdf = pending.length
+  const failedPdfData = {
+    uid: 'n-pdf', attachmentId: 'att-pdf', attachmentName: '扫描件.pdf',
+    attachmentMimeType: 'application/pdf', attachmentStatus: 'failed',
+    attachmentError: 'PDF 未提取到文字（可能是扫描件，需 OCR）'
+  }
+  errVm.onAttachmentClick({ getData: key => key ? failedPdfData[key] : failedPdfData })
+  assert.equal(errVm.errorDialog.visible, false, 'failed PDF extraction does not open the blocking error dialog')
+  assert.equal(pending.length, pendingBeforePdf + 1, 'failed PDF click requests the original attachment')
+  pending[pendingBeforePdf].resolve({ attachment: {
+    id: 'att-pdf', fileName: '扫描件.pdf', mimeType: 'application/pdf',
+    status: 'failed', errorMessage: 'PDF 未提取到文字（可能是扫描件，需 OCR）', byteSize: 1024
+  } })
+  await flush()
+  assert.equal(errVm.source.id, 'att-pdf', 'original PDF is loaded despite extraction failure')
+  assert.match(component.computed.extractionWarning.call(errVm), /原文件可以打开，但文字提取失败/)
+  assert.match(component.computed.extractionWarning.call(errVm), /需 OCR/)
+  assert.equal(errVm.previewComponent.render instanceof Function, true, 'PDF preview is mounted')
+  // Failed image OCR follows the same non-blocking path.
+  const failedImageData = {
+    attachmentId: 'att-image', attachmentName: '图片.png', attachmentMimeType: 'image/png',
+    attachmentStatus: 'failed', attachmentError: '图片 OCR 服务未配置'
+  }
+  const pendingBeforeImage = pending.length
+  errVm.onAttachmentClick({ getData: key => key ? failedImageData[key] : failedImageData })
+  assert.equal(errVm.errorDialog.visible, false)
+  pending[pendingBeforeImage].resolve({ attachment: {
+    id: 'att-image', fileName: '图片.png', mimeType: 'image/png', status: 'failed',
+    errorMessage: '图片 OCR 服务未配置', byteSize: 2048
+  } })
+  await flush()
+  assert.equal(errVm.source.id, 'att-image', 'original image opens despite OCR failure')
+  assert.match(component.computed.extractionWarning.call(errVm), /图片 OCR 服务未配置/)
+  // If the original content is actually unavailable or forbidden, show that
+  // retrieval error instead of masking it as an extraction warning.
+  for (const [id, message] of [['att-403', '403 Forbidden'], ['att-404', '404 Not Found']]) {
+    const deniedData = {
+      attachmentId: id, attachmentName: '原件.pdf', attachmentMimeType: 'application/pdf',
+      attachmentStatus: 'failed', attachmentError: 'PDF 未提取到文字'
+    }
+    const pendingBeforeDenied = pending.length
+    errVm.onAttachmentClick({ getData: key => key ? deniedData[key] : deniedData })
+    pending[pendingBeforeDenied].reject(Object.assign(new Error(message), {
+      statusCode: Number(id.slice(-3))
+    }))
+    await flush()
+    assert.equal(errVm.error, message, `${message} from original retrieval remains visible`)
+    assert.equal(component.computed.extractionWarning.call(errVm), '', 'an unavailable original does not get a success-style extraction notice')
+  }
   for (const action of ['replace', 'delete', 'ignoreError']) {
     errVm.errorDialog.visible = true
     errVm.errorAction(action)

@@ -5,7 +5,7 @@
     ref="fileInput"
     class="node-attachment-input"
     type="file"
-    accept=".txt,.md,.markdown,.csv,.log,.json,.html,.htm,.pdf,.doc,.docx,.xls,.xlsx,.xlsm,.ods,.pptx,.png,.jpg,.jpeg,.webp,.gif,text/plain,text/markdown,text/csv,text/html,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroenabled.12,application/vnd.oasis.opendocument.spreadsheet,application/vnd.openxmlformats-officedocument.presentationml.presentation,image/png,image/jpeg,image/webp,image/gif"
+    :accept="fileAccept"
     @change="onFilePicked"
   />
   </div>
@@ -16,6 +16,7 @@ import { roomFromLocation } from '@/utils/roomLocation'
 import { attachmentUploadNotice } from '@/utils/attachmentProgressiveText'
 import KnowledgeFilePicker from './KnowledgeFilePicker.vue'
 import { normalizeAttachmentFileName } from 'simple-mind-map/src/utils/attachmentFileName'
+import { ARCHIVE_EXTENSIONS } from 'simple-mind-map/src/utils/attachmentFileType'
 import { MAX_KNOWLEDGE_FILES, readKnowledgeFileReference, knowledgeFileUrl } from '@/utils/knowledgeFiles'
 import {
   getNodeAttachment,
@@ -29,6 +30,7 @@ import {
 
 const ATTACHMENT_WRITE_MAX_ATTEMPTS = 3
 const ATTACHMENT_WRITE_RETRY_DELAY_MS = 120
+const BASE_ATTACHMENT_ACCEPT = '.txt,.md,.markdown,.csv,.log,.json,.html,.htm,.pdf,.doc,.docx,.xls,.xlsx,.xlsm,.ods,.pptx,.png,.jpg,.jpeg,.webp,.gif,text/plain,text/markdown,text/csv,text/html,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroenabled.12,application/vnd.oasis.opendocument.spreadsheet,application/vnd.openxmlformats-officedocument.presentationml.presentation,image/png,image/jpeg,image/webp,image/gif'
 const ATTACHMENT_FIELDS = [
   'attachmentUrl',
   'attachmentName',
@@ -126,6 +128,12 @@ export default {
     mindMap: {
       type: Object,
       default: null
+    }
+  },
+  computed: {
+    fileAccept() {
+      const extensions = ARCHIVE_EXTENSIONS.map(ext => ext.startsWith('.') ? ext : '.' + ext)
+      return [BASE_ATTACHMENT_ACCEPT, ...extensions].join(',')
     }
   },
   data() {

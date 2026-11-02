@@ -18,12 +18,16 @@
         <el-button class="attachmentCloseButton" size="small" icon="el-icon-close" aria-label="关闭附件预览" @click="visible = false"></el-button>
       </div>
     </header>
-    <main v-if="visible" class="attachmentViewerMain">
+    <main v-if="visible" class="attachmentViewerMain" :class="{ 'has-extraction-warning': extractionWarning }">
       <div v-if="loading" class="attachmentViewerState" role="status"><i class="el-icon-loading"></i><strong>正在加载文件…</strong></div>
       <div v-else-if="error" class="attachmentViewerState" role="alert">
         <i class="el-icon-warning-outline"></i><strong>{{ error }}</strong><el-button size="small" @click="retry">重新加载</el-button>
       </div>
-      <component v-else-if="source && previewComponent" :is="previewComponent" :key="requestId" :source="source" :kind="kind" @download="download" />
+      <template v-else>
+      <div v-if="extractionWarning" class="attachmentExtractionWarning" role="status">
+        <i class="el-icon-warning-outline"></i><span>{{ extractionWarning }}</span>
+      </div>
+      <component v-if="source && previewComponent" :is="previewComponent" :key="requestId" :source="source" :kind="kind" @download="download" />
       <div v-else-if="externalUrl" class="attachmentExternal">
         <iframe :src="externalUrl" :title="title" sandbox="allow-same-origin allow-popups allow-forms allow-downloads" referrerpolicy="no-referrer"></iframe>
       </div>
@@ -31,6 +35,7 @@
         <span class="attachmentFileIconSvg is-large" aria-hidden="true" v-html="fileIconSvg"></span><strong>暂不支持在线预览此文件类型</strong><p>{{ typeLabel }} · {{ fileSize }}</p>
         <el-button v-if="attachmentId" type="primary" size="small" icon="el-icon-download" @click="download">下载原文件</el-button>
       </div>
+      </template>
     </main>
   </el-dialog>
   <el-dialog :visible.sync="errorDialog.visible" title="附件处理失败" width="440px" append-to-body
@@ -85,6 +90,20 @@ export default {
   }),
   computed: {
     fileSize() { return formatPreviewBytes(this.attachment && this.attachment.byteSize) },
+    extractionWarning() {
+      const attachment = this.attachment || {}
+      const selected = this.selectedData || {}
+      if (this.error) return ''
+      if (selected.attachmentErrorIgnored || attachment.errorIgnored) return ''
+      const status = String(attachment.status || selected.attachmentStatus || '').toLowerCase()
+      if (status !== 'failed' || !canPreviewOriginalAttachment({ ...selected, ...attachment })) return ''
+      const message = attachmentErrorText({
+        attachmentError: attachment.errorMessage || selected.attachmentError
+      })
+      return message
+        ? `原文件可以打开，但文字提取失败：${message}`
+        : '原文件可以打开，但文字提取失败。'
+    },
     typeLabel() {
       const ext = this.title.includes('.') ? this.title.split('.').pop().toUpperCase() : ''
       return ext || '文件'
@@ -174,8 +193,16 @@ export default {
         this.$bus.$emit('viewKnowledgeFiles', node)
         return
       }
-      if (isAttachmentErrorActive(data)) { this.openErrorActions(node, data); return }
+      if (isAttachmentErrorActive(data) && !canPreviewOriginalAttachment(data)) {
+        this.openErrorActions(node, data)
+        return
+      }
       if (!data.attachmentId && !data.attachmentUrl) { this.$message.info(attachmentBusyMessage(data)); return }
+      if (attachmentPreviewKind(data.attachmentName, data.attachmentMimeType) === 'archive') {
+        if (data.attachmentId) this.downloadStoredAttachment(data.attachmentId, data.attachmentName)
+        else this.openUrlInNewPage(data.attachmentUrl)
+        return
+      }
       if (isHtmlAttachment(data.attachmentName, data.attachmentMimeType, data.attachmentUrl)) {
         if (data.attachmentId) this.openHtmlInNewPage(data)
         else this.openUrlInNewPage(data.attachmentUrl)
@@ -299,10 +326,13 @@ export default {
     download() {
       if (this.externalUrl) { this.openExternal(); return }
       const room = (this.source && this.source.roomKey) || roomFromLocation(this.$route)
-      if (!room || !this.attachmentId) return
+      this.downloadStoredAttachment(this.attachmentId, this.title, room)
+    },
+    downloadStoredAttachment(attachmentId, fileName, room = roomFromLocation(this.$route)) {
+      if (!room || !attachmentId) return
       const link = document.createElement('a')
-      link.href = nodeAttachmentContentUrl(room, this.attachmentId, { download: true })
-      link.download = this.title || 'attachment'
+      link.href = nodeAttachmentContentUrl(room, attachmentId, { download: true })
+      link.download = fileName || 'attachment'
       link.target = '_blank'
       link.rel = 'noopener'
       document.body.appendChild(link)

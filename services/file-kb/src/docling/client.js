@@ -72,9 +72,24 @@ function createDoclingClient({
     return res
   }
 
-  async function submit(filePath, fileName, ext, signal, pass = mode === 'always' ? ALWAYS : PLAIN) {
+  async function submit(input, fileNameOrSignal, extOrPass, legacySignal, legacyPass) {
+    let filePath, buffer, fileName, mimeType, ext, signal, pass
+    if (input && typeof input === 'object' && !Buffer.isBuffer(input)) {
+      ({ filePath, buffer, fileName, mimeType, ext } = input)
+      signal = fileNameOrSignal
+      pass = extOrPass || (mode === 'always' ? ALWAYS : PLAIN)
+    } else {
+      // Preserve the existing public submit(filePath, fileName, ext, signal, pass) API.
+      filePath = input
+      fileName = fileNameOrSignal
+      ext = extOrPass
+      signal = legacySignal
+      pass = legacyPass || (mode === 'always' ? ALWAYS : PLAIN)
+    }
     const form = new FormData()
-    const blob = await fs.openAsBlob(filePath)
+    const blob = Buffer.isBuffer(buffer)
+      ? new Blob([buffer], { type: mimeType || 'application/octet-stream' })
+      : await fs.openAsBlob(filePath, mimeType ? { type: mimeType } : undefined)
     form.append('files', blob, path.basename(fileName))
     form.append('to_formats', 'json')
     if (FROM_FORMAT[ext]) form.append('from_formats', FROM_FORMAT[ext])
@@ -110,15 +125,15 @@ function createDoclingClient({
   }
 
   // One async conversion pass. existingTaskId lets a retried job resume an in-flight task.
-  async function runPass(pass, { filePath, fileName, ext, existingTaskId = null, onTaskId = async () => {}, signal }) {
+  async function runPass(pass, { filePath, buffer, fileName, mimeType, ext, existingTaskId = null, onTaskId = async () => {}, signal }) {
     const deadline = Date.now() + pass.totalTimeoutMs
     let taskId = existingTaskId
-    if (!taskId) { taskId = await submit(filePath, fileName, ext, signal, pass); await onTaskId(taskId) }
+    if (!taskId) { taskId = await submit({ filePath, buffer, fileName, mimeType, ext }, signal, pass); await onTaskId(taskId) }
     for (;;) {
       if (Date.now() > deadline) throw new DoclingDocumentError(`docling task ${taskId} exceeded ${pass.totalTimeoutMs}ms`, { retryable: true })
       const st = await poll(taskId, signal)
       if (st.task_status === 'lost') { // docling restarted and forgot the task: resubmit once
-        taskId = await submit(filePath, fileName, ext, signal, pass); await onTaskId(taskId); continue
+        taskId = await submit({ filePath, buffer, fileName, mimeType, ext }, signal, pass); await onTaskId(taskId); continue
       }
       if (st.task_status === 'success') break
       if (st.task_status === 'failure') {

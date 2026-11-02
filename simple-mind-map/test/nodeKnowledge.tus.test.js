@@ -150,6 +150,34 @@ async function main() {
     assert.equal(options.headers['tus-resumable'], '1.0.0')
     assert.match(String(options.headers['tus-extension'] || ''), /creation/)
 
+    const archiveCreated = await request(port, '/api/attachments/resumable', {
+      method: 'POST',
+      headers: {
+        'Tus-Resumable': '1.0.0',
+        'Upload-Length': '4',
+        'Upload-Metadata': encodeMetadata({
+          filename: '资料.TAR.XZ',
+          filetype: 'application/octet-stream',
+          roomKey: 'room-demo'
+        })
+      }
+    })
+    assert.equal(archiveCreated.status, 201, archiveCreated.text)
+
+    const unsupportedArchiveType = await request(port, '/api/attachments/resumable', {
+      method: 'POST',
+      headers: {
+        'Tus-Resumable': '1.0.0',
+        'Upload-Length': '4',
+        'Upload-Metadata': encodeMetadata({
+          filename: 'unsafe.exe',
+          filetype: 'application/octet-stream',
+          roomKey: 'room-demo'
+        })
+      }
+    })
+    assert.equal(unsupportedArchiveType.status, 415, unsupportedArchiveType.text)
+
     const missing = await request(port, '/api/attachments/resumable/missing/result')
     assert.equal(missing.status, 404)
     assert.equal(missing.json().code, 'NOT_FOUND')
