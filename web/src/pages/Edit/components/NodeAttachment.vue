@@ -16,7 +16,7 @@ import { roomFromLocation } from '@/utils/roomLocation'
 import { attachmentUploadNotice } from '@/utils/attachmentProgressiveText'
 import KnowledgeFilePicker from './KnowledgeFilePicker.vue'
 import { normalizeAttachmentFileName } from 'simple-mind-map/src/utils/attachmentFileName'
-import { MAX_KNOWLEDGE_FILES, readKnowledgeFileReference } from '@/utils/knowledgeFiles'
+import { MAX_KNOWLEDGE_FILES, readKnowledgeFileReference, knowledgeFileUrl } from '@/utils/knowledgeFiles'
 import {
   getNodeAttachment,
   getRoomRevision,
@@ -188,7 +188,14 @@ export default {
     this.invalidateAttachmentTargets()
   },
   methods: {
-    onViewKnowledgeFiles(node) { this.openKnowledgePicker([node], true) },
+    onViewKnowledgeFiles(node) {
+      const entries = node && node.getData ? node.getData('knowledgeFiles') || [] : []
+      if (entries.length === 1 && entries[0].kind !== 'folder') {
+        window.open(knowledgeFileUrl(entries[0]), '_blank', 'noopener')
+        return
+      }
+      this.openKnowledgePicker([node], true)
+    },
     onSelectKnowledgeFile(nodes) {
       this.openKnowledgePicker(nodes, false)
     },
@@ -215,8 +222,8 @@ export default {
     },
     async onKnowledgeFilePicked(files) {
       if (this.knowledgeBusy || !Array.isArray(files) || this.knowledgeReadonly) return
-      const uniqueFiles = Array.from(new Map(files.map(file => [file.id, file])).values())
-      if (uniqueFiles.length > MAX_KNOWLEDGE_FILES) { this.$message.warning(`最多选择 ${MAX_KNOWLEDGE_FILES} 个文件`); return }
+      const uniqueFiles = Array.from(new Map(files.map(file => [`${file.kind === 'folder' ? 'folder' : 'file'}:${file.id}`, file])).values())
+      if (uniqueFiles.length > MAX_KNOWLEDGE_FILES) { this.$message.warning(`最多选择 ${MAX_KNOWLEDGE_FILES} 项`); return }
       const targets = this.knowledgeTargets.slice()
       if (!targets.length || !targets.every(target => this.targetIsCurrent(target))) {
         this.$message.warning('目标节点或附件已发生变化，请重新选择节点')
@@ -240,7 +247,7 @@ export default {
         }
         this.knowledgeVisible = false
         this.knowledgeTargets = []
-        this.$message.success(references.length ? `已挂载 ${references.length} 个知识库文件，可查看解析信息` : '已清除知识库文件挂载')
+        this.$message.success(references.length ? `已挂载 ${references.length} 项知识库资料` : '已清除知识库挂载')
       } catch (error) {
         if (!this.destroyed && requestGeneration === this.attachmentTargetGeneration) {
           this.knowledgeError = error.message || '读取知识库解析信息失败，请重试'
