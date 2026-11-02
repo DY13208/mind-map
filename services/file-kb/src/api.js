@@ -538,12 +538,17 @@ function createApi({ pool, storage, queue, config, limiter, geekcloud = null }) 
     const params = []
     const where = ['f.deleted_at is null', ownerClause(user, 'f', params, 'folder')]
     const parent = qp(url, 'parentId', 'parent_id')
+    const search = String(url.searchParams.get('q') || '').trim().slice(0, 200)
+    if (search) {
+      params.push(`%${search.replace(/[%_\\]/g, value => '\\' + value)}%`)
+      where.push(`f.name ilike $${params.length}`)
+    }
     // Root = top-level folders plus visible folders whose parent the caller cannot see
     // (e.g. a subfolder shared directly), so shared folders are reachable from the tree.
-    if (!parent || parent === 'root') {
+    if ((!parent && !search) || parent === 'root') {
       where.push(`(f.parent_id is null or not exists (select 1 from kb.folders p where p.id = f.parent_id and p.deleted_at is null and ${ownerClause(user, 'p', params, 'folder')}))`)
     }
-    else { if (!UUID.test(parent)) throw new HttpError(400, 'bad_parent_id'); params.push(parent); where.push(`f.parent_id = $${params.length}`) }
+    else if (parent) { if (!UUID.test(parent)) throw new HttpError(400, 'bad_parent_id'); params.push(parent); where.push(`f.parent_id = $${params.length}`) }
     const cursor = url.searchParams.get('cursor')
     if (cursor) {
       let decoded
