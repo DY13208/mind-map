@@ -47,9 +47,9 @@
       @selection-change="s => (selection = s)"
     >
       <el-table-column type="selection" width="44" />
-      <el-table-column label="文件名" min-width="240" show-overflow-tooltip>
+      <el-table-column label="文件名" min-width="240">
         <template slot-scope="{ row }">
-          <span class="kb-file-name" @click="$emit('open', row)">
+          <span class="kb-file-name" :title="row.name || row.fileName" @click="$emit('open', row)">
             <i :class="iconOf(row)" aria-hidden="true" />{{ row.name || row.fileName }}
           </span>
         </template>
@@ -146,6 +146,12 @@ export default {
 .kb-batch-reparse { margin-top: 10px; }
 .kb-batch-scope { margin-top: 16px; font-size: 12px; color: var(--ui-text-muted); white-space: nowrap; }
 .kb-file-name {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  white-space: normal;
+  overflow-wrap: anywhere;
   cursor: pointer;
   color: var(--ui-text);
   font-weight: 500;

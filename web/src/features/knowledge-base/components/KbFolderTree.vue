@@ -4,7 +4,7 @@
       <span>文件夹</span>
       <span class="kb-tree-actions">
         <el-tooltip content="新建文件夹" :visible-arrow="false" placement="top">
-          <el-button type="text" icon="el-icon-folder-add" class="kb-icon-btn" aria-label="新建文件夹" @click="createFolder" />
+          <el-button type="text" icon="el-icon-folder-add" class="kb-icon-btn" aria-label="新建文件夹" @click="createFolder()" />
         </el-tooltip>
         <el-tooltip content="刷新" :visible-arrow="false" placement="top">
           <el-button type="text" icon="el-icon-refresh-right" class="kb-icon-btn" aria-label="刷新" @click="load" />
@@ -51,6 +51,7 @@
           <el-dropdown trigger="click" size="small" @command="c => onCommand(c, data, node)" @click.native.stop>
             <i class="el-icon-more kb-tree-more" aria-label="更多" />
             <el-dropdown-menu slot="dropdown" :visible-arrow="false">
+              <el-dropdown-item command="create" icon="el-icon-folder-add">新建文件夹</el-dropdown-item>
               <el-dropdown-item command="acl" icon="el-icon-lock">权限设置</el-dropdown-item>
               <el-dropdown-item command="rename" icon="el-icon-edit">重命名</el-dropdown-item>
               <el-dropdown-item command="delete" icon="el-icon-delete">删除</el-dropdown-item>
@@ -157,20 +158,22 @@ export default {
       const node = id && tree ? tree.getNode(id) : null
       if (!node) return this.load()
       node.loaded = false
+      node.isLeaf = false
       node.childNodes.splice(0)
       node.expand()
     },
-    async createFolder() {
+    async createFolder(parentId = this.value) {
       try {
         const { value } = await this.$prompt('文件夹名称', '新建文件夹', { inputPattern: /\S/, inputErrorMessage: '请输入名称', confirmButtonText: '创建', cancelButtonText: '取消' })
-        await kbApi.createFolder({ name: value.trim(), parentId: this.value || undefined })
+        await kbApi.createFolder({ name: value.trim(), parentId: parentId || undefined })
         this.$message.success('已创建')
-        this.refreshNode(this.value)
+        this.refreshNode(parentId)
       } catch (e) {
         if (e && e.__kb) this.$message.error(e.message)
       }
     },
     async onCommand(cmd, folder, node) {
+      if (cmd === 'create') return this.createFolder(folder.id)
       if (cmd === 'acl') return this.$emit('acl', { type: 'folder', id: folder.id, name: folder.name })
       try {
         if (cmd === 'rename') {
@@ -241,9 +244,15 @@ export default {
 }
 .kb-tree-label {
   flex: 1;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
 }
 .kb-tree-more {
   color: var(--ui-text-muted);
@@ -272,7 +281,7 @@ export default {
     overflow-wrap: anywhere;
     text-align: left;
   }
-  .el-tree-node__content { border-radius: var(--ui-radius-sm); height: 32px; }
+  .el-tree-node__content { border-radius: var(--ui-radius-sm); height: auto; min-height: 32px; padding-top: 4px; padding-bottom: 4px; box-sizing: border-box; }
   .el-tree-node__content:hover { background: var(--ui-hover-overlay); }
   &.el-tree--highlight-current .el-tree-node.is-current > .el-tree-node__content {
     background: var(--ui-primary-soft);

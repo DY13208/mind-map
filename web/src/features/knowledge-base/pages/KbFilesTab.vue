@@ -261,7 +261,7 @@ export default {
   align-items: flex-start;
 }
 .kb-files-side {
-  width: 240px;
+  width: clamp(280px, 24vw, 400px);
   flex: none;
   max-height: calc(100vh - 220px);
   overflow: auto;
