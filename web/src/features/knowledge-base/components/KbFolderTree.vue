@@ -3,6 +3,9 @@
     <div class="kb-tree-head">
       <span>文件夹</span>
       <span class="kb-tree-actions">
+        <el-tooltip content="搜索全部文件" :visible-arrow="false" placement="top">
+          <el-button type="text" icon="el-icon-search" class="kb-icon-btn" aria-label="搜索全部文件" :aria-expanded="String(searchOpen)" @click="toggleSearch" />
+        </el-tooltip>
         <el-tooltip content="新建文件夹" :visible-arrow="false" placement="top">
           <el-button type="text" icon="el-icon-folder-add" class="kb-icon-btn" aria-label="新建文件夹" @click="createFolder()" />
         </el-tooltip>
@@ -11,6 +14,7 @@
         </el-tooltip>
       </span>
     </div>
+    <el-input v-if="searchOpen" ref="fileSearch" :value="searchQuery" size="small" prefix-icon="el-icon-search" placeholder="搜索全部文件名" aria-label="搜索全部文件名" clearable class="kb-tree-search" @input="$emit('search', $event)" @keydown.esc.native="closeSearch" />
     <div v-if="checkedFolders.length" class="kb-folder-batch">
       <span>已选 {{ checkedFolders.length }} 个文件夹</span>
       <el-button size="mini" icon="el-icon-lock" @click="$emit('batch-acl', checkedFolders.slice())">批量设置权限</el-button>
@@ -69,10 +73,11 @@ const PAGE = 100
 let moreSeq = 0
 export default {
   name: 'KbFolderTree',
-  props: { value: { type: String, default: '' } },
+  props: { value: { type: String, default: '' }, searchQuery: { type: String, default: '' } },
   data() {
     return {
       treeKey: 1,
+      searchOpen: false,
       error: null,
       checkedFolders: [],
       treeProps: {
@@ -84,6 +89,15 @@ export default {
     }
   },
   methods: {
+    toggleSearch() {
+      if (this.searchOpen) return this.closeSearch()
+      this.searchOpen = true
+      this.$nextTick(() => { if (this.$refs.fileSearch) this.$refs.fileSearch.focus() })
+    },
+    closeSearch() {
+      this.searchOpen = false
+      this.$emit('search', '')
+    },
     load() {
       this.error = null
       this.checkedFolders = []
@@ -215,6 +229,8 @@ export default {
   color: var(--ui-text-secondary);
   &:hover { color: var(--ui-primary); }
 }
+.kb-tree-actions { display: flex; align-items: center; }
+.kb-tree-search { margin: 4px 0 10px; }
 .kb-tree-root {
   display: flex;
   align-items: center;
