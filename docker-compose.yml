@@ -108,6 +108,24 @@ services:
       COLLAB_MCP_DIRECT: ${COLLAB_MCP_DIRECT:-false}
       # File KB feature flag (nginx /api/kb/ + /file-kb-mcp/ return 404 unless true)
       FILE_KB_ENABLED: ${FILE_KB_ENABLED:-false}
+      # Node attachment OCR shares File KB's Docling client and OCR settings.
+      # Keep Docling opt-in for the app; local .env can point at docling-serve.
+      DOCLING_URL: ${DOCLING_URL:-}
+      DOCLING_API_KEY: ${DOCLING_API_KEY:-}
+      KB_DOCLING_OCR_MODE: ${KB_DOCLING_OCR_MODE:-auto}
+      KB_DOCLING_OCR_ENGINE: ${KB_DOCLING_OCR_ENGINE:-rapidocr}
+      KB_DOCLING_OCR_LANG: ${KB_DOCLING_OCR_LANG:-}
+      KB_DOCLING_OCR_FORCE: ${KB_DOCLING_OCR_FORCE:-true}
+      KB_DOCLING_OCR_MIN_CHARS_PER_PAGE: ${KB_DOCLING_OCR_MIN_CHARS_PER_PAGE:-20}
+      KB_DOCLING_OCR_TEXTLESS_PAGE_PCT: ${KB_DOCLING_OCR_TEXTLESS_PAGE_PCT:-60}
+      KB_DOCLING_OCR_MIXED_MIN_PAGES: ${KB_DOCLING_OCR_MIXED_MIN_PAGES:-1}
+      KB_DOCLING_OCR_DOCUMENT_TIMEOUT_S: ${KB_DOCLING_OCR_DOCUMENT_TIMEOUT_S:-1800}
+      KB_DOCLING_OCR_TOTAL_TIMEOUT_MS: ${KB_DOCLING_OCR_TOTAL_TIMEOUT_MS:-3600000}
+      KB_DOCLING_TOTAL_TIMEOUT_MS: ${KB_DOCLING_TOTAL_TIMEOUT_MS:-1800000}
+      # Explicit legacy OCR endpoint remains supported when configured.
+      NODE_KNOWLEDGE_OCR_URL: ${NODE_KNOWLEDGE_OCR_URL:-}
+      NODE_KNOWLEDGE_OCR_TOKEN: ${NODE_KNOWLEDGE_OCR_TOKEN:-}
+      NODE_KNOWLEDGE_OCR_TIMEOUT_MS: ${NODE_KNOWLEDGE_OCR_TIMEOUT_MS:-30000}
       TZ: Asia/Shanghai
       HISTORY_DISPLAY_TZ: Asia/Shanghai
       SOP_OUTPUT_DIR: /app/output

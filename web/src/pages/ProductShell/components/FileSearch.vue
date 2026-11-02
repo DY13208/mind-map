@@ -6,16 +6,16 @@
       expanded: alwaysExpanded || expanded || !!value
     }"
   >
+    <ActionTooltip v-if="!alwaysExpanded && !expanded && !value" content="搜索">
     <button
-      v-if="!alwaysExpanded && !expanded && !value"
       type="button"
       class="searchTrigger"
-      title="搜索"
       aria-label="搜索"
       @click="open"
     >
       <i class="el-icon-search" aria-hidden="true" />
     </button>
+    </ActionTooltip>
     <el-input
       v-else
       ref="input"
@@ -32,8 +32,10 @@
   </div>
 </template>
 <script>
+import ActionTooltip from '@/components/ActionTooltip.vue'
 export default {
   name: 'FileSearch',
+  components: { ActionTooltip },
   props: {
     value: { type: String, default: '' },
     alwaysExpanded: { type: Boolean, default: false },

@@ -1,3 +1,6 @@
+import { shellTheme } from './shellTheme'
+import { resolveAppearanceTheme, isDarkThemeValue } from './themeAppearance'
+
 const PREFIX = 'mind-map-personal-appearance:v1:'
 const copy = value => JSON.parse(JSON.stringify(value))
 
@@ -16,13 +19,25 @@ export function bindPersonalAppearance(mindMap, roomKey, userId, getState, saveS
   }
   const persist = () => saveState(roomKey, copy(state)).catch(() => {})
   const restore = () => {
-    if (stopped || applying || !Object.keys(state).length) return
+    if (stopped || applying) return
     const current = {
       theme: mindMap.getTheme(),
       themeConfig: mindMap.getCustomThemeConfig() || {},
       layout: mindMap.getLayout()
     }
     const next = { ...current, ...state }
+    // Room hydration and a delayed personal-view response must respect the
+    // current application mode, rather than bringing back a light canvas.
+    // An explicit preset selected in this session is already a complete palette.
+    // Continue enforcing the application mode when restoring stale room data.
+    const explicitPalette = dirty && isDarkThemeValue(next.theme) === (shellTheme.theme === 'dark')
+    const aligned = explicitPalette ? { changed: false } : resolveAppearanceTheme({ nextDark: shellTheme.theme === 'dark', currentTheme: next.theme })
+    if (aligned.changed) {
+      next.theme = aligned.theme
+      next.themeConfig = {}
+      state = { ...state, theme: next.theme, themeConfig: {} }
+      cache()
+    }
     if (JSON.stringify(current) === JSON.stringify(next)) return
     applying = true
     try {

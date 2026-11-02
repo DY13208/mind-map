@@ -117,19 +117,15 @@
       </div>
     </aside>
     <header v-if="shellMode !== 'embed'" class="mobileShellHeader">
-      <template v-if="$route.path === '/spaces'">
-        <button class="mobileBrandButton mobileTeamBrand" aria-label="打开全部功能" @click="openNavigation"><WcpdLogoMark class="mobileBrandMark wcpdLogoImage" aria-hidden="true" /><strong>WCPD</strong></button>
-        <div class="mobileHeaderSpacer" />
-        <button aria-label="搜索团队" @click="$bus.$emit('mobile-search-teams')"><i class="el-icon-search" /></button>
-        <button aria-label="全部功能与设置" @click="openNavigation"><i class="el-icon-menu" /></button>
-      </template>
-      <template v-else>
-      <button class="mobileBrandButton" aria-label="打开全部功能" @click="openNavigation"><WcpdLogoMark class="mobileBrandMark wcpdLogoImage" aria-hidden="true" /><strong>WCPD</strong></button>
-      <button v-if="$route.path.startsWith('/spaces/')" class="detailLauncher" aria-label="全部功能与设置" @click="openNavigation"><i class="el-icon-menu" /></button>
-      <template v-else-if="!$route.path.startsWith('/spaces/')">
-      <button aria-label="全部功能与设置" @click="openNavigation"><i class="el-icon-menu" /></button>
-      </template>
-      </template>
+      <button class="mobileBrandButton" :class="{ mobileTeamBrand: $route.path === '/spaces' }" aria-label="打开全部功能" @click="openNavigation">
+        <span class="mobileBrandIcon"><WcpdLogoMark class="mobileBrandMark wcpdLogoImage" aria-hidden="true" /></span>
+        <strong>WCPD</strong>
+      </button>
+      <div class="mobileHeaderActions">
+        <button v-if="$route.path === '/spaces'" aria-label="搜索团队" @click="$bus.$emit('mobile-search-teams')"><i class="el-icon-search" /></button>
+        <ThemeModeToggle />
+        <button :class="{ detailLauncher: $route.path.startsWith('/spaces/') }" aria-label="全部功能与设置" @click="openNavigation"><i class="el-icon-menu" /></button>
+      </div>
     </header>
     <nav v-if="shellMode !== 'embed'" class="mobileBottomNav" aria-label="主导航">
       <router-link to="/files" aria-label="脑图" title="脑图"><i class="el-icon-house" aria-hidden="true" /></router-link>
@@ -219,6 +215,7 @@ import productService from '@/services/productService'
 import { logoutAndRedirect } from '@/utils/auth'
 import UserAvatar from '@/components/UserAvatar.vue'
 import WcpdLogoMark from '@/components/WcpdLogoMark.vue'
+import ThemeModeToggle from './ThemeModeToggle.vue'
 import AccessNotificationTrigger from '@/components/AccessNotificationTrigger.vue'
 import { shellTheme, applyShellThemeToRoot } from '@/utils/shellTheme'
 import { resolveShellMode, withShell } from '@/utils/shellMode'
@@ -237,7 +234,7 @@ const readSidebarPreference = () => {
 export default {
   name: 'ProductShellLayout',
   mixins: [mobileViewport],
-  components: { UserAvatar, WcpdLogoMark, AccessNotificationTrigger, ProductNavigation },
+  components: { UserAvatar, WcpdLogoMark, ThemeModeToggle, AccessNotificationTrigger, ProductNavigation },
   provide() {
     return { showProductSidebar: this.showProductSidebar }
   },
@@ -1274,11 +1271,10 @@ export default {
 <style lang="less">
 @media (max-width: 767px) {
   .productShell--team-detail {
-    --ui-bg: #f6f9f7; --ui-primary: #08785d; --ui-text: #182d29; --ui-text-secondary: #7c8e88;
     font-family: -apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;
     .productMain { padding-top: calc(65px + env(safe-area-inset-top)); }
     .spaceDetailPage { padding: 20px 15px 44px !important; }
-    .mobileShellHeader { height: 65px; padding-inline: 19px; background: rgba(255,255,255,.93); border-bottom: 1px solid #e9efeb; backdrop-filter: blur(16px); }
+    .mobileShellHeader { height: 65px; padding-inline: 19px; background: var(--ui-surface); border-bottom: 1px solid var(--ui-border); backdrop-filter: blur(16px); }
     .mobileShellHeader .detailLauncher { margin-left: auto; }
     .mobileShellHeader > button.detailLauncher:last-child { margin-left: auto; }
     .mobileBrandMark { width: 40px; height: 40px; border-radius: 12px; font-size: 27px; font-family: Georgia,serif; }
@@ -1289,12 +1285,11 @@ export default {
 <style lang="less">
 @media (max-width: 767px) {
   .productShell--teams {
-    --ui-bg: #f6f9f7; --ui-primary: #08795d; --ui-primary-soft: #e6f4ee; --ui-text: #152925; --ui-text-secondary: #83938c;
-    background: #e9efeb;
+    background: var(--ui-bg);
     font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
-    .productMain { max-width: 640px !important; margin-inline: auto !important; padding-top: calc(104px + env(safe-area-inset-top)); padding-bottom: calc(114px + env(safe-area-inset-bottom)); min-height: 100dvh; box-sizing: border-box; background: radial-gradient(ellipse 64% 230px at 100% -62px,rgba(212,239,224,.58),transparent 76%),#f6f9f7; box-shadow: 0 0 50px rgba(20,52,39,.10); }
+    .productMain { max-width: 640px !important; margin-inline: auto !important; padding-top: calc(104px + env(safe-area-inset-top)); padding-bottom: calc(114px + env(safe-area-inset-bottom)); min-height: 100dvh; box-sizing: border-box; background: var(--ui-bg); box-shadow: 0 0 50px rgba(20,52,39,.10); }
     .spacesPage { padding: 0 24px 0 !important; }
-    .mobileShellHeader { left: 50%; right: auto; transform: translateX(-50%); width: 100%; max-width: 640px; box-sizing: border-box; height: calc(104px + env(safe-area-inset-top)); padding-inline: 24px; background: #f6f9f7; gap: 8px; }
+    .mobileShellHeader { left: 50%; right: auto; transform: translateX(-50%); width: 100%; max-width: 640px; box-sizing: border-box; height: calc(104px + env(safe-area-inset-top)); padding-inline: 24px; background: var(--ui-bg); gap: 8px; }
     .mobileShellHeader .mobileTeamBrand { min-width: 52px; margin-right: 7px; gap: 11px; }
     .mobileHeaderSpacer { flex: 1; }
     .mobileShellHeader .mobileTeamBrand strong { font-size: 20px; }
@@ -1593,4 +1588,29 @@ export default {
   }
 }
 
+
+@media (max-width: 767px) {
+  .productShell .mobileShellHeader {
+    .mobileBrandButton { gap: 9px; }
+    .mobileBrandIcon {
+      display: grid; place-items: center; width: 32px; height: 32px; flex: 0 0 32px;
+      border-radius: 10px; background: var(--ui-primary-soft); border: 1px solid var(--ui-border);
+    }
+    .mobileBrandButton .mobileBrandIcon svg.wcpdLogoImage {
+      width: 22px; height: 22px; flex: 0 0 22px; color: var(--ui-primary);
+      background: transparent; border-radius: 0; box-shadow: none;
+    }
+    .mobileBrandButton strong {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 16px; font-weight: 650; letter-spacing: .06em; color: var(--ui-text);
+    }
+    .mobileHeaderActions {
+      display: flex; align-items: center; gap: 4px; margin-left: auto;
+      > button { display: grid; place-items: center; width: 40px; height: 40px; padding: 0; margin: 0; border: 0; border-radius: 10px; color: var(--ui-text-secondary); background: transparent; }
+      > button:active { background: var(--ui-primary-soft); }
+      .themeModeTrigger svg { width: 20px; height: 20px; }
+      .detailLauncher { margin-left: 0; }
+    }
+  }
+}
 </style>

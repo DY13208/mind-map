@@ -6,6 +6,7 @@ const { createDirectLinks } = require('./directLinks')
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 const TOOLS = [
+  { name: 'list_knowledge_folder_files', description: 'Resolve a mounted knowledgeFiles entry with kind=folder into current visible files, including descendants. Pass folderId=entry.id and paginate nextCursor until null, then read each file with read_knowledge_document. New files are included on the next listing; permissions are checked on every call.', inputSchema: { type: 'object', properties: { folderId: {type:'string'}, cursor: {type:'string'}, limit: {type:'integer'} }, required: ['folderId'] } },
   { name: 'list_knowledge_files', description: 'List files the caller can view.', inputSchema: { type: 'object', properties: { folderId: { type: 'string' }, q: { type: 'string' }, page: { type: 'integer' }, pageSize: { type: 'integer' } } } },
   { name: 'search_knowledge', description: 'Keyword and full-text search over files the caller can view.', inputSchema: { type: 'object', properties: { q: { type: 'string' }, mode: { type: 'string', enum: ['keyword', 'hybrid'] }, limit: { type: 'integer' } }, required: ['q'] } },
   { name: 'query_knowledge_records', description: 'Filter structured rows by SKU, price, stock, date, or an original column.', inputSchema: { type: 'object', properties: { fileId: { type: 'string' }, filters: { type: 'array' }, cursor:{type:'string'}, sheet:{type:'string'}, tableIndex:{type:'integer'}, page: { type: 'integer' }, pageSize: { type: 'integer' } } } },
@@ -42,6 +43,32 @@ function fileItem(f) {
     sha256: f.sha256, status: f.status, statusDetail: f.status_detail, error: f.error,
     parseVersion: f.parse_version, currentRunId: f.current_run_id, createdAt: f.created_at, updatedAt: f.updated_at
   }
+}
+
+async function listFolderFiles(db, user, { folderId, cursor, limit = 100 } = {}) {
+  if (!UUID.test(String(folderId || ''))) throw httpError(400, 'bad_folder_id')
+  await requireRole(db, user, 'folder', folderId, 'viewer')
+  const params = [folderId]
+  const where = ['f.deleted_at is null', visibleSql(user, 'file', 'f', params)]
+  if (cursor) {
+    let value
+    try { value = JSON.parse(Buffer.from(cursor, 'base64url').toString()) } catch (_) { throw httpError(400, 'bad_cursor') }
+    if (!Array.isArray(value) || value.length !== 3 || value[0] !== folderId || typeof value[1] !== 'string' || isNaN(Date.parse(value[1])) || !UUID.test(String(value[2]))) throw httpError(400, 'bad_cursor')
+    params.push(value[1], value[2])
+    where.push(`(f.updated_at, f.id) < ($${params.length - 1}::timestamptz, $${params.length}::uuid)`)
+  }
+  const pageSize = Math.min(Math.max(Math.floor(Number(limit) || 100), 1), 200)
+  params.push(pageSize + 1)
+  const result = await db.query(`with recursive folders(id) as (
+    select id from kb.folders where id = $1 and deleted_at is null
+    union
+    select c.id from kb.folders c join folders p on c.parent_id = p.id where c.deleted_at is null
+  ) select f.* from kb.files f join folders d on d.id = f.folder_id
+    where ${where.join(' and ')} order by f.updated_at desc, f.id desc limit $${params.length}`, params)
+  const rows = result.rows.slice(0, pageSize)
+  const last = rows[rows.length - 1]
+  const nextCursor = result.rows.length > pageSize ? Buffer.from(JSON.stringify([folderId, new Date(last.updated_at).toISOString(), last.id])).toString('base64url') : null
+  return {items: rows.map(fileItem), nextCursor}
 }
 
 async function listFiles(db, user, { folderId, q, status, page = 1, pageSize = 50 } = {}) {
@@ -308,6 +335,7 @@ async function callTool(db, user, name, args = {}, options = {}) {
   delete input.actorId
   delete input.subjectId
   if (name === 'list_knowledge_files') return listFiles(db, user, input)
+  if (name === 'list_knowledge_folder_files') return listFolderFiles(db, user, input)
   if (name === 'search_knowledge') return search(db, user, input)
   if (name === 'query_knowledge_records') return queryRecords(db, user, input)
   if (name === 'get_knowledge_document') return getDocument(db, user, input.fileId)
@@ -320,6 +348,6 @@ async function callTool(db, user, name, args = {}, options = {}) {
 }
 
 module.exports = {
-  TOOLS, plain, rawHeaders, bboxOf, fileItem, listFiles, search, queryRecords,
+  TOOLS, plain, rawHeaders, bboxOf, fileItem, listFiles, listFolderFiles, search, queryRecords,
   sourceOf, listFields, listBlocks, getDocument, readDocument, getBlock, getSource, importStatus, callTool
 }

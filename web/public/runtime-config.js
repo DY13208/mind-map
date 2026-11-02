@@ -1,5 +1,5 @@
 window.__MIND_MAP_RUNTIME__ = {
-  "host": "192.168.0.175",
+  "host": "192.168.0.45",
   "webPort": 8989,
   "collabPort": 1234,
   "aiPort": 3456,

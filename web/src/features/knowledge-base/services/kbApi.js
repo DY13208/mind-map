@@ -49,6 +49,9 @@ export default {
   listFolders: ({ parentId, q, limit = 100, cursor } = {}) =>
     http.get('/folders', { params: query({ parent_id: parentId || (q ? undefined : 'root'), q, limit, cursor }) }).then(d => pickList(d, 'folders')),
   createFolder: body => http.post('/folders', body),
+  getFolder: id => http.get(`/folders/${enc(id)}`),
+  listFolderFiles: (id, { cursor, limit = 100 } = {}) =>
+    http.get(`/folders/${enc(id)}/files`, { params: query({ cursor, limit }) }).then(d => pickList(d, 'files')),
   renameFolder: (id, name) => http.patch(`/folders/${enc(id)}`, { name }),
   deleteFolder: id => http.delete(`/folders/${enc(id)}`),
 

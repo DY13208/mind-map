@@ -46,20 +46,53 @@ export class SearchService {
     // escape LIKE wildcards; ranking keeps the raw query
     const titleLikeQuery = query.replace(/[\\%_]/g, '\\$&');
 
+    const pageTextMatch = sql<boolean>`pages.tsv @@ to_tsquery('english', f_unaccent(${searchQuery}))`;
+    const attachmentTextMatch = sql<boolean>`exists (
+      select 1 from attachments a
+      where a.page_id = pages.id and a.workspace_id = pages.workspace_id
+        and a.type = 'file' and a.deleted_at is null
+        and a.tsv @@ to_tsquery('english', f_unaccent(${searchQuery}))
+    )`;
+    const attachmentRank = sql<number>`coalesce((
+      select max(ts_rank(a.tsv, to_tsquery('english', f_unaccent(${searchQuery}))))
+      from attachments a
+      where a.page_id = pages.id and a.workspace_id = pages.workspace_id
+        and a.type = 'file' and a.deleted_at is null
+        and a.tsv @@ to_tsquery('english', f_unaccent(${searchQuery}))
+    ), 0)`;
+    const matchedAttachmentName = sql<string | null>`(
+      select a.file_name
+      from attachments a
+      where a.page_id = pages.id and a.workspace_id = pages.workspace_id
+        and a.type = 'file' and a.deleted_at is null
+        and a.tsv @@ to_tsquery('english', f_unaccent(${searchQuery}))
+      order by ts_rank(a.tsv, to_tsquery('english', f_unaccent(${searchQuery}))) desc, a.id
+      limit 1
+    )`;
+
     const rankColumn = browseByFilters
       ? sql<number>`0`.as('rank')
       : titleOnly
         ? sql<number>`word_similarity(lower(${titleQuery}), lower(pages.title))`.as(
             'rank',
           )
-        : sql<number>`ts_rank(tsv, to_tsquery('english', f_unaccent(${searchQuery})))`.as(
+        : sql<number>`greatest(
+            coalesce(ts_rank(pages.tsv, to_tsquery('english', f_unaccent(${searchQuery}))), 0),
+            ${attachmentRank}
+          )`.as(
             'rank',
           );
     const highlightColumn = browseByFilters || titleOnly
       ? sql<string>`''`.as('highlight')
-      : sql<string>`ts_headline('english', text_content, to_tsquery('english', f_unaccent(${searchQuery})),'MinWords=9, MaxWords=10, MaxFragments=3')`.as(
+      : sql<string>`case when ${pageTextMatch} then ts_headline('english', pages.text_content, to_tsquery('english', f_unaccent(${searchQuery})),'MinWords=9, MaxWords=10, MaxFragments=3') else '' end`.as(
           'highlight',
         );
+    const matchSourceColumn = browseByFilters || titleOnly
+      ? sql<string>`'page'`.as('matchSource')
+      : sql<string>`case when ${pageTextMatch} then 'page' else 'attachment' end`.as('matchSource');
+    const matchedAttachmentNameColumn = browseByFilters || titleOnly
+      ? sql<string | null>`null`.as('matchedAttachmentName')
+      : sql<string | null>`case when ${pageTextMatch} then null else ${matchedAttachmentName} end`.as('matchedAttachmentName');
 
     let queryResults = this.db
       .selectFrom('pages')
@@ -74,13 +107,11 @@ export class SearchService {
         'updatedAt',
         rankColumn,
         highlightColumn,
+        matchSourceColumn,
+        matchedAttachmentNameColumn,
       ])
       .$if(!browseByFilters && !titleOnly, (qb) =>
-        qb.where(
-          'tsv',
-          '@@',
-          sql<string>`to_tsquery('english', f_unaccent(${searchQuery}))`,
-        ),
+        qb.where(sql<boolean>`(${pageTextMatch} or ${attachmentTextMatch})`),
       )
       .$if(!browseByFilters && titleOnly, (qb) =>
         qb.where((eb) =>

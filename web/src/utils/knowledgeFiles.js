@@ -1,6 +1,9 @@
 import kbApi from '@/features/knowledge-base/services/kbApi'
 export const MAX_KNOWLEDGE_FILES = 20
 export const MAX_KNOWLEDGE_CONTEXT_CHARS = 200000
+export function knowledgeFileUrl(file) {
+  return `/kb/parse?shell=full&view=source&file=${encodeURIComponent(file.id)}`
+}
 
 function dataOf(node) {
   return node && typeof node.getData === 'function' ? node.getData() || {} : (node && ((node.nodeData && node.nodeData.data) || node.data)) || {}
@@ -11,7 +14,7 @@ export function collectKnowledgeFileReferences(node, { includeDescendants = fals
     if (!item || visited.has(item)) return
     visited.add(item)
     const data = dataOf(item)
-    for (const file of Array.isArray(data.knowledgeFiles) ? data.knowledgeFiles : []) if (file && file.id) references.set(file.id, file)
+    for (const file of Array.isArray(data.knowledgeFiles) ? data.knowledgeFiles : []) if (file && file.id) references.set(`${file.kind === 'folder' ? 'folder' : 'file'}:${file.id}`, file)
     if (descend) for (const child of item.children || (item.nodeData && item.nodeData.children) || []) add(child, true)
   }
   add(node, includeDescendants)
@@ -23,7 +26,26 @@ function contextError(message, code = 'KNOWLEDGE_FULL_TEXT_FAILED') {
 }
 // Fetch the current parse run on demand; full documents never enter node data.
 export async function readNodeKnowledgeFullText(node, options = {}) {
-  const references = collectKnowledgeFileReferences(node, options)
+  const mounts = collectKnowledgeFileReferences(node, options)
+  const resolved = new Map()
+  for (const reference of mounts) {
+    if (reference.kind !== 'folder') { resolved.set(reference.id, reference); continue }
+    try {
+      let cursor = null
+      const seen = new Set()
+      do {
+        if (cursor && seen.has(cursor)) throw contextError('文件夹分页异常，无法确认已读取完整内容。')
+        if (cursor) seen.add(cursor)
+        const page = await kbApi.listFolderFiles(reference.id, {cursor, limit: 100})
+        page.items.forEach(file => resolved.set(file.id, file))
+        if (resolved.size > 1000) throw contextError('文件夹包含的文件超过单次读取 1000 个上限，请缩小挂载范围。')
+        cursor = page.nextCursor || null
+      } while (cursor)
+    } catch (error) {
+      throw contextError(`无法读取挂载文件夹「${reference.name || reference.id}」：${error.message || '无权访问或已删除'}`)
+    }
+  }
+  const references = Array.from(resolved.values())
   if (!references.length) return { text: '', files: [], chars: 0 }
   const maxChars = options.maxChars || MAX_KNOWLEDGE_CONTEXT_CHARS
   let chars = 0
@@ -79,11 +101,16 @@ export async function appendKnowledgeFullText(prompt, node, options = {}) {
   return context.text ? `${prompt}\n\n${context.text}` : prompt
 }
 export async function readKnowledgeFileReference(item) {
+  if (item.kind === 'folder') {
+    const folder = await kbApi.getFolder(item.id)
+    return { id: folder.id, name: folder.name, kind: 'folder', recursive: true,
+      url: `/kb/files?shell=full&folder=${encodeURIComponent(folder.id)}` }
+  }
   const file = await kbApi.getFile(item.id)
   const result = await kbApi.getBlocks(item.id, { limit: 50 })
   const text = result.items.map(block => block.text || (block.data ? JSON.stringify(block.data) : '')).filter(Boolean).join('\n\n')
   return { id: file.id, name: file.name || file.fileName, mime: file.mime || file.mimeType || '', size: file.size || 0,
     status: file.status || '', parseVersion: file.parseVersion || file.parse_version || '', extractedText: text.slice(0, 3000),
     excerptTruncated: text.length > 3000 || !!result.nextCursor, updatedAt: file.updatedAt || '',
-    url: `/kb/parse?shell=full&file=${encodeURIComponent(file.id)}` }
+    url: knowledgeFileUrl(file) }
 }

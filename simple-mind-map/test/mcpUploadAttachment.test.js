@@ -45,6 +45,12 @@ async function main() {
   )
   assert.equal(fromUrl.contentBase64, undefined)
 
+  const fromArchiveUrl = await resolveAttachmentUploadInput({
+    source_url: 'https://example.com/files/%E8%B5%84%E6%96%99.tar.gz'
+  })
+  assert.equal(fromArchiveUrl.fileName, '资料.tar.gz')
+  assert.equal(fromArchiveUrl.sourceUrl, 'https://example.com/files/%E8%B5%84%E6%96%99.tar.gz')
+
   const fromB64 = await resolveAttachmentUploadInput({
     node: 'n2',
     file_name: 'note.md',
@@ -54,6 +60,14 @@ async function main() {
   assert.equal(fromB64.fileName, 'note.md')
   assert.equal(fromB64.mimeType, 'text/markdown')
   assert.ok(fromB64.contentBase64)
+
+  const archiveBytes = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00, 0xff])
+  const fromArchiveB64 = await resolveAttachmentUploadInput({
+    file_name: '加密资料.7z',
+    content_base64: archiveBytes.toString('base64')
+  })
+  assert.deepEqual(Buffer.from(fromArchiveB64.contentBase64, 'base64'), archiveBytes)
+  assert.equal(fromArchiveB64.fileName, '加密资料.7z')
 
   const tmp = path.join(os.tmpdir(), `mcp-att-${Date.now()}.txt`)
   fs.writeFileSync(tmp, 'hello-attachment', 'utf8')
@@ -69,6 +83,16 @@ async function main() {
     )
   } finally {
     fs.unlinkSync(tmp)
+  }
+
+  const archiveTmp = path.join(os.tmpdir(), `mcp-att-${Date.now()}.tar.xz`)
+  fs.writeFileSync(archiveTmp, archiveBytes)
+  try {
+    const fromArchivePath = await resolveAttachmentUploadInput({ file_path: archiveTmp })
+    assert.equal(fromArchivePath.fileName, path.basename(archiveTmp))
+    assert.deepEqual(Buffer.from(fromArchivePath.contentBase64, 'base64'), archiveBytes)
+  } finally {
+    fs.unlinkSync(archiveTmp)
   }
 
   await assert.rejects(

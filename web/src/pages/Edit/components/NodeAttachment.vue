@@ -5,7 +5,7 @@
     ref="fileInput"
     class="node-attachment-input"
     type="file"
-    accept=".txt,.md,.markdown,.csv,.log,.json,.html,.htm,.pdf,.doc,.docx,.xls,.xlsx,.xlsm,.ods,.pptx,.png,.jpg,.jpeg,.webp,.gif,text/plain,text/markdown,text/csv,text/html,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroenabled.12,application/vnd.oasis.opendocument.spreadsheet,application/vnd.openxmlformats-officedocument.presentationml.presentation,image/png,image/jpeg,image/webp,image/gif"
+    :accept="fileAccept"
     @change="onFilePicked"
   />
   </div>
@@ -16,7 +16,8 @@ import { roomFromLocation } from '@/utils/roomLocation'
 import { attachmentUploadNotice } from '@/utils/attachmentProgressiveText'
 import KnowledgeFilePicker from './KnowledgeFilePicker.vue'
 import { normalizeAttachmentFileName } from 'simple-mind-map/src/utils/attachmentFileName'
-import { MAX_KNOWLEDGE_FILES, readKnowledgeFileReference } from '@/utils/knowledgeFiles'
+import { ARCHIVE_EXTENSIONS } from 'simple-mind-map/src/utils/attachmentFileType'
+import { MAX_KNOWLEDGE_FILES, readKnowledgeFileReference, knowledgeFileUrl } from '@/utils/knowledgeFiles'
 import {
   getNodeAttachment,
   getRoomRevision,
@@ -29,6 +30,7 @@ import {
 
 const ATTACHMENT_WRITE_MAX_ATTEMPTS = 3
 const ATTACHMENT_WRITE_RETRY_DELAY_MS = 120
+const BASE_ATTACHMENT_ACCEPT = '.txt,.md,.markdown,.csv,.log,.json,.html,.htm,.pdf,.doc,.docx,.xls,.xlsx,.xlsm,.ods,.pptx,.png,.jpg,.jpeg,.webp,.gif,text/plain,text/markdown,text/csv,text/html,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroenabled.12,application/vnd.oasis.opendocument.spreadsheet,application/vnd.openxmlformats-officedocument.presentationml.presentation,image/png,image/jpeg,image/webp,image/gif'
 const ATTACHMENT_FIELDS = [
   'attachmentUrl',
   'attachmentName',
@@ -128,6 +130,12 @@ export default {
       default: null
     }
   },
+  computed: {
+    fileAccept() {
+      const extensions = ARCHIVE_EXTENSIONS.map(ext => ext.startsWith('.') ? ext : '.' + ext)
+      return [BASE_ATTACHMENT_ACCEPT, ...extensions].join(',')
+    }
+  },
   data() {
     return {
       pendingNodes: [],
@@ -188,7 +196,14 @@ export default {
     this.invalidateAttachmentTargets()
   },
   methods: {
-    onViewKnowledgeFiles(node) { this.openKnowledgePicker([node], true) },
+    onViewKnowledgeFiles(node) {
+      const entries = node && node.getData ? node.getData('knowledgeFiles') || [] : []
+      if (entries.length === 1 && entries[0].kind !== 'folder') {
+        window.open(knowledgeFileUrl(entries[0]), '_blank', 'noopener')
+        return
+      }
+      this.openKnowledgePicker([node], true)
+    },
     onSelectKnowledgeFile(nodes) {
       this.openKnowledgePicker(nodes, false)
     },
@@ -215,8 +230,8 @@ export default {
     },
     async onKnowledgeFilePicked(files) {
       if (this.knowledgeBusy || !Array.isArray(files) || this.knowledgeReadonly) return
-      const uniqueFiles = Array.from(new Map(files.map(file => [file.id, file])).values())
-      if (uniqueFiles.length > MAX_KNOWLEDGE_FILES) { this.$message.warning(`最多选择 ${MAX_KNOWLEDGE_FILES} 个文件`); return }
+      const uniqueFiles = Array.from(new Map(files.map(file => [`${file.kind === 'folder' ? 'folder' : 'file'}:${file.id}`, file])).values())
+      if (uniqueFiles.length > MAX_KNOWLEDGE_FILES) { this.$message.warning(`最多选择 ${MAX_KNOWLEDGE_FILES} 项`); return }
       const targets = this.knowledgeTargets.slice()
       if (!targets.length || !targets.every(target => this.targetIsCurrent(target))) {
         this.$message.warning('目标节点或附件已发生变化，请重新选择节点')
@@ -240,7 +255,7 @@ export default {
         }
         this.knowledgeVisible = false
         this.knowledgeTargets = []
-        this.$message.success(references.length ? `已挂载 ${references.length} 个知识库文件，可查看解析信息` : '已清除知识库文件挂载')
+        this.$message.success(references.length ? `已挂载 ${references.length} 项知识库资料` : '已清除知识库挂载')
       } catch (error) {
         if (!this.destroyed && requestGeneration === this.attachmentTargetGeneration) {
           this.knowledgeError = error.message || '读取知识库解析信息失败，请重试'

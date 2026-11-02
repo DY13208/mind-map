@@ -137,8 +137,8 @@ export default {
   display: flex;
   align-items: center;
   gap: 14px;
-  background: white;
-  border: 1px solid #e2e9e6;
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-border);
   padding: 18px;
   border-radius: 13px;
   > i {
@@ -155,7 +155,7 @@ export default {
   }
   p {
     margin: 5px 0 0;
-    color: #83918c;
+    color: var(--ui-text-muted);
     font-size: 12px;
   }
 }
@@ -171,18 +171,18 @@ export default {
 .teamSearchResults {
   margin-top: 12px;
   button { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-height: 48px; padding: 12px; border: 0; border-radius: 8px; background: transparent; color: inherit; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
-  button:hover { background: #eaf5f0; }
-  p { color: #71827b; text-align: center; }
+  button:hover { background: var(--ui-primary-soft); }
+  p { color: var(--ui-text-secondary); text-align: center; }
 }
 @media (max-width: 767px) {
   .spacesPage {
     .productHeader { display: none; }
     .personal { max-width: none; padding: 16px; min-height: 76px; box-sizing: border-box; gap: 14px; border-radius: 14px; }
-    .personal > i { background: #eaf5f0; color: #087854; flex: 0 0 44px; font-size: 22px; }
+    .personal > i { background: var(--ui-primary-soft); color: var(--ui-primary); flex: 0 0 44px; font-size: 22px; }
     .personal > div { min-width: 0; }
     .personal strong { font-size: 17px; }
     .personal p { font-size: 12px; }
-    .personal .el-button { min-width: 44px; min-height: 44px; padding: 0; font-size: 0; color: #71827b; &::after { content: '\e6e0'; font-family: element-icons; font-size: 18px; } }
+    .personal .el-button { min-width: 44px; min-height: 44px; padding: 0; font-size: 0; color: var(--ui-text-secondary); &::after { content: '\e6e0'; font-family: element-icons; font-size: 18px; } }
     .teamsHeading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 24px 0 12px; }
     .sectionTitle { display: flex; align-items: center; min-height: 44px; margin: 0; font-size: 16px; line-height: 22px; color: var(--ui-text); }
     .desktopTeamTitle { display: none; }
@@ -196,27 +196,27 @@ export default {
       &:hover::before, &:focus::before { background: #066647; }
     }
     .teamGrid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
-    .mobileTeamTotal { display: block; text-align: center; color: #83918c; font-size: 12px; margin: 16px 0 0; }
+    .mobileTeamTotal { display: block; text-align: center; color: var(--ui-text-muted); font-size: 12px; margin: 16px 0 0; }
   }
 }
 </style>
 <style lang="less" scoped>
 @media (max-width: 767px) {
   .spacesPage {
-    .personal { min-height: 117px; padding: 18px 22px; gap: 18px; border-color: #e0e9e3; border-radius: 22px; background: rgba(255,255,255,.91); box-shadow: 0 8px 28px rgba(34,70,55,.035); }
-    .personal > i { width: 65px; height: 65px; flex-basis: 65px; border-radius: 18px; background: #e9f5ef; color: #087e60; font-size: 32px; }
+    .personal { min-height: 117px; padding: 18px 22px; gap: 18px; border-color: var(--ui-border); border-radius: 22px; background: var(--ui-surface); box-shadow: 0 8px 28px rgba(34,70,55,.035); }
+    .personal > i { width: 65px; height: 65px; flex-basis: 65px; border-radius: 18px; background: var(--ui-primary-soft); color: var(--ui-primary); font-size: 32px; }
     .personal strong { display: block; font-size: 22px; font-weight: 750; letter-spacing: -.3px; }
-    .personal p { margin-top: 6px; color: #8b9a92; font-size: 15px; }
-    .teamsHeading { position: relative; margin: 32px 0 15px; padding: 17px 21px; border: 1px solid #d8eadf; border-radius: 22px; background: linear-gradient(112deg,#e6f5ed 0%,#f0f9f3 60%,#edf6f1 100%); overflow: hidden; }
+    .personal p { margin-top: 6px; color: var(--ui-text-secondary); font-size: 15px; }
+    .teamsHeading { position: relative; margin: 32px 0 15px; padding: 17px 21px; border: 1px solid var(--ui-border); border-radius: 22px; background: var(--ui-primary-soft); overflow: hidden; }
     .teamsHeading::before, .teamsHeading::after { content: ''; position: absolute; border-radius: 50%; pointer-events: none; }
     .teamsHeading::before { right: -1px; top: -89px; width: 210px; height: 180px; border: 1px solid rgba(53,142,105,.07); }
     .teamsHeading::after { right: -48px; bottom: -115px; width: 260px; height: 200px; border: 1px solid rgba(53,142,105,.11); }
-    .sectionTitle { position: relative; z-index: 1; font-size: 23px; font-weight: 770; letter-spacing: -.35px; color: #152925; }
-    .mobileTeamCreate { z-index: 1; flex: none; height: 44px; min-height: 44px; padding: 0 16px 0 13px; gap: 8px; border: 1px solid rgba(0,90,65,.05); border-radius: 12px; background: linear-gradient(135deg,#0c8768,#066a50); font-size: 15px; font-weight: 650; line-height: 22px; box-shadow: 0 6px 14px rgba(0,104,71,.15); }
+    .sectionTitle { position: relative; z-index: 1; font-size: 23px; font-weight: 770; letter-spacing: -.35px; color: var(--ui-text); }
+    .mobileTeamCreate { z-index: 1; flex: none; height: 44px; min-height: 44px; padding: 0 16px 0 13px; gap: 8px; border: 1px solid rgba(0,90,65,.05); border-radius: 12px; background: var(--ui-primary); color: var(--ui-on-primary); font-size: 15px; font-weight: 650; line-height: 22px; box-shadow: 0 6px 14px rgba(0,104,71,.15); }
     .mobileTeamCreate::before { content: none; }
-    .mobileTeamCreate:hover, .mobileTeamCreate:focus { background: #05644e; }
+    .mobileTeamCreate:hover, .mobileTeamCreate:focus { background: var(--ui-primary-hover); }
     .mobileTeamCreate /deep/ .el-icon-plus { font-size: 19px; }
-    .mobileTeamTotal { font-size: 0; padding: 14px 0 8px; margin: 0; color: #a4b1a7; &::after { content: '— 已展示全部团队 —'; font-size: 12px; } }
+    .mobileTeamTotal { font-size: 0; padding: 14px 0 8px; margin: 0; color: var(--ui-text-muted); &::after { content: '— 已展示全部团队 —'; font-size: 12px; } }
   }
 }
 @media (max-width: 470px) {

@@ -15,6 +15,8 @@ export interface IPageSearch {
   rank: string;
   highlight: string;
   matchedText: string[];
+  matchSource?: 'page' | 'attachment';
+  matchedAttachmentName?: string | null;
   wholeWord: boolean;
   space: Partial<ISpace>;
 }

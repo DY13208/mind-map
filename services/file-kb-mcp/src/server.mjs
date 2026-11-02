@@ -23,6 +23,7 @@ const requestUser = new AsyncLocalStorage()
 const enabledFlag = v => /^(1|true|yes|on)$/i.test(String(v ?? '').trim())
 
 const TOOL_FIELDS = {
+  list_knowledge_folder_files: {folderId: z.string().uuid(), cursor: z.string().optional(), limit: z.number().int().min(1).max(200).optional()},
   list_knowledge_files: {
     folderId: z.string().optional(),
     q: z.string().optional(),

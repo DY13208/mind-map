@@ -641,7 +641,11 @@ function createApi({ pool, storage, queue, config, limiter, geekcloud = null }) 
     if ((m = /^\/api\/kb\/files\/([^/]+)\/structure$/.exec(pathname)) && method === 'POST') return restructure(req, res, user, m[1])
     if (pathname === '/api/kb/folders' && method === 'POST') return createFolder(req, res, user)
     if (pathname === '/api/kb/folders' && method === 'GET') return listFolders(res, user, url)
+    if ((m = /^\/api\/kb\/folders\/([^/]+)\/files$/.exec(pathname)) && method === 'GET') {
+      return readApi.listFolderFiles(pool, user, {folderId: m[1], cursor: url.searchParams.get('cursor'), limit: url.searchParams.get('limit')}).then(body => send(res, 200, body))
+    }
     if ((m = /^\/api\/kb\/folders\/([^/]+)$/.exec(pathname))) {
+      if (method === 'GET') return getFolder(pool, user, m[1], 'viewer').then(folder => send(res, 200, folderView(folder)))
       if (method === 'PATCH') return renameFolder(req, res, user, m[1])
       if (method === 'DELETE') return deleteFolder(res, user, m[1])
     }

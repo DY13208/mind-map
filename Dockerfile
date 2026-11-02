@@ -55,6 +55,9 @@ WORKDIR /app
 COPY web/scripts ./web/scripts
 COPY web/package.json ./web/package.json
 COPY simple-mind-map ./simple-mind-map
+COPY services/file-kb/src/config.js ./services/file-kb/src/config.js
+COPY services/file-kb/src/docling ./services/file-kb/src/docling
+COPY services/file-kb/src/structurer/blocks.js ./services/file-kb/src/structurer/blocks.js
 COPY --from=deps /src/web/node_modules ./web/node_modules
 COPY --from=deps /src/simple-mind-map/node_modules ./simple-mind-map/node_modules
 COPY --from=build /out/web /usr/share/nginx/html

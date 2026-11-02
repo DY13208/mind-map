@@ -99,7 +99,7 @@
             </div>
             <p class="leaveHint">
               {{
-                row.template.agentInput ? '此处为本次申请材料快照，补充材料请在 Agent 中操作。' : editable
+                row.template.agentInput ? '此处为本次申请材料快照。附件仅保存在本次申请中，不挂到脑图节点；补充材料请在 Agent 中操作。' : editable
                   ? '证明上传到本申请模板指定的附件字段节点。节点内容对该脑图现有协作者可见，请使用受限的个人脑图。'
                   : '当前为已提交的材料快照；修改脑图不会改变本轮审批材料，须撤回或退回后重新读取提交。'
               }}
@@ -471,8 +471,7 @@ export default {
           }
         }
         if (seq !== this.sequence) return
-        this.row = { ...data, history: data.history || [] }
-        await this.load()
+        await this.applyLoaded(data, seq)
         if (seq === this.sequence && this.editable)
           await this.refreshNodes(detail.expectedFields)
       } catch (e) {
@@ -525,33 +524,36 @@ export default {
       try {
         const data = await service.get(this.row.id)
         if (seq !== this.sequence) return
-        this.row = data
-        this.rulesChecked = false
-        this.checked = []
-        this.reason = ''
-        this.error = ''
-        const analyses = data.history.filter(
-          e =>
-            e.action === 'analysis' &&
-            e.revision === data.revision &&
-            e.detail.step === data.current_step
-        )
-        this.analysis = analyses.length
-          ? analyses[analyses.length - 1].detail.content
-          : ''
-        const currentTemplate = this.editable
-          ? await service.template(data.template.source).catch(() => null)
-          : null
-        if (seq !== this.sequence) return
-        this.currentTemplate = currentTemplate
-        if (data.canDecide) {
-          this.tab = 'flow'
-          if (!this.analysis) this.analyze()
-        }
+        await this.applyLoaded(data, seq)
       } catch (e) {
         if (seq === this.sequence) this.error = e.message
       } finally {
         if (seq === this.sequence) this.loading = false
+      }
+    },
+    async applyLoaded(data, seq = this.sequence) {
+      if (seq !== this.sequence) return
+      this.row = { ...data, history: data.history || [] }
+      this.rulesChecked = false
+      this.checked = []
+      this.reason = ''
+      this.error = ''
+      const analyses = (data.history || []).filter(
+        e =>
+          e.action === 'analysis' &&
+          e.revision === data.revision &&
+          e.detail.step === data.current_step
+      )
+      this.analysis = analyses.length
+        ? analyses[analyses.length - 1].detail.content
+        : ''
+      const currentTemplate = this.editable
+        ? await service.template(data.template.source).catch(() => null)
+        : null
+      if (seq !== this.sequence) return
+      this.currentTemplate = currentTemplate
+      if (data.canDecide) {
+        this.tab = 'flow'
       }
     },
     async act(action, extra = {}) {
@@ -577,8 +579,7 @@ export default {
           current &&
           current.revision !== row.revision
         ) {
-          this.row = current
-          await this.load()
+          await this.applyLoaded(current, seq)
         }
       } finally {
         if (seq === this.sequence) this.busy = false

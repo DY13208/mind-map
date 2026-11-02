@@ -1425,8 +1425,9 @@ button:focus-visible {
     border-radius: 12px;
   }
 }
-/* 暗色模式：编辑页 body.isDark 时生效（ProductShell 页不加 isDark，保持浅色） */
-body.isDark .accessNotificationDialog.el-dialog {
+/* Dialogs and select poppers are mounted under body; support both editor
+   and product-shell appearance roots, including live mode changes. */
+:is(body.isDark, html.shellDark) .accessNotificationDialog.el-dialog {
   background: #1f2329;
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
   .messageCenter { color: #e6e8eb; background: #1f2329; }
@@ -1495,9 +1496,9 @@ body.isDark .accessNotificationDialog.el-dialog {
   .el-pagination button, .el-pagination .el-pager li, .el-pagination button:disabled { background: transparent; color: #9aa0a6; }
   .el-pagination .el-pager li.active, .el-pagination .el-pager li:hover { color: #4cc596; }
 }
-body.isDark .v-modal { background: #000; }
+:is(body.isDark, html.shellDark) .v-modal { background: #000; }
 /* 下拉框挂在 body 上，单独覆盖 */
-body.isDark .accessNotificationPopper.el-select-dropdown {
+:is(body.isDark, html.shellDark) .accessNotificationPopper.el-select-dropdown {
   background: #25282d; border-color: #3a3d42;
   .el-select-dropdown__item { color: #d5d9dd; }
   .el-select-dropdown__item.hover, .el-select-dropdown__item:hover { background: #2f343a; }
@@ -1507,10 +1508,10 @@ body.isDark .accessNotificationPopper.el-select-dropdown {
   &[x-placement^='top'] .popper__arrow { border-top-color: #3a3d42 !important; }
   &[x-placement^='top'] .popper__arrow::after { border-top-color: #25282d !important; }
 }
-body.isDark .accessNotificationDialog .el-loading-mask {
+:is(body.isDark, html.shellDark) .accessNotificationDialog .el-loading-mask {
   background-color: rgba(24, 27, 33, 0.72);
 }
-body.isDark .accessNotificationDialog .el-loading-spinner .path {
+:is(body.isDark, html.shellDark) .accessNotificationDialog .el-loading-spinner .path {
   stroke: #34c759;
 }
 .accessNotificationDialog .el-loading-spinner .path {

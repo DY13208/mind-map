@@ -2,7 +2,6 @@
   <el-badge
     :value="count"
     :max="99"
-    :is-dot="avatar"
     :hidden="!count || (!collapsed && !avatar)"
     class="notificationBadge"
     :class="{
@@ -208,32 +207,29 @@ export default {
   border-color: #e64b57;
   box-shadow: 0 0 0 3px rgba(230, 75, 87, 0.2);
 }
-.notificationBadge--avatar /deep/ .el-badge__content.is-dot {
-  top: 2px;
-  right: 3px;
-  width: 10px;
-  height: 10px;
-  background-color: #e64b57;
+.notificationBadge--avatar /deep/ .el-badge__content.is-fixed {
+  top: 0;
+  right: 0;
+  box-sizing: border-box;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 4px;
+  background-color: #d92d43;
+  color: #fff;
   border: 2px solid #fff;
-  transform: translate(50%, -50%);
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
+  box-shadow: 0 2px 5px rgba(130, 20, 35, 0.25);
+  transform: translate(10%, -20%);
+  pointer-events: none;
 }
 @media (prefers-reduced-motion: reduce) {
   .notificationButton { transition: none; }
 }
 </style>
 <style lang="less">
-.el-tooltip__popper.wcpdActionTooltip {
-  padding: 7px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
-  background: #29352f;
-  color: #f5f8f6;
-  box-shadow: 0 4px 14px rgba(17, 30, 23, 0.14);
-  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  font-size: 12px;
-  font-weight: 400;
-  line-height: 18px;
-}
 body.isDark .notificationBadge .notificationButton {
   color: #b4bac0;
 }
@@ -246,7 +242,7 @@ body.isDark .notificationCount,
   background: #492d33;
   color: #ffb4b8;
 }
-body.isDark .notificationBadge--avatar .el-badge__content.is-dot {
+body.isDark .notificationBadge--avatar .el-badge__content.is-fixed {
   border-color: #1f2329;
 }
 </style>

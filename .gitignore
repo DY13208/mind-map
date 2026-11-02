@@ -77,6 +77,8 @@ output/*.py
 /tests/performance/*.log
 !/simple-mind-map/test/
 /simple-mind-map/test/*
+!/simple-mind-map/test/collabTitleWatch.test.cjs
+!/simple-mind-map/test/shortNodeLinks.pg.test.cjs
 !/simple-mind-map/test/performanceBackendHarness.js
 !/simple-mind-map/test/backendPerformanceSample.js
 !/simple-mind-map/test/backendCountSample.js
@@ -96,6 +98,10 @@ output/*.py
 !/simple-mind-map/test/historyTreeCounts.pg.test.js
 !/web/tests/
 /web/tests/*
+!/web/tests/mapTitleSync.test.cjs
+!/web/tests/shortNodeLink.test.cjs
+!/web/tests/appearanceMode.test.cjs
+!/web/tests/themeReveal.test.cjs
 !/web/tests/helpers/
 !/web/tests/helpers/**
 !/web/tests/cardPreviewQueue.test.cjs
@@ -111,14 +117,22 @@ output/*.py
 !/simple-mind-map/e2e/performance/*.cjs
 /work/
 !/simple-mind-map/test/roomAclStartup.pg.test.js
+!/simple-mind-map/test/approvalAttachments.test.cjs
+!/simple-mind-map/test/approvalAttachments.mcp.test.mjs
+!/simple-mind-map/test/approvalAttachments.pg.integration.test.cjs
 !/services/file-kb/test/direct-links.test.js
 !/web/tests/kbDirectLink.test.cjs
 /output/
 
 !/web/tests/kbBatchPermissions.test.cjs
 !/web/tests/kbOrganization.test.cjs
+!/web/tests/approvalPerformance.test.cjs
 !/services/file-kb/test/download-url.test.js
 !/services/file-kb-mcp/test/download-url.test.mjs
+!/services/file-kb/test/folder-mount.test.cjs
+!/web/tests/knowledgeFolderMount.test.cjs
+!/web/tests/knowledgeFileOpen.test.cjs
+!/web/tests/knowledgeFilePickerSearch.test.cjs
 
 # 环境配置与备份
 .env

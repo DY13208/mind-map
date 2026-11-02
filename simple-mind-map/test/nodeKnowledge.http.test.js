@@ -1,4 +1,5 @@
 const assert = require('assert').strict
+const crypto = require('crypto')
 const httpApi = require('../bin/nodeKnowledge/http')
 const limits = require('../bin/nodeKnowledge/limits')
 const roomAcl = require('../bin/roomAcl')
@@ -113,6 +114,26 @@ async function main() {
     assert.ok(Buffer.isBuffer(response.body))
     assert.ok(response.body.equals(raw), 'content response must preserve original bytes')
     assert.deepEqual(accessCalls, [{ roomKey: 'room-demo', action: 'view' }])
+
+    const archiveBytes = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00, 0xff, 0x10])
+    store.getContentById = async () => ({
+      attachment: { fileName: '项目资料.tar.gz', mimeType: 'application/octet-stream' },
+      buffer: archiveBytes
+    })
+    const archiveDownload = createResponse()
+    await httpApi.handleApi(
+      { method: 'GET', url: '/api/files/room-demo/attachments/archive-1/content?download=1' },
+      archiveDownload,
+      { db: {} }
+    )
+    assert.equal(archiveDownload.statusCode, 200)
+    assert.equal(archiveDownload.headers['Content-Type'], 'application/gzip')
+    assert.equal(archiveDownload.headers['Content-Length'], archiveBytes.length)
+    assert.equal(archiveDownload.headers['Content-Disposition'], `attachment; filename*=UTF-8''${encodeURIComponent('项目资料.tar.gz')}`)
+    assert.equal(
+      crypto.createHash('sha256').update(archiveDownload.body).digest('hex'),
+      crypto.createHash('sha256').update(archiveBytes).digest('hex')
+    )
 
     store.getContentById = async () => ({ attachment: { fileName: normalizedName, mimeType: 'application/octet-stream' }, buffer: raw })
     const htmlInline = createResponse()

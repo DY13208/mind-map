@@ -56,12 +56,16 @@ export class AttachmentRepo {
     opts?: {
       trx?: KyselyTransaction;
     },
-  ): Promise<Attachment> {
+  ): Promise<Attachment & { updatedAtExact: string }> {
     const db = dbOrTx(this.db, opts?.trx);
 
     return db
       .selectFrom('attachments')
-      .select([...this.baseFields, 'textContent'])
+      .select([
+        ...this.baseFields,
+        'textContent',
+        sql<string>`"updated_at"::text`.as('updatedAtExact'),
+      ])
       .where('id', '=', attachmentId)
       .executeTakeFirst();
   }
@@ -183,6 +187,32 @@ export class AttachmentRepo {
       .where('id', '=', attachmentId)
       .returning(this.baseFields)
       .executeTakeFirst();
+  }
+
+  async updateAttachmentText(
+    attachmentId: string,
+    expectedFilePath: string,
+    expectedUpdatedAtExact: string,
+    textContent: string,
+  ): Promise<boolean> {
+    const bounded = String(textContent || '').slice(0, 1_000_000);
+    const result = await this.db
+      .updateTable('attachments')
+      .set({
+        textContent: bounded,
+        // The attachments search index predates this open build and has no
+        // trigger. Maintain its existing tsv column without changing page text.
+        tsv: sql`setweight(to_tsvector('english', f_unaccent(substring(coalesce(${bounded}, ''), 1, 1000000))), 'B')`,
+        updatedAt: new Date(),
+      })
+      .where('id', '=', attachmentId)
+      .where('filePath', '=', expectedFilePath)
+      // Keep the parameter text-typed first; binding it as timestamptz makes
+      // postgres.js parse it as Date and truncate the database's microseconds.
+      .where(sql<boolean>`"updated_at" = ${expectedUpdatedAtExact}::text::timestamptz`)
+      .where('deletedAt', 'is', null)
+      .executeTakeFirst();
+    return Number(result?.numUpdatedRows) > 0;
   }
 
   async claimAttachmentsForChat(

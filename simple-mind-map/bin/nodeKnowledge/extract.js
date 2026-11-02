@@ -1,5 +1,52 @@
 const JSZip = require('jszip')
 const { kindOf, normalizeMime, MAX_EXTRACT_CHARS } = require('./limits')
+const fs = require('fs')
+const path = require('path')
+
+const DOCLING_IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'webp'])
+let doclingRuntime = null
+
+function doclingConfigured() {
+  return !!String(process.env.DOCLING_URL || '').trim()
+}
+
+function legacyOcrConfigured() {
+  return !!String(process.env.NODE_KNOWLEDGE_OCR_URL || '').trim()
+}
+
+function shouldUseDocling(fileName, mimeType = '') {
+  if (!doclingConfigured() || legacyOcrConfigured()) return false
+  const kind = kindOf(fileName, normalizeMime(mimeType, fileName))
+  if (kind === 'pdf') return true
+  const ext = path.extname(String(fileName || '')).toLowerCase().slice(1)
+  return kind === 'image' && DOCLING_IMAGE_EXTENSIONS.has(ext)
+}
+
+function getDoclingRuntime() {
+  if (doclingRuntime) return doclingRuntime
+  const { doclingOcrConfig } = require('../../../services/file-kb/src/config')
+  const { createDoclingClient } = require('../../../services/file-kb/src/docling/client')
+  const settings = doclingOcrConfig(process.env)
+  doclingRuntime = {
+    client: createDoclingClient({
+      baseUrl: String(process.env.DOCLING_URL || '').trim().replace(/\/+$/, ''),
+      apiKey: String(process.env.DOCLING_API_KEY || ''),
+      ocrMode: settings.doclingOcrMode,
+      ocrEngine: settings.doclingOcrEngine,
+      ocrLang: settings.doclingOcrLang,
+      ocrForce: settings.doclingOcrForce,
+      ocrMinCharsPerPage: settings.doclingOcrMinCharsPerPage,
+      ocrTextlessPageRatio: settings.doclingOcrTextlessPagePct / 100,
+      ocrMixedMinPages: settings.doclingOcrMixedMinPages,
+      ocrDocumentTimeoutS: settings.doclingOcrDocumentTimeoutS,
+      ocrTotalTimeoutMs: settings.doclingOcrTotalTimeoutMs,
+      totalTimeoutMs: Number(process.env.KB_DOCLING_TOTAL_TIMEOUT_MS) || 30 * 60 * 1000,
+      log: message => console.info('[nodeKnowledge]', message.replace(/^\[file-kb-worker\] /, 'Docling '))
+    }),
+    docToBlocks: require('../../../services/file-kb/src/structurer/blocks').docToBlocks
+  }
+  return doclingRuntime
+}
 
 function clip(text, max = MAX_EXTRACT_CHARS) {
   const value = String(text || '')
@@ -235,10 +282,82 @@ async function ocrImage(buffer,mimeType,fileName) {
  throw Object.assign(new Error('图片 OCR 服务未配置'),{code:'OCR_NOT_CONFIGURED'})
 }
 
+async function extractWithDocling(source, options = {}) {
+  const fileName = options.fileName || 'file'
+  const mimeType = normalizeMime(options.mimeType, fileName)
+  const ext = path.extname(fileName).toLowerCase().slice(1)
+  const kind = kindOf(fileName, mimeType)
+  try {
+    const runtime = getDoclingRuntime()
+    const converted = await runtime.client.convertFile({
+      ...(Buffer.isBuffer(source) ? { buffer: source } : { filePath: source }),
+      fileName,
+      mimeType,
+      ext
+    })
+    const text = clip(runtime.docToBlocks(converted.json)
+      .map(block => String(block.text || '').trim())
+      .filter(Boolean)
+      .join('\n'))
+    if (!text) {
+      const details = []
+      if (Array.isArray(converted.errors) && converted.errors.length) {
+        details.push(JSON.stringify(converted.errors).slice(0, 300))
+      }
+      if (converted.ocr && converted.ocr.ok === false && converted.ocr.error) {
+        details.push(`OCR fallback 失败：${String(converted.ocr.error).slice(0, 300)}`)
+      }
+      throw new Error(`Docling 未提取到可检索文字${details.length ? `：${details.join('；')}` : ''}`)
+    }
+    return { kind, status: 'ready', extractedText: text, errorMessage: '' }
+  } catch (error) {
+    // Preserve the existing lightweight PDF path as a fallback when Docling is
+    // unavailable. Its original error remains visible if it also finds no text.
+    if (kind === 'pdf') {
+      try {
+        const fallbackBuffer = Buffer.isBuffer(source) ? source : await fs.promises.readFile(source)
+        return { kind, status: 'ready', extractedText: extractPdfText(fallbackBuffer), errorMessage: '' }
+      } catch (fallbackError) {
+        return {
+          kind,
+          status: 'failed',
+          extractedText: '',
+          errorMessage: `Docling 解析失败：${error.message || '未知错误'}；本地提取失败：${fallbackError.message || '未提取到文字'}`
+        }
+      }
+    }
+    return {
+      kind,
+      status: 'failed',
+      extractedText: '',
+      errorMessage: `Docling 解析失败：${error.message || '未知错误'}`
+    }
+  }
+}
+
+async function extractFile(filePath, options = {}) {
+  const fileName = options.fileName || path.basename(filePath || 'file')
+  if (shouldUseDocling(fileName, options.mimeType)) {
+    return extractWithDocling(filePath, { ...options, fileName })
+  }
+  return extractBuffer(await fs.promises.readFile(filePath), { ...options, fileName })
+}
+
 async function extractBuffer(buffer, options = {}) {
   const fileName = options.fileName || 'file'
   const mimeType = normalizeMime(options.mimeType, fileName)
   const kind = kindOf(fileName, mimeType)
+  if (kind === 'archive') {
+    return {
+      kind,
+      status: 'ready',
+      extractedText: '',
+      errorMessage: ''
+    }
+  }
+  if (shouldUseDocling(fileName, mimeType)) {
+    return extractWithDocling(buffer, { ...options, fileName, mimeType })
+  }
   if (kind === 'text') {
     return {
       kind,
@@ -305,7 +424,7 @@ async function extractBuffer(buffer, options = {}) {
             kind,
             status: 'failed',
             extractedText: '',
-            errorMessage: err.message
+            errorMessage: `${err.message}; ${ocrErr.message || 'OCR 处理失败'}`
           }
         }
       }
@@ -346,7 +465,9 @@ module.exports = {
   extractXlsx,
   extractPptx,
   extractPdfText,
+  extractFile,
   extractBuffer,
+  shouldUseDocling,
   compactXlsxCsv,
   ocrViaHttp,
   ocrImage

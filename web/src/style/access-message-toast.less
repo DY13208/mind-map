@@ -1,0 +1,47 @@
+.accessMessageToast.el-notification {
+  box-sizing: border-box;
+  width: 420px;
+  max-width: calc(100vw - 32px);
+  padding: 22px 40px 22px 20px;
+  border: 1px solid #cbd8d2;
+  border-left: 4px solid #087854;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 12px 40px rgba(16, 37, 26, 0.22);
+  cursor: pointer;
+
+  .el-notification__group { min-width: 0; margin-left: 14px; }
+  .el-notification__title { color: #17261f; font-size: 18px; line-height: 1.5; }
+  .el-notification__content {
+    margin-top: 10px;
+    color: #344b40;
+    font-size: 15px;
+    line-height: 1.8;
+    text-align: left;
+    white-space: pre-line;
+    overflow-wrap: anywhere;
+  }
+  .el-notification__closeBtn {
+    top: 12px;
+    right: 10px;
+    padding: 6px;
+    color: #52665f;
+    font-size: 18px;
+  }
+  &:hover { border-color: #087854; }
+}
+
+body.isDark .accessMessageToast.el-notification,
+html.shellDark .accessMessageToast.el-notification {
+  background: #1f2924;
+  border-color: #52665b;
+  border-left-color: #4cc596;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+  .el-notification__title { color: #f2f7f4; }
+  .el-notification__content { color: #d6e3db; }
+  .el-notification__closeBtn { color: #bdcec3; }
+}
+
+@media (max-width: 520px) {
+  .accessMessageToast.el-notification { padding: 18px 36px 18px 14px; }
+}

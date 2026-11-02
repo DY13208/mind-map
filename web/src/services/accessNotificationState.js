@@ -51,7 +51,13 @@ const notices = { requests: null, results: null, leave: null }
 function showNotice(kind, options) {
   const previous = notices[kind]
   if (previous && typeof previous.close === 'function') previous.close()
-  notices[kind] = Notification(options)
+  notices[kind] = Notification({
+    ...options,
+    customClass: 'accessMessageToast',
+    duration: 12000,
+    showClose: true,
+    message: `${options.message}\n点击查看消息 →`
+  })
 }
 export const roleText = role =>
   ({ viewer: '可查看', editor: '可编辑', manager: '可管理', owner: '所有者' }[

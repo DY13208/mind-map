@@ -131,6 +131,13 @@ export function collectNodeKnowledge(nodes, options = {}) {
   list.filter(Boolean).forEach(node => {
     const data = dataOf(node)
     ;(Array.isArray(data.knowledgeFiles) ? data.knowledgeFiles : []).forEach(file => {
+      if (file.kind === 'folder') {
+        const name = stripHtml(file.name) || '知识库文件夹'
+        attachmentCount++
+        truncated = appendWithinBudget(lines, `知识库文件夹（${name}，folder_id=${file.id}）：含子文件夹，文件动态更新；通过 list_knowledge_folder_files 分页列出当前可见文件，再按 file_id 读取正文。`, budget) || truncated
+        pushSource(sources, {type: 'knowledge-folder', name, status: 'mounted'}, config)
+        return
+      }
       const name = stripHtml(file.name) || '知识库文件'
       const text = stripHtml(file.extractedText)
       attachmentCount++

@@ -12,17 +12,19 @@ const {
   DEFAULT_LIST_LIMIT,
   MAX_LIST_LIMIT,
   isAllowedFile,
+  isArchiveAttachment,
   normalizeMime,
   safeFileName,
   kindOf
 } = require('./limits')
 const { detectLegacyAttachmentFileName } = require('../../src/utils/attachmentFileName')
 const pLimit = require('p-limit')
-const { extractBuffer } = require('./extract')
+const { extractBuffer, extractFile, shouldUseDocling } = require('./extract')
 const { fetchSafeUrl } = require('./ssrf')
 const binary = require('./binary')
 
 const extractLimit = pLimit(EXTRACT_CONCURRENCY)
+const extractionTasks = new Map()
 
 const cos = new COS({
   SecretId: process.env.TENCENT_COS_SECRET_ID,
@@ -488,6 +490,100 @@ async function updateExtraction(db, id, patch) {
   return rowToDto(res.rows[0])
 }
 
+async function performExtraction(db, id, source = {}) {
+  let heartbeat
+  try {
+    // updated_at is the recovery lease for jobs that have no separate queue row.
+    // Refresh it while a task is alive so a slow but healthy Docling request is
+    // never picked up by another app instance as abandoned work.
+    const touchLease = () => db.query(
+      `update node_attachments set updated_at = now()
+        where id = $1 and status = 'processing'`,
+      [id]
+    ).catch(err => console.warn('[nodeKnowledge] extraction lease refresh failed', err && err.message))
+    await touchLease()
+    heartbeat = setInterval(touchLease, 5 * 60 * 1000)
+    if (heartbeat.unref) heartbeat.unref()
+
+    let extracted
+    try {
+      let currentSource = source
+      if (source.loadStored) {
+        const content = await getContentById(db, source.roomKey, id)
+        if (!content) {
+          extracted = {
+            status: 'failed',
+            extractedText: '',
+            errorMessage: '附件原文件不存在，无法恢复提取'
+          }
+        } else {
+          currentSource = {
+            ...source,
+            buffer: content.buffer,
+            fileName: content.attachment.fileName,
+            mimeType: content.attachment.mimeType
+          }
+        }
+      }
+      if (!extracted && currentSource.filePath) {
+        extracted = await extractFile(currentSource.filePath, {
+          fileName: currentSource.fileName,
+          mimeType: currentSource.mimeType
+        })
+      } else if (!extracted) {
+        const buffer = Buffer.isBuffer(currentSource.buffer) ? currentSource.buffer : await loadBuffer(currentSource)
+        extracted = await extractBuffer(buffer, {
+          fileName: currentSource.fileName,
+          mimeType: currentSource.mimeType
+        })
+      }
+    } catch (err) {
+      extracted = {
+        status: 'failed',
+        extractedText: '',
+        errorMessage: (err && err.message) || '附件解析失败'
+      }
+    }
+    return await updateExtraction(db, id, {
+      status: extracted.status,
+      errorMessage: extracted.errorMessage,
+      extractedText: extracted.extractedText
+    })
+  } finally {
+    if (heartbeat) clearInterval(heartbeat)
+    if (source.cleanupFile) await binary.unlinkQuiet(source.filePath)
+  }
+}
+
+function scheduleExtraction(db, id, source = {}) {
+  const key = String(id)
+  if (extractionTasks.has(key)) return extractionTasks.get(key)
+  const task = extractLimit(() => performExtraction(db, id, source))
+    .catch(err => {
+      console.warn('[nodeKnowledge] background extract failed', err && err.message)
+    })
+    .finally(() => extractionTasks.delete(key))
+  extractionTasks.set(key, task)
+  return task
+}
+
+async function markArchiveReady(db, attachment) {
+  if (
+    attachment &&
+    attachment.status === 'ready' &&
+    !attachment.errorMessage &&
+    !attachment.extractedText &&
+    Number(attachment.extractedChars || 0) === 0
+  ) {
+    return attachment
+  }
+  return updateExtraction(db, attachment.id, {
+    status: 'ready',
+    errorMessage: '',
+    extractedText: ''
+  })
+}
+
 async function loadBuffer(options = {}) {
   if (Buffer.isBuffer(options.buffer)) return options.buffer
   if (options.filePath) return fs.promises.readFile(options.filePath)
@@ -514,6 +610,7 @@ async function createFromBuffer(db, options = {}) {
   const originalFileName = String(options.fileName || 'file')
   const fileName = safeFileName(originalFileName)
   const mimeType = normalizeMime(options.mimeType, fileName)
+  const archive = isArchiveAttachment(fileName, mimeType)
   if (!isAllowedFile(fileName, mimeType)) {
     const err = new Error(`不支持的文件类型：${fileName}`)
     err.statusCode = 415
@@ -533,11 +630,31 @@ async function createFromBuffer(db, options = {}) {
       originalFileName,
       fileName
     )
-    if (options.cleanupFile) await binary.unlinkQuiet(filePath)
+    if (isArchiveAttachment(existing.fileName, existing.mimeType)) {
+      const ready = await markArchiveReady(db, existing)
+      if (options.cleanupFile) await binary.unlinkQuiet(filePath)
+      return { ...ready, deduped: true, kind: 'archive' }
+    }
     if (options.forceExtract && existing.status === 'failed') {
-      const buffer = await loadBuffer(options)
+      if (shouldUseDocling(existing.fileName, existing.mimeType)) {
+        if (options.cleanupFile) await binary.unlinkQuiet(filePath)
+        if (extractionTasks.has(String(existing.id))) return getById(db, roomKey, existing.id)
+        const pending = await updateExtraction(db, existing.id, {
+          status: 'processing', errorMessage: '', extractedText: ''
+        })
+        scheduleExtraction(db, existing.id, {
+          roomKey,
+          loadStored: true
+        })
+        return { ...pending, deduped: true }
+      }
+      const buffer = Buffer.isBuffer(options.buffer)
+        ? options.buffer
+        : (await getContentById(db, roomKey, existing.id).catch(() => null))?.buffer || await loadBuffer(options)
+      if (options.cleanupFile) await binary.unlinkQuiet(filePath)
       return reextract(db, existing, buffer)
     }
+    if (options.cleanupFile) await binary.unlinkQuiet(filePath)
     return { ...existing, deduped: true }
   }
 
@@ -558,7 +675,7 @@ async function createFromBuffer(db, options = {}) {
       `insert into node_attachments (
        id, room_key, node_uid, content_hash, file_name, mime_type, byte_size,
        cos_key, status, source_kind, created_by
-     ) values ($1,$2,$3,$4,$5,$6,$7,$8,'processing',$9,$10)`,
+     ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
       [
         id,
         roomKey,
@@ -568,6 +685,7 @@ async function createFromBuffer(db, options = {}) {
         mimeType,
         byteSize,
         storedKey,
+        archive ? 'ready' : 'processing',
         options.sourceKind || 'attachment',
         String(options.createdBy || '').slice(0, 160)
       ]
@@ -584,42 +702,52 @@ async function createFromBuffer(db, options = {}) {
           originalFileName,
           fileName
         )
+        if (isArchiveAttachment(repaired.fileName, repaired.mimeType)) {
+          const ready = await markArchiveReady(db, repaired)
+          return { ...ready, deduped: true, kind: 'archive' }
+        }
         return { ...repaired, deduped: true }
       }
     }
     throw err
   }
 
-  const waitExtract =
-    options.waitExtract != null
-      ? !!options.waitExtract
-      : byteSize <= EXTRACT_WAIT_MAX_BYTES
-
-  const runExtract = async () => {
-    try {
-      const buffer = await loadBuffer(options)
-      let extracted
-      try {
-        extracted = await extractBuffer(buffer, { fileName, mimeType })
-      } catch (err) {
-        extracted = {
-          status: 'failed',
-          extractedText: '',
-          errorMessage: (err && err.message) || '附件解析失败'
-        }
-      }
-      return updateExtraction(db, id, {
-        status: extracted.status,
-        errorMessage: extracted.errorMessage,
-        extractedText: extracted.extractedText
-      })
-    } finally {
-      if (options.cleanupFile) await binary.unlinkQuiet(filePath)
+  if (archive) {
+    if (options.cleanupFile) await binary.unlinkQuiet(filePath)
+    return {
+      id,
+      roomKey,
+      nodeUid: String(options.nodeUid || '').slice(0, 120),
+      contentHash,
+      fileName,
+      mimeType,
+      byteSize,
+      status: 'ready',
+      errorMessage: '',
+      extractedText: '',
+      extractedChars: 0,
+      sourceKind: options.sourceKind || 'attachment',
+      createdBy: String(options.createdBy || '').slice(0, 160),
+      deduped: false,
+      kind: 'archive'
     }
   }
 
+  const useDocling = shouldUseDocling(fileName, mimeType)
+  const waitExtract = !useDocling && (
+    options.waitExtract != null
+      ? !!options.waitExtract
+      : byteSize <= EXTRACT_WAIT_MAX_BYTES
+  )
+
   if (waitExtract) {
-    const saved = await extractLimit(() => runExtract())
+    const saved = await extractLimit(() => performExtraction(db, id, {
+      buffer: options.buffer,
+      filePath: options.filePath,
+      fileName,
+      mimeType,
+      cleanupFile: options.cleanupFile
+    }))
     return {
       ...saved,
       deduped: false,
@@ -627,8 +755,12 @@ async function createFromBuffer(db, options = {}) {
     }
   }
 
-  extractLimit(() => runExtract()).catch(err => {
-    console.warn('[nodeKnowledge] background extract failed', err && err.message)
+  scheduleExtraction(db, id, {
+    buffer: options.buffer,
+    filePath: options.filePath,
+    fileName,
+    mimeType,
+    cleanupFile: options.cleanupFile
   })
   return {
     id,
@@ -650,6 +782,21 @@ async function createFromBuffer(db, options = {}) {
 }
 
 async function reextract(db, existing, buffer) {
+  if (isArchiveAttachment(existing.fileName, existing.mimeType)) {
+    return markArchiveReady(db, existing)
+  }
+  if (shouldUseDocling(existing.fileName, existing.mimeType)) {
+    if (extractionTasks.has(String(existing.id))) return getById(db, existing.roomKey, existing.id)
+    const pending = await updateExtraction(db, existing.id, {
+      status: 'processing', errorMessage: '', extractedText: ''
+    })
+    scheduleExtraction(db, existing.id, {
+      buffer,
+      fileName: existing.fileName,
+      mimeType: existing.mimeType
+    })
+    return pending
+  }
   await updateExtraction(db, existing.id, {
     status: 'processing',
     errorMessage: '',
@@ -667,9 +814,66 @@ async function reextract(db, existing, buffer) {
 }
 
 async function reextractStored(db, roomKey, id) {
+  const attachment = await getById(db, roomKey, id)
+  if (!attachment) return null
+  if (isArchiveAttachment(attachment.fileName, attachment.mimeType)) {
+    return reextract(db, attachment, null)
+  }
+  if (shouldUseDocling(attachment.fileName, attachment.mimeType)) {
+    if (extractionTasks.has(String(attachment.id))) return attachment
+    const pending = await updateExtraction(db, attachment.id, {
+      status: 'processing', errorMessage: '', extractedText: ''
+    })
+    scheduleExtraction(db, attachment.id, { roomKey, loadStored: true })
+    return pending
+  }
   const content = await getContentById(db, roomKey, id)
   if (!content) return null
   return reextract(db, content.attachment, content.buffer)
+}
+
+async function resumeStaleProcessing(db) {
+  const staleMs = Math.max(15 * 60 * 1000, Number(process.env.KB_DOCLING_TOTAL_TIMEOUT_MS) || 30 * 60 * 1000)
+  const cutoff = new Date(Date.now() - staleMs)
+  const batchSize = Math.max(1, Math.min(EXTRACT_CONCURRENCY, 2))
+  const result = await db.query(
+    `select id, room_key, updated_at::text as lease_token
+       from node_attachments
+      where status = 'processing' and updated_at < $1
+      order by updated_at asc
+      limit $2`,
+    [cutoff, batchSize]
+  )
+  let queued = 0
+  for (const row of result.rows || []) {
+    if (extractionTasks.has(String(row.id))) continue
+    // updated_at doubles as a lease: competing app replicas can only claim a
+    // stale row once, and a crashed retry becomes claimable after the timeout.
+    // Keep the database timestamp as text: node-postgres Date conversion drops
+    // microseconds, which would otherwise make this compare-and-set miss.
+    const claimed = await db.query(
+      `update node_attachments set updated_at = now()
+        where id = $1 and status = 'processing' and updated_at = $2::text::timestamptz
+        returning id`,
+      [row.id, row.lease_token]
+    )
+    if (!claimed.rows || !claimed.rows.length) continue
+    // Load the COS object only after a bounded extraction slot opens. Recovery
+    // must not allocate a batch of up to 200 MiB buffers before the queue runs.
+    scheduleExtraction(db, row.id, { roomKey: row.room_key, loadStored: true })
+    queued += 1
+  }
+  return queued
+}
+
+function startStaleProcessingRecovery(db) {
+  const timer = setInterval(() => {
+    resumeStaleProcessing(db).catch(err => {
+      console.warn('[nodeKnowledge] stale attachment recovery failed', err && err.message)
+    })
+  }, 10 * 60 * 1000)
+  if (timer.unref) timer.unref()
+  return timer
 }
 
 function decodeContentBase64(value) {
@@ -679,11 +883,12 @@ function decodeContentBase64(value) {
   // and empty files legitimately have no payload after the comma.
   const dataUrl = /^data:[^,]*;base64,/i.test(raw)
   const cleaned = dataUrl ? raw.replace(/^data:[^,]*;base64,/i, '') : raw
+  const padding = cleaned.endsWith('==') ? 2 : cleaned.endsWith('=') ? 1 : 0
+  // Avoid repeated groups: V8 can overflow its regexp stack on multi-MiB files.
   if (
     cleaned &&
-    !/^(?:[a-z0-9+/]{4})*(?:[a-z0-9+/]{2}==|[a-z0-9+/]{3}=)?$/i.test(
-      cleaned
-    )
+    (cleaned.length % 4 !== 0 ||
+      /[^a-z0-9+/]/i.test(cleaned.slice(0, cleaned.length - padding)))
   ) {
     const err = new Error('contentBase64 无效')
     err.statusCode = 400
@@ -703,11 +908,12 @@ function decodeContentBase64(value) {
 }
 
 async function ingestUpload(db, roomKey, body, actor = {}) {
+  const maxBytes = Math.min(MAX_BYTES, Number(actor.maxBytes) > 0 ? Number(actor.maxBytes) : MAX_BYTES)
   let buffer = decodeContentBase64(body && body.contentBase64)
   let mimeType = body && body.mimeType
   let fileName = (body && body.fileName) || 'file'
   if (!buffer && body && body.sourceUrl) {
-    const downloaded = await fetchSafeUrl(body.sourceUrl, { maxBytes: MAX_BYTES })
+    const downloaded = await fetchSafeUrl(body.sourceUrl, { maxBytes })
     buffer = downloaded.buffer
     mimeType = mimeType || downloaded.mimeType
     if (!body.fileName) {
@@ -725,6 +931,7 @@ async function ingestUpload(db, roomKey, body, actor = {}) {
     err.code = 'MISSING_CONTENT'
     throw err
   }
+  if (buffer.length > maxBytes) throw binary.fileTooLargeError(maxBytes)
   return createFromBuffer(db, {
     roomKey,
     buffer,
@@ -733,6 +940,7 @@ async function ingestUpload(db, roomKey, body, actor = {}) {
     nodeUid: body && body.nodeUid,
     sourceKind: (body && body.sourceKind) || 'attachment',
     createdBy: actor.id || '',
+    waitExtract: actor.waitExtract,
     forceExtract: !!(body && body.forceExtract)
   })
 }
@@ -847,6 +1055,8 @@ module.exports = {
   getContentById,
   removeById,
   reextractStored,
+  resumeStaleProcessing,
+  startStaleProcessingRecovery,
   createFromBuffer,
   ingestUpload,
   ingestBinaryRequest,

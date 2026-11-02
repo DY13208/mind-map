@@ -37,7 +37,7 @@ export default {
   gap: 16px;
   width: 100%;
   box-sizing: border-box;
-  background: #fff;
+  background: var(--ui-surface);
   border: 1px solid #e2e9e6;
   border-radius: 13px;
   padding: 20px;
@@ -115,16 +115,16 @@ export default {
 <style lang="less" scoped>
 @media (max-width: 767px) {
   .teamCard {
-    min-height: 111px; padding: 19px 20px; gap: 17px; border-color: #e4ece7; border-radius: 21px; box-shadow: 0 8px 28px rgba(34,70,55,.035);
-    .teamIcon { width: 62px; height: 62px; flex-basis: 62px; font-size: 33px; border-radius: 17px; background: linear-gradient(140deg,#e6f4ed,#eef8f2); color: #0a9474; }
+    min-height: 111px; padding: 19px 20px; gap: 17px; border-color: var(--ui-border); border-radius: 21px; box-shadow: 0 8px 28px rgba(34,70,55,.035);
+    .teamIcon { width: 62px; height: 62px; flex-basis: 62px; font-size: 33px; border-radius: 17px; background: var(--ui-primary-soft); color: var(--ui-primary); }
     .teamTitle { flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
-    h3 { max-width: 100%; font-size: 20px; font-weight: 750; letter-spacing: -.35px; color: #152925; }
-    .teamOwnerBadge { display: inline-flex; align-items: center; gap: 4px; padding: 4px 9px; color: #087959; background: #ebf7f1; font-size: 12px; font-weight: 550; &::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: #26a27c; } }
-    .stats { display: flex; align-items: center; gap: 11px; margin: 0; font-size: 13px; color: #87978e; white-space: nowrap; }
+    h3 { max-width: 100%; font-size: 20px; font-weight: 750; letter-spacing: -.35px; color: var(--ui-text); }
+    .teamOwnerBadge { display: inline-flex; align-items: center; gap: 4px; padding: 4px 9px; color: var(--ui-primary); background: var(--ui-primary-soft); font-size: 12px; font-weight: 550; &::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: #26a27c; } }
+    .stats { display: flex; align-items: center; gap: 11px; margin: 0; font-size: 13px; color: var(--ui-text-secondary); white-space: nowrap; }
     .stats > span:not(.statsDivider) { display: inline-flex; align-items: center; gap: 5px; }
-    .mobileStatIcon { display: inline; color: #a4b2a8; font-size: 16px; }
-    .statsDivider { width: 1px; height: 13px; background: #d8e3dc; font-size: 0; flex-shrink: 0; }
-    .arrow { display: grid; place-items: center; width: 33px; height: 33px; box-sizing: border-box; border: 1px solid #edf2ee; border-radius: 50%; color: #9dad9f; font-size: 16px; }
+    .mobileStatIcon { display: inline; color: var(--ui-text-muted); font-size: 16px; }
+    .statsDivider { width: 1px; height: 13px; background: var(--ui-border); font-size: 0; flex-shrink: 0; }
+    .arrow { display: grid; place-items: center; width: 33px; height: 33px; box-sizing: border-box; border: 1px solid var(--ui-border); border-radius: 50%; color: var(--ui-text-muted); font-size: 16px; }
   }
 }
 @media (max-width: 470px) {

@@ -330,6 +330,7 @@ import {
   saveMapView
 } from '@/utils/mapRefNav'
 import { MapRefMirrorSync } from '@/utils/mapRefMirror'
+import { MapTitleSync } from '@/utils/mapTitleSync'
 import {
   buildChildTrail,
   consumeMapNavViewRestore,
@@ -1657,9 +1658,22 @@ export default {
         }
       })
       this._mapRefMirrorSync.start()
+      this._mapTitleSync = new MapTitleSync({
+        mindMap: this.mindMap,
+        roomKey: this.roomName,
+        onTitle: update => this.$bus.$emit('room_title_updated', update),
+        onRoomChanged: () => {
+          if (this._mapRefMirrorSync) this._mapRefMirrorSync._pollPeers()
+        }
+      })
+      this._mapTitleSync.start()
     },
 
     stopMapRefMirrorSync() {
+      if (this._mapTitleSync) {
+        this._mapTitleSync.stop()
+        this._mapTitleSync = null
+      }
       if (this._mapRefMirrorSync) {
         try {
           this._mapRefMirrorSync.stop()

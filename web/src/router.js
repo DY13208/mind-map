@@ -71,6 +71,11 @@ const editorRoomQuery = (to, from, isHistoryNavigation) => {
 
 const routes = [
   {
+    path: '/s/:code',
+    name: 'ShortNodeLink',
+    component: () => import('./pages/NodeShare/ShortLink.vue')
+  },
+  {
     path: '/node-share/:id',
     name: 'NodeShare',
     component: () => import('./pages/NodeShare/Index.vue')

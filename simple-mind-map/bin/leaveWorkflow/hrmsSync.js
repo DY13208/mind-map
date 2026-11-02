@@ -47,13 +47,13 @@ async function run(pool,options={}) {
     const job=(await db.query("select * from approval_hrms_sync where status <> 'synced' and retry_at<=now() order by retry_at limit 1 for update skip locked")).rows[0]
     if(job){
       try{
-        const row=(await db.query('select room_key,status,round from leave_requests where id=$1',[job.request_id])).rows[0]
+        const row=(await db.query('select id,room_key,status,round from leave_requests where id=$1',[job.request_id])).rows[0]
         if(!row || row.status!=='approved' || row.round!==job.round) throw new Error('单据状态或轮次已变化，不能同步')
         const payload=structuredClone(job.payload)
         if(payload.attachments.length>10) throw new Error('同步附件超过10份')
         let total=0
         for(const file of payload.attachments){
-          const content=await (options.readAttachment || require('../nodeKnowledge/store').getContentById)(db,row.room_key,file.id,{maxBytes:20*1024*1024})
+          const content=await (options.readAttachment || require('../nodeKnowledge/store').getContentById)(db,require('./attachments').storageScope(row,file),file.id,{maxBytes:20*1024*1024})
           if(!content || content.attachment.contentHash!==file.hash || createHash('sha256').update(content.buffer).digest('hex')!==file.hash) throw new Error('审批附件已变化，不能同步为原材料')
           total+=content.buffer.length
           if(total>20*1024*1024) throw new Error('同步附件合计超过20MB')

@@ -20,6 +20,7 @@
       ><el-radio-button label="cc">抄送我的</el-radio-button></el-radio-group
     >
     <p v-if="error" class="leaveInboxError" role="alert">{{ error }}</p>
+    <p v-if="noticeError" class="leaveInboxError" role="status">{{ noticeError }}</p>
     <div v-loading="loading" class="leaveInboxItems">
       <article v-for="item in items" :key="item.id" class="leaveInboxItem">
         <span class="leaveInboxGlyph"><i class="el-icon-date"/></span>
@@ -77,17 +78,19 @@ export default {
     total: 0,
     loading: false,
     error: '',
+    noticeError: '',
     sequence: 0
   }),
   mounted() {
     this.load()
-    window.addEventListener('mindmap:leave-changed', this.load)
-    window.addEventListener('mindmap:leave-refresh', this.load)
+    window.addEventListener('mindmap:leave-changed', this.scheduleLoad)
+    window.addEventListener('mindmap:leave-refresh', this.scheduleLoad)
   },
   beforeDestroy() {
     this.sequence++
-    window.removeEventListener('mindmap:leave-changed', this.load)
-    window.removeEventListener('mindmap:leave-refresh', this.load)
+    clearTimeout(this.refreshTimer)
+    window.removeEventListener('mindmap:leave-changed', this.scheduleLoad)
+    window.removeEventListener('mindmap:leave-refresh', this.scheduleLoad)
   },
   methods: {
     status(s,notificationOnly=false) {
@@ -119,24 +122,39 @@ export default {
       return new Date(s).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })
     },
     async load() {
+      clearTimeout(this.refreshTimer)
       const seq = ++this.sequence
       this.loading = true
+      // Notification delivery/read receipts must not hold the list spinner open.
+      this.loadNotices(seq)
       try {
-        const [data, messages] = await Promise.all([
-          service.list({ scope: this.scope, offset: (this.page - 1) * 20 }),
-          service.notices()
-        ])
+        const data = await service.list({ scope: this.scope, offset: (this.page - 1) * 20 })
         if (seq !== this.sequence) return
         this.items = data.list
         this.total = data.total
-        this.notices = messages.list
         this.error = ''
-        await service.seen(messages.list.map(n => n.id))
-        window.dispatchEvent(new CustomEvent('mindmap:leave-seen'))
       } catch (e) {
         if (seq === this.sequence) this.error = e.message
       } finally {
         if (seq === this.sequence) this.loading = false
+      }
+    },
+    scheduleLoad() {
+      clearTimeout(this.refreshTimer)
+      this.refreshTimer = setTimeout(() => this.load(), 80)
+    },
+    async loadNotices(seq) {
+      try {
+        const messages = await service.notices()
+        if (seq !== this.sequence) return
+        this.notices = messages.list
+        this.noticeError = ''
+        const unread = messages.list.filter(n => !n.seen_at).map(n => n.id)
+        if (!unread.length) return
+        await service.seen(unread)
+        if (seq === this.sequence) window.dispatchEvent(new CustomEvent('mindmap:leave-seen'))
+      } catch (e) {
+        if (seq === this.sequence) this.noticeError = '通知同步失败：' + e.message
       }
     },
     change() {

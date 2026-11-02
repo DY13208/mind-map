@@ -84,11 +84,20 @@ loadRootEnv()
 function fileKbEnabled() {
   return /^(1|true|yes|on)$/i.test(String(process.env.FILE_KB_ENABLED || '').trim())
 }
+function localDoclingEnabled() {
+  try {
+    return new URL(String(process.env.DOCLING_URL || '').trim()).hostname === 'docling-serve'
+  } catch (_) {
+    return false
+  }
+}
 function kbProfileArgs() {
-  return fileKbEnabled() ? ['--profile', 'kb'] : []
+  return fileKbEnabled() || localDoclingEnabled() ? ['--profile', 'kb'] : []
 }
 function kbServices() {
-  return fileKbEnabled() ? ['file-kb', 'file-kb-worker', 'file-kb-mcp', 'docling-serve'] : []
+  return fileKbEnabled()
+    ? ['file-kb', 'file-kb-worker', 'file-kb-mcp', 'docling-serve']
+    : localDoclingEnabled() ? ['docling-serve'] : []
 }
 require('./wiki-compiler-env').ensureCompilerEnv(ROOT)
 

@@ -1,6 +1,7 @@
 import Vue from 'vue'
 import Vuex from 'vuex'
 import { storeLocalConfig } from '@/api'
+import { shellTheme, setShellThemeMode } from '@/utils/shellTheme'
 
 Vue.use(Vuex)
 
@@ -23,7 +24,8 @@ const store = new Vuex.Store({
       // 是否显示导航工具栏
       showNavigatorToolbar: true,
       // 是否是暗黑模式
-      isDark: false,
+      isDark: shellTheme.theme === 'dark',
+      appearanceMode: shellTheme.mode,
       // 是否开启AI功能
       enableAi: true,
       // WorkBuddy 模型字段保留兼容旧本地配置；执行已统一走助理（OpenClaw）
@@ -72,6 +74,10 @@ const store = new Vuex.Store({
 
     // 设置本地配置
     setLocalConfig(state, data) {
+      if (data.appearanceMode) setShellThemeMode(data.appearanceMode)
+      else if (Object.keys(data).length === 1 && typeof data.isDark === 'boolean') {
+        setShellThemeMode(data.isDark ? 'dark' : 'light')
+      }
       const aiConfigKeys = Object.keys(state.aiConfig)
       Object.keys(data).forEach(key => {
         if (aiConfigKeys.includes(key)) {
@@ -80,6 +86,8 @@ const store = new Vuex.Store({
           state.localConfig[key] = data[key]
         }
       })
+      state.localConfig.isDark = shellTheme.theme === 'dark'
+      state.localConfig.appearanceMode = shellTheme.mode
       storeLocalConfig({
         ...state.localConfig,
         ...state.aiConfig

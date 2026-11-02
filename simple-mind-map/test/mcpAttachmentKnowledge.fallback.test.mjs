@@ -163,6 +163,39 @@ test('a short original fallback page may complete the parsed text without claimi
   assert.equal(result.parsed_text_end, true)
 })
 
+test('archive attachment text fallback explains that embedded files were not read', async () => {
+  const { api } = makeFixture({
+    listedAttachments: [{
+      id: 'a1', fileName: '项目备份.TAR.GZ', status: 'ready', contentHash: 'hash-a1',
+      updatedAt: UPDATED_AT, extractedChars: 0
+    }],
+    text: ''
+  })
+  const result = await readAttachmentKnowledge(api, input({ attachment_id: 'a1', source_backend: 'attachment' }))
+  assert.equal(result.status, 'ok')
+  assert.equal(result.text, '')
+  assert.equal(result.complete, true)
+  assert.equal(result.complete_scope, 'parsed_text')
+  assert.match(result.warning, /未提取正文/)
+  assert.match(result.warning, /没有读取压缩包内部文件/)
+})
+
+test('an empty ready archive returned from Wiki also explains the parsed-text boundary', async () => {
+  const { api } = makeFixture({
+    listedAttachments: [{
+      id: 'a1', fileName: '资料.7z', status: 'ready', contentHash: 'hash-a1',
+      updatedAt: UPDATED_AT, extractedChars: 0
+    }],
+    wikiReadResult: { status: 'ok', version: 7, text: '', complete: true, source: { name: '资料.7z' } }
+  })
+  const result = await readAttachmentKnowledge(api, input({ attachment_id: 'a1' }))
+  assert.equal(result.text, '')
+  assert.equal(result.complete, true)
+  assert.equal(result.complete_scope, 'parsed_text')
+  assert.match(result.warning, /未提取正文/)
+  assert.match(result.warning, /没有读取压缩包内部文件/)
+})
+
 test('attachment continuation stops when re-extraction updates metadata without changing the hash', async () => {
   const firstFixture = makeFixture({ text: '甲乙丙丁戊'.repeat(1200), wikiReadStatus: 'unavailable' })
   const first = await readAttachmentKnowledge(firstFixture.api, input({ attachment_id: 'a1' }))

@@ -153,17 +153,7 @@
               />
               <span>{{ option.label }}</span>
             </button>
-            <div class="mobileFilesMenuSeparator" role="separator" />
           </template>
-          <button
-            type="button"
-            role="menuitem"
-            class="mobileFilesMenuItem"
-            @click="toggleTheme"
-          >
-            <i class="mobileFilesMenuCheck" aria-hidden="true" />
-            <span>{{ themeLabel }}</span>
-          </button>
         </div>
       </el-popover>
     </div>
@@ -185,7 +175,6 @@
 
 <script>
 import FileSearch from './FileSearch.vue'
-import { shellTheme, toggleShellTheme } from '@/utils/shellTheme'
 import {
   isFolderPathAncestor,
   updateMobilePanel
@@ -260,12 +249,6 @@ export default {
     },
     activeView() {
       return this.mode === 'folder' ? 'files' : this.mode
-    },
-    isDark() {
-      return shellTheme.theme === 'dark'
-    },
-    themeLabel() {
-      return this.isDark ? '切换到浅色模式' : '切换到深色模式'
     }
   },
   watch: {
@@ -357,10 +340,6 @@ export default {
     chooseView(key) {
       this.closePanels()
       this.$emit('navigate-view', key)
-    },
-    toggleTheme() {
-      toggleShellTheme()
-      this.closePanels()
     }
   }
 }

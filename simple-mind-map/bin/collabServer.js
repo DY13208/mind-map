@@ -150,6 +150,8 @@ const server = http.createServer(async (request, response) => {
     }
     if (pathname.startsWith('/api/node-shares')) applyCorsHeaders(request, response)
     if (await require('./nodeShares').handleNodeShareApi(request, response, pathname)) return
+    if (pathname.startsWith('/api/node-links')) applyCorsHeaders(request, response)
+    if (await require('./shortNodeLinks').handleShortNodeLinkApi(request, response, pathname)) return
     if (pathname === '/api/integrations/hrms/token' && await require('./hrmsExternalApi').handleApi(request, response, pathname)) return
     if (await require('./wikiCompiler/api').handleApi(request, response, pathname)) return
     if (pathname.startsWith('/api/knowledge/') && await require('./knowledge').handleApi(request, response, pathname)) return
@@ -298,6 +300,14 @@ server.on('upgrade', async (request, socket, head) => {
 
 Promise.all([initSchema(), initAuth()])
   .then(async () => {
+    try {
+      const nodeKnowledge = require('./nodeKnowledge')
+      const recovered = await nodeKnowledge.resumeStaleProcessing(getPool())
+      if (recovered) console.info(`[nodeKnowledge] queued ${recovered} stale attachment extractions`)
+      nodeKnowledge.startStaleProcessingRecovery(getPool())
+    } catch (err) {
+      console.warn('[nodeKnowledge] stale attachment recovery unavailable', err && err.message)
+    }
     if (isAuthEnabled()) {
       await require('./teamSpace').initCorpConstraints(getPool())
     }

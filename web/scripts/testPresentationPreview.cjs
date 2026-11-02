@@ -5,6 +5,7 @@ const vm = require('vm')
 const compiler = require('vue-template-compiler')
 const root = path.resolve(__dirname, '..')
 const read = file => fs.readFileSync(path.join(root, file), 'utf8')
+const { isArchiveAttachment } = require(path.resolve(root, '../simple-mind-map/src/utils/attachmentFileType'))
 const file = 'src/pages/Edit/components/attachment-preview/AttachmentPresentationPreview.vue'
 const parsed = compiler.parseComponent(read(file))
 assert.deepStrictEqual(compiler.compile(parsed.template.content).errors, [])
@@ -47,9 +48,9 @@ async function test() {
   assert(big.error.includes('较大'))
   const classifier = read('src/utils/nodeAttachmentPreview.js')
   const fn = classifier.slice(classifier.indexOf('export function attachmentPreviewKind'), classifier.indexOf('export function isHtmlAttachment')).replace('export ', '')
-  const kindContext = { IMAGE_EXT: /\.(png|jpe?g|webp|gif)$/i, HTML_EXT: /\.html?$/i, TEXT_EXT: /\.(txt|js)$/i }
+  const kindContext = { IMAGE_EXT: /\.(png|jpe?g|webp|gif)$/i, HTML_EXT: /\.html?$/i, TEXT_EXT: /\.(txt|js)$/i, isArchiveAttachment }
   vm.runInNewContext(fn, kindContext)
-  for (const [name, expected] of [['deck.pptx', 'presentation'], ['deck.ppt', 'unsupported'], ['archive.zip', 'archive'], ['file.md', 'markdown'], ['file.pdf', 'pdf'], ['file.docx', 'office'], ['file.xlsx', 'office'], ['file.png', 'image'], ['file.txt', 'text']]) assert.equal(kindContext.attachmentPreviewKind(name, ''), expected)
+  for (const [name, expected] of [['deck.pptx', 'presentation'], ['deck.ppt', 'unsupported'], ['archive.zip', 'archive'], ['archive.tar.gz', 'archive'], ['archive.tbz2', 'archive'], ['file.md', 'markdown'], ['file.pdf', 'pdf'], ['file.docx', 'office'], ['file.xlsx', 'office'], ['file.png', 'image'], ['file.txt', 'text']]) assert.equal(kindContext.attachmentPreviewKind(name, ''), expected)
   assert(read('src/pages/Edit/components/NodeAttachmentPreview.vue').includes("kind === 'presentation' ? 'AttachmentPresentationPreview'"))
   console.log('PASS: binary PPTX routing/rendering, navigation, zoom preserves page, close cleanup, size budget, per-format routing and unsupported legacy files.')
 }
