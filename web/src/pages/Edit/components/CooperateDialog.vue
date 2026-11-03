@@ -330,7 +330,7 @@ import {
   saveMapView
 } from '@/utils/mapRefNav'
 import { MapRefMirrorSync } from '@/utils/mapRefMirror'
-import { MapTitleSync } from '@/utils/mapTitleSync'
+import { MapTitleSync, resolveInitialMapRefTitles } from '@/utils/mapTitleSync'
 import {
   buildChildTrail,
   consumeMapNavViewRestore,
@@ -2753,6 +2753,10 @@ export default {
 
     async applyPreview(preview, silent, attemptId) {
       if (attemptId !== this._openAttemptId) return false
+      await resolveInitialMapRefTitles(preview && preview.tree, {
+        isCurrent: () => attemptId === this._openAttemptId && !this._isDestroyed
+      })
+      if (attemptId !== this._openAttemptId || this._isDestroyed) return false
       const cooperate = this.mindMap.cooperate
       this.largeMapInitialOverview = !!(
         preview &&

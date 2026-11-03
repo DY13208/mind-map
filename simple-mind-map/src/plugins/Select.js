@@ -8,6 +8,7 @@ class Select {
     this.mindMap = mindMap
     this.rect = null
     this.isMousedown = false
+    this.selectionButton = 0
     this.mouseDownX = 0
     this.mouseDownY = 0
     this.mouseMoveX = 0
@@ -27,6 +28,8 @@ class Select {
     this.onMousedown = this.onMousedown.bind(this)
     this.onMousemove = this.onMousemove.bind(this)
     this.onMouseup = this.onMouseup.bind(this)
+    this.onNodeMouseup = (node, e) => this.onMouseup(e)
+    this.onWindowBlur = () => this.onMouseup()
     this.checkInNodesRaw = this.checkInNodes.bind(this)
     this.checkInNodes = (...args) => {
       if (this.checkInNodesTimer || this.isDestroyed) return
@@ -40,8 +43,9 @@ class Select {
     this.mindMap.on('mousedown', this.onMousedown)
     this.mindMap.on('mousemove', this.onMousemove)
     this.mindMap.on('mouseup', this.onMouseup)
-    this.mindMap.on('node_mouseup', this.onMouseup)
+    this.mindMap.on('node_mouseup', this.onNodeMouseup)
     this.mindMap.on('node_active', this.onNodeActive)
+    window.addEventListener('blur', this.onWindowBlur)
   }
 
   // 解绑事件
@@ -50,14 +54,21 @@ class Select {
     this.mindMap.off('mousedown', this.onMousedown)
     this.mindMap.off('mousemove', this.onMousemove)
     this.mindMap.off('mouseup', this.onMouseup)
-    this.mindMap.off('node_mouseup', this.onMouseup)
+    this.mindMap.off('node_mouseup', this.onNodeMouseup)
     this.mindMap.off('node_active', this.onNodeActive)
+    window.removeEventListener('blur', this.onWindowBlur)
     this.clearSelectionState()
   }
 
   isSelectionAllowed() {
     const opt = this.mindMap.opt || {}
     return !opt.readonly || opt.allowReadonlySelection
+  }
+
+  isMouseInCanvas(e) {
+    const rect = this.mindMap.elRect
+    return !rect || (e.clientX >= rect.left && e.clientX <= rect.right &&
+      e.clientY >= rect.top && e.clientY <= rect.bottom)
   }
 
   clearSelectionState() {
@@ -67,6 +78,7 @@ class Select {
     }
     this.autoMove.clearAutoMoveTimer()
     this.isMousedown = false
+    this.selectionButton = 0
     this.isSelecting = false
     this.cacheActiveList = []
     if (this.rect) this.rect.remove()
@@ -91,6 +103,7 @@ class Select {
       e.preventDefault()
     }
     this.isMousedown = true
+    this.selectionButton = e.which === 3 ? 2 : e.which === 2 ? 4 : 1
     this.cacheActiveList = [...this.mindMap.renderer.activeNodeList]
     let { x, y } = this.mindMap.toPos(e.clientX, e.clientY)
     this.mouseDownX = x
@@ -117,10 +130,23 @@ class Select {
     if (!this.isMousedown) {
       return
     }
+    // Mouseup can be lost outside the window. A later hover must not extend
+    // the previous rectangle into another region of the map.
+    if (typeof e.buttons === 'number' && !(e.buttons & this.selectionButton)) {
+      this.onMouseup()
+      return
+    }
+    // Global mousemove also arrives over sidebars and outside the canvas.
+    // Freeze the rectangle there instead of scrolling every other region.
+    if (!this.isMouseInCanvas(e)) {
+      this.autoMove.clearAutoMoveTimer()
+      return
+    }
     let { x, y } = this.mindMap.toPos(e.clientX, e.clientY)
     this.mouseMoveX = x
     this.mouseMoveY = y
     if (
+      !this.isSelecting &&
       Math.abs(x - this.mouseDownX) <= 10 &&
       Math.abs(y - this.mouseDownY) <= 10
     ) {
@@ -165,7 +191,7 @@ class Select {
   }
 
   // 结束框选
-  onMouseup() {
+  onMouseup(e) {
     if (!this.isSelectionAllowed()) {
       this.clearSelectionState()
       return
@@ -174,6 +200,11 @@ class Select {
       return
     }
     const didSelect = this.isSelecting
+    if (didSelect && e && Number.isFinite(e.clientX) && Number.isFinite(e.clientY) && this.isMouseInCanvas(e)) {
+      const { x, y } = this.mindMap.toPos(e.clientX, e.clientY)
+      this.mouseMoveX = x
+      this.mouseMoveY = y
+    }
     // 节流会丢掉松开前最后一次检测，这里立刻提交选区，否则右键菜单拿到的还是空选中
     if (didSelect) {
       if (this.checkInNodesTimer) {

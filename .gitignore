@@ -99,6 +99,7 @@ output/*.py
 !/web/tests/
 /web/tests/*
 !/web/tests/mapTitleSync.test.cjs
+!/web/tests/mapRefMirrorSelection.test.cjs
 !/web/tests/shortNodeLink.test.cjs
 !/web/tests/appearanceMode.test.cjs
 !/web/tests/themeReveal.test.cjs

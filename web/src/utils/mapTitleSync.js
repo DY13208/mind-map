@@ -1,9 +1,63 @@
 import { io } from 'socket.io-client'
 import { getRuntimeConfig } from './runtimeConfig'
 import { resolveFileRef } from './fileApi'
-import { normalizeMapRef, isMirrorMapRef } from './mapRefNav'
+import { normalizeMapRef } from './mapRefNav'
+import { withMirrorForwardSuppressed } from './mapRefMirror'
 
 const plainTitle = text => String(text || '').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').trim()
+
+// Resolve only the references already present in the preview, before its first
+// paint. Do not persist derived labels or fetch entire referenced maps.
+export async function resolveInitialMapRefTitles(tree, {
+  request = resolveFileRef,
+  isCurrent = () => true,
+  timeoutMs = 1500,
+  concurrency = 4
+} = {}) {
+  const targets = new Map()
+  const walk = node => {
+    if (!node || !node.data) return
+    const ref = normalizeMapRef(node.data.mapRef)
+    if (ref) {
+      const key = JSON.stringify([ref.mapId, ref.nodeId || null])
+      if (!targets.has(key)) targets.set(key, { ref, nodes: [] })
+      targets.get(key).nodes.push(node)
+    }
+    const children = node.children || []
+    children.forEach(walk)
+  }
+  walk(tree)
+  if (!targets.size || !isCurrent()) return tree
+  const jobs = [...targets.values()]
+  let active = true
+  let index = 0
+  let timer
+  const worker = async () => {
+    while (active && isCurrent() && index < jobs.length) {
+      const { ref, nodes } = jobs[index++]
+      try {
+        const info = await request(ref.mapId, ref.nodeId || undefined)
+        if (!active || !isCurrent() || !info || !info.exists || (ref.nodeId && !info.nodeExists)) continue
+        const text = plainTitle(ref.nodeId ? info.nodeText : info.title)
+        if (text) nodes.forEach(node => {
+          Object.assign(node.data, { text, richText: false, resetRichText: true })
+        })
+      } catch (_) {
+        // Missing/inaccessible targets retain their last known label.
+      }
+    }
+  }
+  try {
+    await Promise.race([
+      Promise.all(Array.from({ length: Math.min(concurrency, jobs.length) }, worker)),
+      new Promise(resolve => { timer = setTimeout(resolve, timeoutMs) })
+    ])
+  } finally {
+    active = false
+    clearTimeout(timer)
+  }
+  return tree
+}
 
 // Titles are derived display data. Never send a node edit back to the source
 // or the host room merely because a referenced map was renamed.
@@ -70,11 +124,12 @@ export class MapTitleSync {
       const ref = normalizeMapRef(node.data.mapRef)
       if (ref) {
         if (!next.has(ref.mapId)) next.set(ref.mapId, [])
-        // Node mirrors already follow the bound node's text, rather than the
-        // enclosing map title, through MapRefMirrorSync.
-        if (!isMirrorMapRef(ref)) next.get(ref.mapId).push({ node, ref })
+        // Reconcile mirror labels independently of subtree version cursors.
+        // This also covers references inside collapsed/unloaded branches.
+        next.get(ref.mapId).push({ node, ref })
       }
-      ;(node.children || []).forEach(walk)
+      const children = node.children || []
+      children.forEach(walk)
     }
     walk(this.map.renderer && this.map.renderer.renderTree)
     this.rooms.forEach((_, key) => {
@@ -151,7 +206,18 @@ export class MapTitleSync {
   }
 
   applyTitle(host, text) {
-    const data = host.node.data
+    // Hydration can replace the render tree while the metadata request is in
+    // flight. Resolve the current host instead of updating a detached snapshot.
+    const uid = host.node.data.uid
+    let node = null
+    const walk = current => {
+      if (!current || node) return
+      if (current.data && current.data.uid === uid) node = current
+      else (current.children || []).forEach(walk)
+    }
+    walk(this.map.renderer.renderTree)
+    if (!node) return
+    const data = node.data
     const current = normalizeMapRef(data.mapRef)
     if (!text || !current || current.mapId !== host.ref.mapId || current.nodeId !== host.ref.nodeId || plainTitle(data.text) === text) return
     this.applying = true
@@ -161,7 +227,7 @@ export class MapTitleSync {
     try {
       const live = this.map.renderer.findNodeByUid(data.uid)
       const patch = { text, richText: false, resetRichText: true }
-      if (live) this.map.renderer.setNodeDataRender(live, patch)
+      if (live) withMirrorForwardSuppressed(() => this.map.renderer.setNodeDataRender(live, patch))
       else Object.assign(data, patch)
     } finally {
       if (cooperate) cooperate.isApplyingRemote = wasRemote

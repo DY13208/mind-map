@@ -821,6 +821,13 @@ export class MapRefMirrorSync {
   }
 
   async _forwardPatches(hosts, name, args) {
+    const patch = name === 'SET_NODE_DATA' && args[1]
+    const hasField = key => patch && Object.prototype.hasOwnProperty.call(patch, key)
+    const editsText = name === 'SET_NODE_TEXT' || (name === 'SET_NODE_DATA' && hasField('text'))
+    const editsNote = name === 'SET_NODE_NOTE' || (name === 'SET_NODE_DATA' && hasField('note'))
+    // SET_NODE_ACTIVE also emits SET_NODE_DATA. Selection, folding and styling
+    // must never resend a stale text/note snapshot to the referenced map.
+    if (!editsText && !editsNote) return
     const uids = extractCommandUids(name, args, this.mindMap)
     for (const uid of uids) {
       const hit = findMirrorForLocalUid(hosts, uid)
@@ -832,10 +839,10 @@ export class MapRefMirrorSync {
         null
       if (!live || typeof live.getData !== 'function') continue
       const body = { originMirror: this.sourceRoomKey }
-      if (name === 'SET_NODE_TEXT' || name === 'SET_NODE_DATA') {
+      if (editsText) {
         body.text = stripHtml(live.getData('text'))
       }
-      if (name === 'SET_NODE_NOTE' || name === 'SET_NODE_DATA') {
+      if (editsNote) {
         const note = live.getData('note')
         if (note != null) body.note = note
       }
