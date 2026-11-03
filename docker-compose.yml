@@ -92,7 +92,7 @@ services:
       # Bounded performance evidence; admin-only read API, no raw logs/content.
       PERFORMANCE_DIAGNOSTICS: ${PERFORMANCE_DIAGNOSTICS:-1}
       PUBLIC_HOST: ${PUBLIC_HOST:-localhost}
-      WEB_PORT: ${MIND_MAP_HTTP_PORT:-8990}
+      WEB_PORT: ${MIND_MAP_PORT:-8989}
       GATEWAY: "1"
       HOST: "127.0.0.1"
       PORT: "1234"
@@ -208,8 +208,7 @@ services:
       - mind-map-openclaw:/openclaw-data:ro
       # Start-Docker 自动注入的 OpenClaw Token 等（gitignore）
       - ./docker/runtime-config.local.js:/usr/share/nginx/html/runtime-config.js:ro
-    ports:
-      - "${MIND_MAP_HTTP_PORT:-8990}:80"
+    # HTTP 仅在 Docker 内网提供，由 TLS 入口统一发布 MIND_MAP_PORT。
     depends_on:
       postgres:
         condition: service_healthy
@@ -378,9 +377,7 @@ services:
       start_period: 10s
     restart: unless-stopped
 
-  # ===== 公网 TLS 终止（唯一对外入口）=====
-  # 路由器只把公网 8989 转到本机，所以 8989 必须是 HTTPS。
-  # 宿主 8989 -> 容器 443(TLS)，再反代到 app:80（明文，只走 docker 内网）。
+  # ===== HTTPS 入口，端口由 MIND_MAP_PORT 控制 =====
   # 证书放 certs/，已在 .gitignore 排除，私钥不入库。
   tls:
     image: nginx:1.27-alpine
