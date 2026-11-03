@@ -16,7 +16,7 @@ x-file-kb-env: &file-kb-env
   # Verified 2026-10-16 against GHCR manifest digest
   # sha256:6eda9c524992147c1b0b06a1a9be4894bd68b1f43c86d92c32f996c4c60d18a3
   # docling-serve runs in the same "kb" profile (worker breaker defers jobs while it is down).
-  DOCLING_URL: ${DOCLING_URL:-http://docling-serve:5001}
+  DOCLING_URL: ${DOCLING_URL:-http://docling-serve:15001}
   KB_STORAGE_ROOT: /data/kb
   TZ: Asia/Shanghai
 
@@ -520,11 +520,14 @@ services:
     profiles: ["kb"]
     image: ghcr.io/docling-project/docling-serve-cpu:v1.37.0@sha256:6eda9c524992147c1b0b06a1a9be4894bd68b1f43c86d92c32f996c4c60d18a3
     environment:
+      # Image default is 5001. Keep that port free for the existing production
+      # service and listen on 15001, matching DOCLING_URL.
+      UVICORN_PORT: "15001"
       DOCLING_SERVE_ENG_LOC_NUM_WORKERS: "1"
       DOCLING_SERVE_MAX_SYNC_WAIT: "600"
       DOCLING_SERVE_ENABLE_REMOTE_SERVICES: "false"
     expose:
-      - "5001"
+      - "15001"
     security_opt:
       - no-new-privileges:true
     deploy:

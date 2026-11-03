@@ -10,7 +10,7 @@
    `sha256:6eda9c524992147c1b0b06a1a9be4894bd68b1f43c86d92c32f996c4c60d18a3`。
    本机 `docker pull` 在这次实现结束时仍未完成，所以还没有对运行中的容器做 `/health` 或真实文件转换。
    未启动该 profile 时不要设置 `DOCLING_URL`。
-   启动后把 `DOCLING_URL=http://docling-serve:5001` 传给 file-kb。
+   启动后把 `DOCLING_URL=http://docling-serve:15001` 传给 file-kb。服务由 `UVICORN_PORT=15001` 监听该端口，默认的 5001 留给现有生产服务。
 5. 注意：nginx.conf/start.sh 是打进 app 镜像的，修改后需重建 app（Start-Docker 会自动 build app）。
 
 ## 阶段 2 已实现

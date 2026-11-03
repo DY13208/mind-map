@@ -11,7 +11,7 @@ services:
       NODE_OPTIONS: --max-old-space-size=${DOCMOST_NODE_MAX_OLD_SPACE_SIZE:-4096}
       # Reuse the existing profile-scoped Docling service for native wiki
       # attachment text extraction. OCR mode/engine match the file-kb defaults.
-      DOCLING_URL: ${DOCLING_URL:-http://docling-serve:5001}
+      DOCLING_URL: ${DOCLING_URL:-http://docling-serve:15001}
       DOCLING_API_KEY: ${DOCLING_API_KEY:-}
       KB_DOCLING_OCR_MODE: ${KB_DOCLING_OCR_MODE:-auto}
       KB_DOCLING_OCR_ENGINE: ${KB_DOCLING_OCR_ENGINE:-rapidocr}
