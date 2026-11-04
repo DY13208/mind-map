@@ -215,10 +215,12 @@ function compose(args, extraEnv) {
   require('./wiki-env').ensureWikiEnv()
   loadWikiSecretsIntoEnv()
   loadGeekcloudSecretIntoEnv()
+  // 不传 shell：docker 是可执行文件（docker.exe），spawn 直接能起。
+  // 传 args 数组 + shell:true 会触发 DEP0190（参数不转义，有注入风险），
+  // 而且 Windows 下参数里的 & | ^ 会被 cmd 截断。
   return spawn('docker', ['compose', '-f', 'docker-compose.yml', '-f', 'docker-compose.wiki.yml', ...args], {
     cwd: ROOT,
     stdio: 'inherit',
-    shell: true,
     env: {
       ...process.env,
       ...extraEnv

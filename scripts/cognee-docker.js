@@ -134,11 +134,12 @@ function composeCogneeSync(dir, args) {
 /** 前台输出 docker compose 进度（拉取/构建可见） */
 function composeCogneeLive(dir, args) {
   return new Promise(resolve => {
+    // 同 docker-up.js：docker 是 exe，不需要 shell；
+    // args 数组 + shell:true 会触发 DEP0190，且参数不转义有注入风险
     const child = spawn('docker', ['compose', ...args], {
       cwd: dir,
       env: process.env,
       stdio: 'inherit',
-      shell: true,
       windowsHide: false
     })
     child.on('error', err => {

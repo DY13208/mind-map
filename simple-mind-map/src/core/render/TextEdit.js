@@ -470,6 +470,15 @@ export default class TextEdit {
       this.syncEditSessionDraft()
       return
     }
+    // 概要是虚拟节点：服务端没有 gen uid 对应的节点行，以 gen uid 建编辑
+    // 会话并提交 node.update 必然被 NODE_DELETED 拒绝（同步失败）。
+    // 概要文本编辑改走 SET_NODE_TEXT 命令兜底，由 Cooperate 的
+    // collectGeneralizationOwners → syncHttpGeneralization(owner) 通道
+    // 合并进 owner 节点的 generalization 字段落库（与 ADD/REMOVE_GENERALIZATION 同路）。
+    if (node && node.isGeneralization) {
+      this.editSessionId = null
+      return
+    }
     const uid = node && node.getData && node.getData('uid')
     if (!uid) return
     const session = cooperate.beginEditSession({

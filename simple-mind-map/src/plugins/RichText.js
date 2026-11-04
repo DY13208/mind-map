@@ -526,6 +526,14 @@ class RichText {
       this.syncEditSessionDraft()
       return
     }
+    // 概要是虚拟节点：服务端没有 gen uid 的节点行，editSession 以 gen uid
+    // 提交 node.update 会被 NODE_DELETED 拒绝。概要富文本编辑改由
+    // SET_NODE_TEXT 兜底 → collectGeneralizationOwners →
+    // syncHttpGeneralization(owner) 通道同步到 owner 节点。
+    if (node && node.isGeneralization) {
+      this.editSessionId = null
+      return
+    }
     const uid = node && node.getData && node.getData('uid')
     if (!uid) return
     const session = cooperate.beginEditSession({

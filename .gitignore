@@ -134,6 +134,7 @@ output/*.py
 !/web/tests/knowledgeFolderMount.test.cjs
 !/web/tests/knowledgeFileOpen.test.cjs
 !/web/tests/knowledgeFilePickerSearch.test.cjs
+!/web/tests/generalization-edit-session.test.cjs
 
 # 环境配置与备份
 .env

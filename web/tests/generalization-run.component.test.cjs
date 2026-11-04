@@ -247,8 +247,8 @@ async function main() {
     JSON.stringify(vm.jobGeneralization)
   )
   check(
-    '并提示去点运行',
-    vm.messages.some(m => m[0] === 'success' && m[1].includes('点「运行」')),
+    '点概要不弹提醒（用户要求去掉运行提醒）',
+    vm.messages.length === 0,
     JSON.stringify(vm.messages.map(m => m[0]))
   )
   check(
@@ -311,8 +311,8 @@ async function main() {
   vm.activeNodes = [OWNER]
   vm.onJobNodeClick(GEN_EMPTY)
   check(
-    '占位概要点了也给提示（写「下一步」或直接跑默认）',
-    vm.messages.some(m => m[0] === 'info' && m[1].includes('双击概要')),
+    '占位概要点了也不弹提醒（用户要求去掉运行提醒）',
+    vm.messages.length === 0,
     JSON.stringify(vm.messages.map(m => m[0]))
   )
   await vm.runWorkbuddyJob({ channel: 'bridge' })

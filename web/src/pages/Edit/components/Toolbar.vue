@@ -675,15 +675,7 @@ const JOB_POLL_INTERVAL = 2500
 const JOB_POLL_MISS_LIMIT = 24
 // 「没有可派端口（会话）」时不再干等 —— 直接让桥接起一个（见 autoSpawnSession）。
 // 上限由桥接管（MAX_SPAWNED_SESSIONS=5，只算桥接自己起的）。
-// 概要：点它 = 选中「按这条概要继续」，真正的派发还是由「运行」按钮触发
-const GENERALIZATION_TEXT_LIMIT = 60
-
-function clipJobText(text, limit = GENERALIZATION_TEXT_LIMIT) {
-  const value = String(text || '')
-    .replace(/\s+/g, ' ')
-    .trim()
-  return value.length > limit ? `${value.slice(0, limit)}…` : value
-}
+// 概要：点它 = 选中「按这条概要继续」，真正的派发还是由「运行」按钮触发（不弹提醒）
 // 执行位置固定为「这台电脑」，不再让用户选主机/任务
 const LOCAL_JOB_HOST_KEY = '127.0.0.1:8799'
 
@@ -2010,7 +2002,7 @@ export default {
     /**
      * 点概要点：只把「这条概要」记成这次的继续指令，不直接派发。
      * 派发交给工具栏「运行」按钮 —— 点概要 → 点运行，跑的是接着这条概要继续，
-     * 而不是把整张脑图当 SOP 重跑一遍。
+     * 而不是把整张脑图当 SOP 重跑一遍。不弹任何提醒。
      */
     onJobNodeClick(node) {
       if (!node || !node.isGeneralization || this.isReadonly) return
@@ -2021,16 +2013,6 @@ export default {
         ownerUid,
         genUid: String((node.getData && node.getData('uid')) || ''),
         title: this.nodePlainTitle(owner)
-      }
-      const text = this.nodePlainTitle(node)
-      if (text && !isFollowUpPlaceholder(text)) {
-        this.$message.success(
-          `已选中这条概要，点「运行」就按它继续执行：${clipJobText(text)}`
-        )
-      } else {
-        this.$message.info(
-          '这条概要还没写内容：双击概要写上「下一步做什么」，再点「运行」；不写就按节点默认任务跑。'
-        )
       }
     },
 

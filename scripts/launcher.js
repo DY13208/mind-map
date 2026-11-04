@@ -397,6 +397,21 @@ function prefixLines(name, color, chunk) {
   process.stdout.write(tagged)
 }
 
+/**
+ * Windows 下必须走 shell 的命令（npx/npm 在 Windows 上是 .cmd，spawn 不认）。
+ * 走 shell 时**不能**把参数数组交给 spawn —— 那样会触发 DEP0190 且参数不转义，
+ * 所以这里自己拼命令行并逐段转义。
+ */
+const SHELL_COMMANDS = /^(npx|npm|yarn|pnpm|pnpx)$/i
+
+function quoteShellArg(arg) {
+  const text = String(arg == null ? '' : arg)
+  // 无需转义的普通片段原样拼，读起来更像人手敲的命令
+  if (!/[\s"&|<>^()%!]/.test(text)) return text
+  // cmd.exe 规则：双引号包裹，内部双引号写成两个
+  return `"${text.replace(/"/g, '""')}"`
+}
+
 function startProcess(
   name,
   command,
@@ -409,16 +424,23 @@ function startProcess(
   let restarts = 0
   let stableTimer = null
   const spawnOnce = () => {
-    const child = spawn(command, args, {
-      cwd,
-      shell: true,
-      env: {
-        ...process.env,
-        HOST: '0.0.0.0',
-        FORCE_COLOR: '1',
-        ...extraEnv
-      }
-    })
+    const env = {
+      ...process.env,
+      HOST: '0.0.0.0',
+      FORCE_COLOR: '1',
+      ...extraEnv
+    }
+    const useShell = process.platform === 'win32' && SHELL_COMMANDS.test(command)
+    const child = useShell
+      ? spawn([command, ...(args || [])].map(quoteShellArg).join(' '), {
+          cwd,
+          shell: true,
+          env
+        })
+      : spawn(command, args || [], {
+          cwd,
+          env
+        })
     child.stdout && child.stdout.on('data', chunk => prefixLines(name, color, chunk))
     child.stderr && child.stderr.on('data', chunk => prefixLines(name, color, chunk))
     children.push(child)
@@ -805,10 +827,10 @@ async function startDocker() {
   log(paint(c.yellow, '  交给 Docker：内部跑协同 / MCP / AI / 数据库，对外只开一个端口。'))
   log('')
   await new Promise((resolve, reject) => {
+    // node 是可执行文件，不需要 shell（args 数组 + shell:true 会触发 DEP0190）
     const child = spawn('node', [script, 'up'], {
       cwd: ROOT,
-      stdio: 'inherit',
-      shell: true
+      stdio: 'inherit'
     })
     child.on('exit', code => {
       if (code) reject(new Error('Docker 启动失败'))
