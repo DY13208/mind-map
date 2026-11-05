@@ -27,6 +27,34 @@ function normalizeGeneralizationChildren(list) {
   }
 }
 
+function asGeneralizationList(value) {
+  if (value == null) return []
+  return Array.isArray(value) ? value : [value]
+}
+
+// 清掉渲染期的节点实例引用（`_node`）。它指向 MindMapNode、带循环引用，
+// 一旦混进 generalization 数据：postMessage 结构化克隆会抛
+// OUTBOX_NON_CLONEABLE_PAYLOAD（同步失败），JSON 深拷贝会因循环返回 null
+// （后续往 null 写字段直接 TypeError，整次渲染中断 → 画布空白）。
+function stripNodeRef(list, depth = 0) {
+  if (!Array.isArray(list) || depth > 50) return
+  list.forEach(node => {
+    if (!node || typeof node !== 'object') return
+    delete node._node
+    const data = node.data
+    if (data && typeof data === 'object') {
+      delete data._node
+      asGeneralizationList(data.generalization).forEach(nested => {
+        if (nested && typeof nested === 'object') {
+          delete nested._node
+          stripNodeRef(nested.children, depth + 1)
+        }
+      })
+    }
+    stripNodeRef(node.children, depth + 1)
+  })
+}
+
 //  检查是否存在概要
 function checkHasGeneralization() {
   return this.formatGetGeneralization().length > 0
@@ -239,6 +267,11 @@ function createGeneralizationNode() {
       cur.structureSig = structureSig
       cur.childrenRef = item.children
     }
+    // 渲染期节点引用必须清掉：createGeneralizationChildNodes 末尾本来就做这件事，
+    // 复用分支跳过了它，_node 就可能漏进 generalization 数据 → 结构化克隆失败
+    // （同步失败）+ JSON 深拷贝返回 null（渲染中断、画布空白）。这里统一兜一遍。
+    stripNodeRef(item.children)
+    delete item._node
     if (this.renderer.registerNodeIndex) {
       this.renderer.registerNodeIndex(cur.generalizationNode)
     }

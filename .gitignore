@@ -138,6 +138,8 @@ output/*.py
 !/web/tests/generalization-subtree-sync.test.cjs
 !/web/tests/generalization-subtree-persist.test.cjs
 !/web/tests/generalization-node-blank.test.cjs
+!/web/tests/generalization-node-ref-leak.test.cjs
+!/web/tests/generalization-render-reuse.test.cjs
 
 # 环境配置与备份
 .env

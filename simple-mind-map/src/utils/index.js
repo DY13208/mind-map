@@ -167,9 +167,39 @@ export const simpleDeepClone = data => {
   }
 }
 
+// 拷贝节点数据。数据里可能混入渲染期引用（`_node` 是 MindMapNode，带循环
+// 引用），JSON 深拷贝会抛错，simpleDeepClone 于是返回 null；后续往 null 上
+// 写字段会 TypeError，把整次渲染打断成空白画布。这里剔除循环引用后再拷。
+const isCircularSafeClone = data => {
+  try {
+    return JSON.parse(JSON.stringify(data))
+  } catch (error) {
+    return undefined
+  }
+}
+
+const stripRenderRefsDeep = (value, depth = 0) => {
+  if (depth > 60 || !value || typeof value !== 'object') return value
+  if (Array.isArray(value)) return value.map(item => stripRenderRefsDeep(item, depth + 1))
+  const next = {}
+  Object.keys(value).forEach(key => {
+    if (key.charCodeAt(0) === 95) return // `_` 前缀：渲染期引用
+    next[key] = stripRenderRefsDeep(value[key], depth + 1)
+  })
+  return next
+}
+
+// 深拷贝且在失败时退化为「剔除渲染引用后再拷」，永不返回 null。
+export const cloneNodeData = data => {
+  const cloned = isCircularSafeClone(data)
+  if (cloned !== undefined) return cloned
+  const cleaned = isCircularSafeClone(stripRenderRefsDeep(data))
+  return cleaned === undefined ? {} : cleaned
+}
+
 //  复制渲染树数据
 export const copyRenderTree = (tree, root, removeActiveState = false) => {
-  tree.data = simpleDeepClone(root.data)
+  tree.data = cloneNodeData(root.data) || {}
   if (removeActiveState) {
     tree.data.isActive = false
     const generalizationList = formatGetNodeGeneralization(tree.data)
@@ -208,7 +238,7 @@ export const copyNodeTree = (
   removeId = true
 ) => {
   const rootData = root.nodeData ? root.nodeData : root
-  tree.data = simpleDeepClone(rootData.data)
+  tree.data = cloneNodeData(rootData.data) || {}
   // 移除节点uid
   if (removeId) {
     delete tree.data.uid
