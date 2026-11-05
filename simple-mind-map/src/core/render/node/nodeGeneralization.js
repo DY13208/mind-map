@@ -215,6 +215,12 @@ function createGeneralizationNode() {
     ) {
       this.lineDraw.add(cur.generalizationLine)
     }
+    // 给连线打上所属节点类名：删除概要时如果引用丢了（复用/重建过程中
+    // item 被替换），还能按类名把残留的括号线清干净。
+    const lineOwnerUid = (this.getData && this.getData('uid')) || this.uid
+    if (lineOwnerUid && cur.generalizationLine && cur.generalizationLine.addClass) {
+      cur.generalizationLine.addClass('generalization-line_' + lineOwnerUid)
+    }
     if (!cur.generalizationNode) {
       cur.generalizationNode = new MindMapNode({
         data: {
@@ -406,24 +412,48 @@ function removeGeneralization() {
       item.generalizationLine = null
     }
     if (item.generalizationNode) {
+      const genNode = item.generalizationNode
       if (this.renderer.unregisterNodeIndex) {
-        this.renderer.unregisterNodeIndex(item.generalizationNode)
+        this.renderer.unregisterNodeIndex(genNode)
       }
       // 删除概要节点时要同步从激活节点里删除
-      this.renderer.removeNodeFromActiveList(item.generalizationNode)
-      item.generalizationNode.remove()
+      this.renderer.removeNodeFromActiveList(genNode)
+      genNode.remove()
+      // 实例已经离开画布，缓存里再留着它，下次渲染一旦命中 lru 就会把
+      // 已经 remove 的 group 重新挂回 nodeDraw，表现为「概要删了框还在」。
+      const genUid = genNode.uid
+      if (genUid) {
+        const renderer = this.renderer || {}
+        if (renderer.nodeCache) delete renderer.nodeCache[genUid]
+        if (renderer.lastNodeCache) delete renderer.lastNodeCache[genUid]
+        if (this.renderer && this.renderer.layout && this.renderer.layout.lru) {
+          const lru = this.renderer.layout.lru
+          if (typeof lru.delete === 'function') lru.delete(genUid)
+        }
+      }
       item.generalizationNode = null
     }
   })
   this._generalizationList = []
   this._generalizationSig = ''
-  // hack修复当激活一个节点时创建概要，然后立即激活创建的概要节点后会重复创建概要节点并且无法删除的问题
-  // 概要节点自身的 group 也带着 generalization_<所属节点uid> 类名，
-  // 这里如果对概要节点执行，会把它自己从画布上删掉。
-  if (!this.isGeneralization && this.generalizationBelongNode) {
-    this.nodeDraw
-      .find('.generalization_' + this.generalizationBelongNode.uid)
-      .remove()
+  // 按类名兜底清理画布残留。
+  // 上面只按 _generalizationList 里的引用去删；一旦某个条目的引用丢了
+  // （重建/复用过程中 item 被替换、group 提前被移出又挂回），就会在画布上
+  // 留下一个空的概要框或括号线，看起来像「删了概要但边框还在」。
+  // 概要节点的 group 带 generalization_<ownerUid>，连线带
+  // generalization-line_<ownerUid>，这里按 owner 的 uid 一次性清理。
+  // 只对所属节点（owner）执行：概要节点自身也带同名类名，对它执行会把
+  // 自己（以及需要保留的兄弟概要）误删。
+  if (!this.isGeneralization) {
+    const ownerUid = (this.getData && this.getData('uid')) || this.uid
+    if (ownerUid) {
+      if (this.nodeDraw && this.nodeDraw.find) {
+        this.nodeDraw.find('.generalization_' + ownerUid).remove()
+      }
+      if (this.lineDraw && this.lineDraw.find) {
+        this.lineDraw.find('.generalization-line_' + ownerUid).remove()
+      }
+    }
   }
 }
 

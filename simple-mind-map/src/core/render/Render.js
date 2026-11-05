@@ -2674,8 +2674,11 @@ class Render {
     for (let i = 0; i < list.length; i++) {
       let node = list[i]
       if (node.isGeneralization) {
-        // 删除概要节点
+        // 删除概要节点。清理顺序必须和 removeNode 一致：先让所属节点摘掉
+        // 这条概要（含画布元素），再把概要节点自身移出激活列表。否则它会
+        // 留在 activeNodeList 里，下次渲染又被当成激活节点画出一个残留边框。
         this.deleteNodeGeneralization(node)
+        this.removeNodeFromActiveList(node)
       } else {
         this.mindMap.command.recordContentChange?.({ removed: [{ data: node.nodeData.data, children: [] }] })
         const parent = node.parent

@@ -142,6 +142,7 @@ output/*.py
 !/web/tests/generalization-render-reuse.test.cjs
 !/web/tests/generalization-subtree-delete.test.cjs
 !/web/tests/generalization-delete-guard-404.test.cjs
+!/web/tests/generalization-remove-residue.test.cjs
 
 # 环境配置与备份
 .env
