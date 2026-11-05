@@ -7064,7 +7064,12 @@ class Cooperate {
     const list = (name==='REMOVE_NODE' || name==='REMOVE_CURRENT_NODE') && args[0] && (Array.isArray(args[0])?args[0].length:true)
       ? (Array.isArray(args[0])?args[0]:[args[0]])
       : (this.mindMap.renderer && this.mindMap.renderer.activeNodeList) || []
-    const selection = collabDelete.collectDeleteRoots(list, name)
+    const selection = collabDelete.collectDeleteRoots(list, name, {
+      // 概要虚拟子树内的节点（概要自身 + 概要后代）没有服务端节点行，
+      // 不能生成 node.delete（服务端会 NODE_DELETED），只能随 owner 的
+      // generalization 整体同步。
+      isVirtualSubtree: node => isGeneralizationScopeNode(node)
+    })
     this.pendingHttpDeletes = selection.roots.map(item => ({
       uid: item.uid,
       keepChildren: item.keepChildren,

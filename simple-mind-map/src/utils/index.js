@@ -1270,12 +1270,16 @@ export const removeFromParentNodeData = node => {
   const index = getNodeDataIndex(node)
   if (index === -1) {
     // Fallback: filter by uid in case index lookup missed a divergent uid.
+    // Filters in place: 概要注意节点的 nodeData.children 就是
+    // generalization[i].children 本身，重新赋值会让两者失去同步，
+    // 删除后刷新节点会重新出现。
     const uid = getNodeUid(node)
     const kids = node.parent.nodeData && node.parent.nodeData.children
     if (uid && Array.isArray(kids)) {
-      node.parent.nodeData.children = kids.filter(
-        item => !(item && item.data && item.data.uid === uid)
-      )
+      for (let i = kids.length - 1; i >= 0; i--) {
+        const item = kids[i]
+        if (item && item.data && item.data.uid === uid) kids.splice(i, 1)
+      }
     }
     return
   }

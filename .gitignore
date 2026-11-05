@@ -140,6 +140,7 @@ output/*.py
 !/web/tests/generalization-node-blank.test.cjs
 !/web/tests/generalization-node-ref-leak.test.cjs
 !/web/tests/generalization-render-reuse.test.cjs
+!/web/tests/generalization-subtree-delete.test.cjs
 
 # 环境配置与备份
 .env
