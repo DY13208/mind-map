@@ -224,26 +224,27 @@ class AssociativeLine {
     if (!tree) return
     let idToNode = new Map()
     let nodeToIds = new Map()
-    walk(
-      tree,
-      null,
-      cur => {
-        if (!cur) return
-        let data = cur.getData()
-        if (
-          data.associativeLineTargets &&
-          data.associativeLineTargets.length > 0
-        ) {
-          nodeToIds.set(cur, data.associativeLineTargets)
-        }
-        if (data.uid) {
-          idToNode.set(data.uid, cur)
-        }
-      },
-      () => {},
-      true,
-      0
-    )
+    // 概要子树里的节点和普通节点一样可以挂关联线，但它们不在主树 children 上，
+    // walk(root) 遍历不到，导致这些关联线根本不渲染。改走全节点遍历。
+    const collect = cur => {
+      if (!cur) return
+      let data = cur.getData()
+      if (
+        data.associativeLineTargets &&
+        data.associativeLineTargets.length > 0
+      ) {
+        nodeToIds.set(cur, data.associativeLineTargets)
+      }
+      if (data.uid) {
+        idToNode.set(data.uid, cur)
+      }
+    }
+    const renderer = this.mindMap.renderer
+    if (typeof renderer.forEachRenderedNode === 'function') {
+      renderer.forEachRenderedNode(collect)
+    } else {
+      walk(tree, null, collect, () => {}, true, 0)
+    }
     nodeToIds.forEach((ids, node) => {
       ids.forEach((uid, index) => {
         let toNode = idToNode.get(uid)
@@ -547,7 +548,11 @@ class AssociativeLine {
   // 检测当前移动到的目标节点
   checkOverlapNode(x, y) {
     this.overlapNode = null
-    bfsWalk(this.mindMap.renderer.root, node => {
+    // 概要子树里的节点也要能作为关联线终点。它们不在主树 children 上，
+    // bfsWalk(root) 遍历不到，这里改走全节点遍历（概要节点自身仍排除：
+    // addLine 不允许把关联线连到概要节点本身上）。
+    const check = node => {
+      if (!node) return
       if (node.getData('isActive')) {
         this.mindMap.execCommand('SET_NODE_ACTIVE', node, false)
       }
@@ -564,7 +569,13 @@ class AssociativeLine {
       if (x >= left && x <= right && y >= top && y <= bottom) {
         this.overlapNode = node
       }
-    })
+    }
+    const renderer = this.mindMap.renderer
+    if (typeof renderer.forEachRenderedNode === 'function') {
+      renderer.forEachRenderedNode(check)
+    } else {
+      bfsWalk(renderer.root, check)
+    }
     if (this.overlapNode && !this.overlapNode.getData('isActive')) {
       this.mindMap.execCommand('SET_NODE_ACTIVE', this.overlapNode, true)
     }

@@ -3856,6 +3856,44 @@ class Render {
     }
   }
 
+  // 遍历「画布上所有可见节点」：主树 + 每一层概要子树（概要节点自身及其后代）。
+  //
+  // 概要子树的数据挂在所属节点的 data.generalization 里，不在主树的 children
+  // 上，所以 walk/bfsWalk(root) 永远遍历不到它们。后果是概要里的节点看着和普通
+  // 节点一样，实际却用不了一批功能（关联线连不上、终点检测不到、拖拽列表里没有）。
+  // 凡是需要「对所有节点一视同仁」的逻辑都走这里，别直接 walk(root)。
+  //
+  // options.includeGeneralizationNode：是否把概要节点自身也交给回调（默认 true，
+  // 由调用方按需过滤 isGeneralization）。
+  forEachRenderedNode(callback, options = {}) {
+    if (typeof callback !== 'function') return
+    const includeGenNode = options.includeGeneralizationNode !== false
+    const seen = new Set()
+    const visit = node => {
+      if (!node || seen.has(node)) return
+      seen.add(node)
+      callback(node)
+      ;(node.children || []).forEach(visit)
+      ;(node._generalizationList || []).forEach(item => {
+        const gNode = item && item.generalizationNode
+        if (!gNode || seen.has(gNode)) return
+        if (includeGenNode) {
+          seen.add(gNode)
+          callback(gNode)
+        }
+        // 概要节点自身不参与时，它的子节点仍要遍历（概要下的节点才是普通节点）
+        ;(gNode.children || []).forEach(visit)
+        // 概要节点自己的 _generalizationList 也要展开（嵌套概要）
+        ;(gNode._generalizationList || []).forEach(sub => {
+          const subNode = sub && sub.generalizationNode
+          if (subNode) visit(subNode)
+        })
+      })
+    }
+    visit(this.root)
+  }
+
+
   unregisterNodeIndex(node) {
     if (!node || !this.nodeIndex) return
     const pending = [node], seen = new Set()
