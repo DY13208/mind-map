@@ -8,6 +8,25 @@ function formatGetGeneralization() {
   return Array.isArray(data) ? data : data ? [data] : []
 }
 
+// 概要子树统一成渲染树结构 { data, children }。
+// 画布插入留下的就是该结构；导入/历史数据可能是扁平的 { uid, text, children }，
+// walk 只认前者，遇到扁平会取不到 data.data.uid 而中断整树渲染。
+// 就地替换数组元素（数组引用不变），data 指回原对象，编辑仍能写回。
+function normalizeGeneralizationChildren(list) {
+  if (!Array.isArray(list)) return
+  for (let i = 0; i < list.length; i++) {
+    const child = list[i]
+    if (!child || typeof child !== 'object') continue
+    if (!(child.data && typeof child.data === 'object')) {
+      list[i] = {
+        data: child,
+        children: Array.isArray(child.children) ? child.children : []
+      }
+    }
+    normalizeGeneralizationChildren(list[i].children)
+  }
+}
+
 //  检查是否存在概要
 function checkHasGeneralization() {
   return this.formatGetGeneralization().length > 0
@@ -133,6 +152,11 @@ function createGeneralizationNode() {
     if (!Array.isArray(item.children)) {
       item.children = []
     }
+    // 概要子树的数据有两种来源：画布插入留下的是渲染树结构
+    // { data, children }，而导入/历史数据可能是扁平 { uid, text, children }。
+    // walk 只认前者，遇到扁平会取不到 data.data.uid 而中断整树渲染。
+    // 这里就地补一层包装（data 指回原对象，编辑仍能写回），数组引用不变。
+    normalizeGeneralizationChildren(item.children)
     if (!item.uid) {
       item.uid = createUid()
     }

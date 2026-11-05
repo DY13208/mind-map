@@ -15,12 +15,45 @@ function listGeneralization(generalization) {
   return Array.isArray(generalization) ? generalization : [generalization]
 }
 
+// 渲染态标记，绝不能持久化：
+//   inserting    —— MindMapNode 渲染完见它会 delete + active() + 触发
+//                   node_dblclick 自动进入编辑。一旦存进 generalization，
+//                   每次刷新都会自动弹编辑框，节点被顶掉。
+//   isActive     —— 会话内选中态
+//   resetRichText—— 一次性重解析富文本的开关
+const EPHEMERAL_KEYS = ['inserting', 'isActive', 'resetRichText']
+
+function stripEphemeralFields(target) {
+  if (!target || typeof target !== 'object') return target
+  EPHEMERAL_KEYS.forEach(key => {
+    delete target[key]
+  })
+  return target
+}
+
+// generalization.children 里存的是渲染树节点 { data, children }，需要逐层清。
+function stripEphemeralTree(node) {
+  if (!node || typeof node !== 'object') return node
+  const copy = { ...node }
+  stripEphemeralFields(copy)
+  if (copy.data && typeof copy.data === 'object') {
+    copy.data = stripEphemeralFields({ ...copy.data })
+    if (Array.isArray(copy.data.children)) {
+      copy.data.children = copy.data.children.map(stripEphemeralTree)
+    }
+  }
+  if (Array.isArray(copy.children)) {
+    copy.children = copy.children.map(stripEphemeralTree)
+  }
+  return copy
+}
+
 function stripEphemeralGen(item) {
   if (!item || typeof item !== 'object') return item
-  const copy = snapshotValue(item) || {}
-  delete copy.inserting
-  delete copy.isActive
-  delete copy.resetRichText
+  const copy = stripEphemeralFields(snapshotValue(item) || {})
+  if (Array.isArray(copy.children)) {
+    copy.children = copy.children.map(stripEphemeralTree)
+  }
   return copy
 }
 

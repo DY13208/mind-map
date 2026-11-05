@@ -7101,10 +7101,23 @@ class Cooperate {
       const owner = generalizationScopeOwner(node)
       if (owner) addOwner(owner)
     }
-    consider(args[0])
+    // 各命令的实参形态不一：INSERT_CHILD_NODE 第一参是 openEdit 布尔值，
+    // 节点在第 2 参或是一个数组。必须把全部实参（含嵌套数组）都过一遍，
+    // 只看 args[0] 会漏掉插入路径。
+    const scan = value => {
+      if (!value) return
+      if (Array.isArray(value)) {
+        value.forEach(scan)
+        return
+      }
+      if (typeof value !== 'object') return
+      if (typeof value.getData === 'function' || value.nodeData) consider(value)
+    }
+    args.forEach(scan)
     if (
       name === 'SET_NODE_DATA' &&
       args[0] &&
+      typeof args[0] === 'object' &&
       !args[0].isGeneralization &&
       args[1] &&
       Object.prototype.hasOwnProperty.call(args[1], 'generalization')
