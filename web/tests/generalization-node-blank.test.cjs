@@ -103,19 +103,22 @@ check(
   /const reusable =/.test(genSrc) && /cur\.structureSig === structureSig/.test(genSrc)
 )
 check(
-  '复用分支不调用 createGeneralizationChildNodes',
-  // 复用分支里会先补量尺寸再算高度，代码段较长，这里只校验「reusable 分支内
-  // 没有重建、重建只发生在 else 分支」这一结构。
+  '复用时不重建：createGeneralizationChildNodes 只在 !reusable 分支里',
+  // 现在的结构是 `if (!reusable) { layout.createGeneralizationChildNodes(...) }`，
+  // 断言「该调用出现在 !reusable 块内，且不在 reusable 块内」。
   (() => {
-    const start = genSrc.indexOf('if (reusable) {')
-    const elseIdx = genSrc.indexOf('} else {', start)
-    if (start < 0 || elseIdx < 0) return false
-    const reusableBlock = genSrc.slice(start, elseIdx)
-    const elseBlock = genSrc.slice(elseIdx, elseIdx + 200)
-    return (
-      !reusableBlock.includes('layout.createGeneralizationChildNodes') &&
-      elseBlock.includes('layout.createGeneralizationChildNodes')
-    )
+    const notReusableIdx = genSrc.indexOf('if (!reusable) {')
+    if (notReusableIdx < 0) return false
+    const blockEnd = genSrc.indexOf('\n    }', notReusableIdx)
+    if (blockEnd < 0) return false
+    const block = genSrc.slice(notReusableIdx, blockEnd)
+    if (!block.includes('layout.createGeneralizationChildNodes')) return false
+    // 不能存在 `if (reusable) { ... createGeneralizationChildNodes ... }`
+    const reusableIdx = genSrc.indexOf('if (reusable) {')
+    if (reusableIdx < 0) return true
+    const reusableEnd = genSrc.indexOf('\n    }', reusableIdx)
+    return !genSrc.slice(reusableIdx, reusableEnd >= 0 ? reusableEnd : reusableIdx + 400)
+      .includes('layout.createGeneralizationChildNodes')
   })()
 )
 check(
@@ -123,13 +126,14 @@ check(
   /cur\.childrenRef === item\.children/.test(genSrc)
 )
 check(
-  '复用分支重算了 childrenAreaHeight',
-  (() => {
-    const start = genSrc.indexOf('if (reusable) {')
-    const elseIdx = genSrc.indexOf('} else {', start)
-    if (start < 0 || elseIdx < 0) return false
-    return genSrc.slice(start, elseIdx).includes('childrenAreaHeight')
-  })()
+  '复用分支也重算了 childrenAreaHeight（经 refreshGeneralizationSubtree）',
+  /refreshGeneralizationSubtree\(cur\.generalizationNode, layout\)/.test(genSrc) &&
+    (() => {
+      const start = genSrc.indexOf('function refreshGeneralizationSubtree')
+      if (start < 0) return false
+      const end = genSrc.indexOf('\n}\n', start)
+      return genSrc.slice(start, end).includes('childrenAreaHeight')
+    })()
 )
 
 // ---- 3. 假空保护 ----

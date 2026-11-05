@@ -170,6 +170,55 @@ function generalizationStructureSignature(item) {
   return (item && item.uid) + '|' + range + '|' + walk(item && item.children, 0)
 }
 
+// 递归给概要子树补量尺寸，并从深到浅重算每一层的 childrenAreaHeight。
+//
+// 复用分支不重建子树，于是跳过了两件「重建路径顺带完成」的事：
+//   1. createNode → getSize()  重新量宽高
+//   2. createGeneralizationChildNodes 末尾那段「逐层算 childrenAreaHeight」
+// 只补顶层是不够的：嵌套层的兄弟节点靠**它自己父节点**的 childrenAreaHeight
+// 定位（layoutGeneralizationChildren 里 `cur.top = totalTop; totalTop +=
+// cur.height + marginY`）。父节点那个值不更新，它的子节点就全部算在同一个
+// top 上 —— 表现就是整列节点糊成一团，正是「概要后面新增节点全叠在一起」。
+function refreshGeneralizationSubtree(gNode, layout, depth = 0) {
+  if (!gNode || depth > 50) return
+  const kids = Array.isArray(gNode.children) ? gNode.children : []
+  kids.forEach(child => {
+    if (!child) return
+    if (typeof child.getSize === 'function') {
+      const snapshot = child.nodeDataSnapshot
+      // 没有快照说明还没量过；有快照则按数据变没变判断（忽略 isActive/expand，
+      // 避免选中态变化引起无谓重算）。
+      const dataDirty =
+        !snapshot ||
+        typeof layout.checkIsNodeDataChange !== 'function' ||
+        layout.checkIsNodeDataChange(
+          snapshot,
+          child.nodeData && child.nodeData.data
+        )
+      // 高度缺失/为 0 的节点直接参与排版会让所有兄弟叠在同一行。
+      const sizeMissing = !(child.height > 0)
+      if (dataDirty || sizeMissing) {
+        child.getSize()
+        child.needLayout = true
+        // 子节点自己也可能挂着嵌套概要，尺寸变了要一起刷新
+        if (typeof child.updateGeneralization === 'function') {
+          child.updateGeneralization()
+        }
+      }
+    }
+    // 先处理更深的层，自己的高度才是最终值
+    refreshGeneralizationSubtree(child, layout, depth + 1)
+  })
+  // 逐层重算（与 Base.createGeneralizationChildNodes 的 after 回调口径一致）
+  const collapsed =
+    typeof gNode.getData === 'function' && gNode.getData('expand') === false
+  const len = collapsed ? 0 : kids.length
+  gNode.childrenAreaHeight = len
+    ? kids.reduce((h, item) => h + item.height, 0) +
+      (len + 1) * layout.getMarginY((gNode.layerIndex || 0) + 1)
+    : 0
+}
+
 //  创建概要节点
 // 概要节点自身也可以拥有概要（概要下的子节点再加概要），所以这里不再排除
 // isGeneralization。递归由数据决定，不存在无限展开。
@@ -261,43 +310,19 @@ function createGeneralizationNode() {
       Array.isArray(kids) &&
       kids.length === item.children.length &&
       kids.every(child => child && child.group)
-    if (reusable) {
-      // 复用实例就不会再走 createNode，而 createNode 才是负责 getSize 的地方。
-      // 不补这一步，文字变长/换行的节点仍按旧宽高参与排版，后一个兄弟就被放到
-      // 前一个身上 —— 表现就是概要后面的子节点重叠。这里对数据变过的子节点
-      // 重新量一次尺寸（判定方式与 Base.checkIsNodeDataChange 一致，忽略
-      // isActive/expand，避免选中态变化引起无谓重算）。
-      kids.forEach(child => {
-        if (!child || typeof child.getSize !== 'function') return
-        const snapshot = child.nodeDataSnapshot
-        // 没有快照说明这个实例还没量过尺寸，必须量；有快照则按数据是否变过判断。
-        const dataDirty =
-          !snapshot ||
-          typeof layout.checkIsNodeDataChange !== 'function' ||
-          layout.checkIsNodeDataChange(
-            snapshot,
-            child.nodeData && child.nodeData.data
-          )
-        // 高度缺失/为 0 的节点如果直接参与排版，会所有兄弟叠在同一行。
-        const sizeMissing = !(child.height > 0)
-        if (!dataDirty && !sizeMissing) return
-        child.getSize()
-        child.needLayout = true
-        // 子节点自己也可能挂着嵌套概要，尺寸变了要一起刷新
-        if (typeof child.updateGeneralization === 'function') {
-          child.updateGeneralization()
-        }
-      })
-      const len = kids.length
-      cur.generalizationNode.childrenAreaHeight = len
-        ? kids.reduce((h, item2) => h + item2.height, 0) +
-          (len + 1) * layout.getMarginY(cur.generalizationNode.layerIndex + 1)
-        : 0
-    } else {
+    if (!reusable) {
       layout.createGeneralizationChildNodes(cur.generalizationNode)
       cur.structureSig = structureSig
       cur.childrenRef = item.children
     }
+    // 无条件补一次「量尺寸 + 逐层重算 childrenAreaHeight」：
+    //  - 复用分支：跳过了 createNode 的 getSize 和逐层重算，必须补。
+    //  - 重建分支：新建的 MindMapNode 初始宽高是 0，而
+    //    createGeneralizationChildNodes 是**当场**按这些 0 高度算 area 的，
+    //    于是这一层的兄弟节点全被算到同一个 top 上（新增节点后整列重叠）。
+    //    这里补量后重算，保证进入 measureGeneralizationTree / 最终布局前
+    //    每层的高度都是真实值。
+    refreshGeneralizationSubtree(cur.generalizationNode, layout)
     // 渲染期节点引用必须清掉：createGeneralizationChildNodes 末尾本来就做这件事，
     // 复用分支跳过了它，_node 就可能漏进 generalization 数据 → 结构化克隆失败
     // （同步失败）+ JSON 深拷贝返回 null（渲染中断、画布空白）。这里统一兜一遍。

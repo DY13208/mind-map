@@ -246,10 +246,23 @@ check('首次渲染不重叠', hasOverlap(gNode).overlap === false, JSON.stringi
 
 // ---- 7. 源码层面的守卫 ----
 {
-  check('复用分支里调用了 getSize', /if \(!dataDirty && !sizeMissing\) return[\s\S]{0,80}?child\.getSize\(\)/.test(raw))
-  check('把缺快照视为脏（必须量）', /const dataDirty =\s*\n?\s*!snapshot/.test(raw))
-  check('高度为 0 视为需要补量', /const sizeMissing = !\(child\.height > 0\)/.test(raw))
-  check('量完尺寸才计算 childrenAreaHeight', raw.indexOf('child.getSize()') < raw.indexOf('cur.generalizationNode.childrenAreaHeight = len'))
+  // 量尺寸与逐层重算已抽到 refreshGeneralizationSubtree 里，并被无条件调用
+  // （复用分支和重建分支都需要）。断言按这个结构写，避免随重构漂移。
+  const refreshStart = raw.indexOf('function refreshGeneralizationSubtree')
+  const refreshEnd = raw.indexOf('\n}\n', refreshStart)
+  const refreshBody = refreshStart >= 0 ? raw.slice(refreshStart, refreshEnd) : ''
+  check('存在 refreshGeneralizationSubtree', refreshStart > 0)
+  check('它内部调用了 getSize', /child\.getSize\(\)/.test(refreshBody))
+  check('把缺快照视为脏（必须量）', /const dataDirty =\s*\n?\s*!snapshot/.test(refreshBody))
+  check('高度为 0 视为需要补量', /const sizeMissing = !\(child\.height > 0\)/.test(refreshBody))
+  check(
+    '量完尺寸才计算 childrenAreaHeight',
+    refreshBody.indexOf('child.getSize()') < refreshBody.indexOf('childrenAreaHeight =')
+  )
+  check(
+    '无条件的调用（重建分支的新节点高度为 0，也必须补）',
+    /refreshGeneralizationSubtree\(cur\.generalizationNode, layout\)/.test(raw)
+  )
 }
 
 const failed = results.filter(r => !r.ok)
