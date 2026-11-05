@@ -124,6 +124,24 @@ function getGeneralizationNodeIndex(node) {
   })
 }
 
+// 概要子树的结构签名：uid + 展开态 + 嵌套形状。
+// 只要结构没变（只是改文字），就不该把整棵子树拆掉重建 —— 拆建会替换掉
+// 正在编辑的节点实例/编辑框，导致输入内容丢失（表现为节点变空）。
+function generalizationStructureSignature(item) {
+  const walk = (list, depth) => {
+    if (!Array.isArray(list) || depth > 50) return ''
+    return list
+      .map(node => {
+        const uid = (node && node.data && node.data.uid) || ''
+        const expand = node && node.data && node.data.expand === false ? '0' : '1'
+        return uid + ':' + expand + '(' + walk(node && node.children, depth + 1) + ')'
+      })
+      .join(',')
+  }
+  const range = Array.isArray(item && item.range) ? item.range.join('-') : ''
+  return (item && item.uid) + '|' + range + '|' + walk(item && item.children, 0)
+}
+
 //  创建概要节点
 // 概要节点自身也可以拥有概要（概要下的子节点再加概要），所以这里不再排除
 // isGeneralization。递归由数据决定，不存在无限展开。
@@ -198,7 +216,29 @@ function createGeneralizationNode() {
     // 关联所属节点
     cur.generalizationNode.generalizationBelongNode = this
     cur.generalizationNode.parent = this
-    layout.createGeneralizationChildNodes(cur.generalizationNode)
+    // 结构没变就别拆建：实时渲染会在每次输入后整树重排，如果这里每次都
+    // child.remove() + 重建，正在编辑的节点会被拆掉，输入内容随之丢失。
+    // 文字/样式变化的重新测量由节点自身的 render 完成。
+    const structureSig = generalizationStructureSignature(item)
+    const kids = cur.generalizationNode.children
+    const reusable =
+      !!cur.structureSig &&
+      cur.structureSig === structureSig &&
+      cur.childrenRef === item.children &&
+      Array.isArray(kids) &&
+      kids.length === item.children.length &&
+      kids.every(child => child && child.group)
+    if (reusable) {
+      const len = kids.length
+      cur.generalizationNode.childrenAreaHeight = len
+        ? kids.reduce((h, item2) => h + item2.height, 0) +
+          (len + 1) * layout.getMarginY(cur.generalizationNode.layerIndex + 1)
+        : 0
+    } else {
+      layout.createGeneralizationChildNodes(cur.generalizationNode)
+      cur.structureSig = structureSig
+      cur.childrenRef = item.children
+    }
     if (this.renderer.registerNodeIndex) {
       this.renderer.registerNodeIndex(cur.generalizationNode)
     }

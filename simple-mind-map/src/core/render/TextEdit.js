@@ -402,6 +402,7 @@ export default class TextEdit {
         this.emitTextChangeEvent()
       })
       this.textEditNode.addEventListener('input', () => {
+        this._editTextTouched = true
         this.emitTextChangeEvent()
       })
       this.textEditNode.addEventListener('compositionstart', () => {
@@ -460,6 +461,8 @@ export default class TextEdit {
       focusInput(this.textEditNode)
     }
     this.cacheEditingText = ''
+    // 本次编辑里用户是否真的动过内容（见 hideEditTextBox 的假空保护）
+    this._editTextTouched = false
     this.beginEditSession(node, isFromScale)
   }
 
@@ -594,7 +597,13 @@ export default class TextEdit {
     }
     if (this.isEditSessionComposing) return Promise.resolve(false)
     const currentNode = this.currentNode
-    const text = trimNodeEditText(this.getEditText(), false)
+    let text = trimNodeEditText(this.getEditText(), false)
+    // 编辑框被重置导致的「假空」不能覆盖节点原文本：用户没动过内容却拿到
+    // 空字符串，就沿用节点当前文本。用户真的删空会遇到 input 事件，走正常提交。
+    if (!text && !this._editTextTouched && currentNode && currentNode.getData) {
+      const committed = currentNode.getData('text')
+      if (committed) text = committed
+    }
     const cooperate = this.mindMap && this.mindMap.cooperate
     const sessionId = this.editSessionId
     const patch = { text }
