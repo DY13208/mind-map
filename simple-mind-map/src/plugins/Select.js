@@ -99,7 +99,12 @@ class Select {
     ) {
       return
     }
-    if (mousedownEventPreventDefault) {
+    // WebKit can start a page text selection when a marquee begins on blank
+    // SVG space. Keep the default action for controls outside the SVG.
+    if (
+      mousedownEventPreventDefault ||
+      this.mindMap.svg.node?.contains(e.target)
+    ) {
       e.preventDefault()
     }
     this.isMousedown = true
@@ -314,6 +319,7 @@ class Select {
     if (this.rect) this.rect.remove()
     this.rect = this.mindMap.svg
       .polygon()
+      .attr('pointer-events', 'none')
       .stroke({
         color: '#0984e3'
       })

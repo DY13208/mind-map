@@ -104,6 +104,7 @@ class RichText {
       `
       .smm-richtext-node-wrap {
         word-break: break-all;
+        -webkit-user-select: none;
         user-select: none;
       }
 
