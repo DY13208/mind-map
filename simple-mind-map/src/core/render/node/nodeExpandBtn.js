@@ -81,10 +81,11 @@ function createExpandNodeContent() {
     // 展开的节点
     this._openExpandNode = new Text()
     this._openExpandNode.addClass('smm-expand-btn-text')
-    // 文本垂直居中
+    // Use the alphabetic baseline with an explicit offset for digits.
+    // WebKit can ignore dominant-baseline on SVG.js's nested tspan.
     this._openExpandNode.attr({
       'text-anchor': 'middle',
-      'dominant-baseline': 'central',
+      dy: '0.35em',
       x: expandBtnSize / 2,
       y: 0
     })
@@ -170,7 +171,7 @@ function updateExpandBtnNode() {
           .y(-height / 2)
         node.attr({ x: x + width / 2, 'font-size': fontSize + 'px' })
         node.fill({ color })
-        node.text(String(count))
+        node.plain(String(count))
       } else {
         this._fillExpandNode.stroke('none')
         this._fillExpandNode

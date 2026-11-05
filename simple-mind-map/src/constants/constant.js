@@ -271,6 +271,7 @@ export const cssContent = `
   }
 
   .smm-text-node-wrap, .smm-expand-btn-text {
+    -webkit-user-select: none;
     user-select: none;
   }
 
