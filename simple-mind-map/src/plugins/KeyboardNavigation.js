@@ -11,6 +11,20 @@ class KeyboardNavigation {
     this.addShortcut()
   }
 
+  // 遍历「方向键可达」的全部节点：主树 + 概要子树。
+  // 概要子树的数据挂在所属节点的 data.generalization 上，不在主树 children 里，
+  // bfsWalk(root) 走不到它们 —— 概要后面的节点就永远无法用方向键聚焦，
+  // 和普通节点的能力不一致。
+  forEachNavigableNode(callback) {
+    const renderer = this.mindMap && this.mindMap.renderer
+    if (!renderer || !renderer.root) return
+    if (typeof renderer.forEachRenderedNode === 'function') {
+      renderer.forEachRenderedNode(callback)
+      return
+    }
+    bfsWalk(renderer.root, callback)
+  }
+
   addShortcut() {
     this.onLeftKeyUp = this.onLeftKeyUp.bind(this)
     this.onUpKeyUp = this.onUpKeyUp.bind(this)
@@ -134,7 +148,7 @@ class KeyboardNavigation {
     checkNodeDis
   }) {
     // 遍历节点树
-    bfsWalk(this.mindMap.renderer.root, node => {
+    this.forEachNavigableNode(node => {
       // 跳过当前聚焦的节点
       if (node.uid === currentActiveNode.uid) return
       // 当前遍历到的节点的位置信息
@@ -172,7 +186,7 @@ class KeyboardNavigation {
     dir,
     checkNodeDis
   }) {
-    bfsWalk(this.mindMap.renderer.root, node => {
+    this.forEachNavigableNode(node => {
       if (node.uid === currentActiveNode.uid) return
       let rect = this.getNodeRect(node)
       let { left, top, right, bottom } = rect
@@ -214,7 +228,7 @@ class KeyboardNavigation {
     // 当前聚焦节点的中心点
     let cX = (currentActiveNodeRect.right + currentActiveNodeRect.left) / 2
     let cY = (currentActiveNodeRect.bottom + currentActiveNodeRect.top) / 2
-    bfsWalk(this.mindMap.renderer.root, node => {
+    this.forEachNavigableNode(node => {
       if (node.uid === currentActiveNode.uid) return
       let rect = this.getNodeRect(node)
       let { left, top, right, bottom } = rect

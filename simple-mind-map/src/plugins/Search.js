@@ -133,28 +133,59 @@ class Search {
         matchList.push(node)
       }
       // 概要节点
-      const generalizationList = formatGetNodeGeneralization({
-        generalization
-      })
-      generalizationList.forEach(gNode => {
-        let { richText, text, uid } = gNode
-        if (
-          isOnlySearchCurrentRenderNodes &&
-          !this.mindMap.renderer.findNodeByUid(uid)
-        ) {
-          return
-        }
-        if (uid && seen.has(uid)) return
-        if (richText) {
-          text = getTextFromHtml(text)
-        }
-        if (text && text.includes(this.searchText)) {
-          matchList.push({
-            data: gNode
+      // 概要节点，以及概要下挂的子树。
+      // 概要子树里的节点不在主树 children 上，bfsWalk 走不到；这里必须递归，
+      // 否则概要后面的节点搜不到 —— 和普通节点的能力不一致。
+      const collectGeneralization = (parentData, depth = 0) => {
+        if (depth > 50) return
+        const generalizationList = formatGetNodeGeneralization(parentData)
+        generalizationList.forEach(gNode => {
+          if (!gNode) return
+          let { richText, text, uid } = gNode
+          if (
+            isOnlySearchCurrentRenderNodes &&
+            !this.mindMap.renderer.findNodeByUid(uid)
+          ) {
+            return
+          }
+          if (uid && seen.has(uid)) return
+          if (richText) {
+            text = getTextFromHtml(text)
+          }
+          if (text && text.includes(this.searchText)) {
+            matchList.push({
+              data: gNode
+            })
+            if (uid) seen.add(uid)
+          }
+          // 概要节点自己的概要（嵌套概要）
+          collectGeneralization(gNode, depth + 1)
+          // 概要下挂的子节点：它们是普通节点，同样要参与搜索
+          const kids = Array.isArray(gNode.children) ? gNode.children : []
+          kids.forEach(child => {
+            if (!child) return
+            const childData = child.data || child
+            const childUid = childData && childData.uid
+            if (childUid && seen.has(childUid)) return
+            let childText = childData && childData.text
+            if (childData && childData.richText) {
+              childText = getTextFromHtml(childText)
+            }
+            if (
+              childText &&
+              String(childText).includes(this.searchText) &&
+              (!isOnlySearchCurrentRenderNodes ||
+                !childUid ||
+                this.mindMap.renderer.findNodeByUid(childUid))
+            ) {
+              matchList.push(isOnlySearchCurrentRenderNodes ? child : { data: childData })
+              if (childUid) seen.add(childUid)
+            }
+            collectGeneralization(childData, depth + 1)
           })
-          if (uid) seen.add(uid)
-        }
-      })
+        })
+      }
+      collectGeneralization(isOnlySearchCurrentRenderNodes ? node.getData() : node.data || {})
     })
     this.updateMatchNodeList(matchList)
   }

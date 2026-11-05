@@ -26,8 +26,15 @@ function walkDescendantUids(node, out = []) {
   return out
 }
 
-function collectDeleteRoots(activeNodes = [], commandName = 'REMOVE_NODE') {
+// opts.isVirtualSubtree(node) —— 判断节点是否位于概要虚拟子树内（概要自身或
+// 概要下挂的后代）。这些节点没有服务端节点行，不能生成 node.delete，只能随
+// owner 的 generalization 整体同步。缺省时退化为只认 isGeneralization。
+function collectDeleteRoots(activeNodes = [], commandName = 'REMOVE_NODE', opts = {}) {
   const keepChildren = commandName === 'REMOVE_CURRENT_NODE'
+  const isVirtualSubtree =
+    typeof opts.isVirtualSubtree === 'function'
+      ? opts.isVirtualSubtree
+      : node => !!(node && node.isGeneralization)
   const roots = []
   const owners = []
   const seen = new Set()
@@ -36,6 +43,24 @@ function collectDeleteRoots(activeNodes = [], commandName = 'REMOVE_NODE') {
     if (!node) return
     if (node.isGeneralization && node.generalizationBelongNode) {
       const owner = node.generalizationBelongNode
+      const ownerUid = nodeUid(owner)
+      if (ownerUid && !seenOwner.has(ownerUid)) {
+        seenOwner.add(ownerUid)
+        owners.push(owner)
+      }
+      return
+    }
+    // 概要虚拟子树内的普通节点：同样是虚拟的，走 owner 的 generalization 通道。
+    if (isVirtualSubtree(node)) {
+      let cur = node
+      let owner = null
+      for (let i = 0; cur && i < 1000; i++) {
+        if (cur.isGeneralization) {
+          owner = cur.generalizationBelongNode || null
+          break
+        }
+        cur = cur.parent
+      }
       const ownerUid = nodeUid(owner)
       if (ownerUid && !seenOwner.has(ownerUid)) {
         seenOwner.add(ownerUid)
@@ -59,11 +84,22 @@ function collectDeleteRoots(activeNodes = [], commandName = 'REMOVE_NODE') {
   roots.forEach(item => {
     item.descendantUids.forEach(id => descendantOfSelected.add(id))
   })
-  const filtered = roots.filter(item => !descendantOfSelected.has(item.uid))
+  // 删概要绝不能连带删宿主。
+  // 概要（及其虚拟子树）只是挂在 owner 上的一条 annotation，数据在
+  // owner.generalization 里；owner 是主树上的真实节点。用户把概要一起选中
+  // （或 active 列表里刚好残留了 owner）时，roots 会带上 owner，
+  // 生成 node.delete(owner) → 服务端把 owner 连同整棵子树删掉 ——
+  // 这正是「删概要却把绑定节点全删了」。
+  // 只要本次有概要进入 owners，就把这些 owner 从删除根里剔除。
+  const protectedOwnerUids = new Set(owners.map(owner => nodeUid(owner)).filter(Boolean))
+  const filtered = roots.filter(
+    item => !descendantOfSelected.has(item.uid) && !protectedOwnerUids.has(item.uid)
+  )
   return {
     command: commandName,
     roots: filtered,
     owners,
+    protectedOwnerUids: Array.from(protectedOwnerUids),
     rootUids: filtered.map(item => item.uid),
     descendantUids: filtered.reduce((list, item) => list.concat(item.descendantUids), [])
   }

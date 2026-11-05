@@ -329,6 +329,10 @@ class RichText {
       this.textEditNode.innerHTML = this.cacheEditingText || nodeText
     }
     this.initQuillEditor()
+    // 记录这次编辑里用户是否真的动过内容。没动过却提交出空字符串，说明是
+    // 编辑框被重置了（而不是用户删空），提交时必须保留节点原文本，否则
+    // 节点会变成空白方块，看起来就像「直接空了」。
+    this._editTextTouched = false
     this.setQuillContainerMinHeight(originHeight)
     this.setIsShowTextEdit(true)
     // 如果是刚创建的节点，那么默认全选，否则普通激活不全选，除非selectTextOnEnterEditText配置为true
@@ -424,9 +428,15 @@ class RichText {
     if (typeof beforeHideRichTextEdit === 'function') {
       beforeHideRichTextEdit(this)
     }
-    const html = trimNodeEditText(this.getEditText(), true)
+    let html = trimNodeEditText(this.getEditText(), true)
     const list = nodes && nodes.length > 0 ? nodes : [this.node]
     const node = this.node
+    // 编辑框被重置导致的「假空」不能覆盖节点原文本：用户没动过内容却拿到
+    // 空字符串，就沿用节点当前文本。用户真的删空会遇到 text-change，走正常提交。
+    if (!html && !this._editTextTouched && node && node.getData) {
+      const committed = node.getData('text')
+      if (committed) html = committed
+    }
     const cooperate = this.mindMap && this.mindMap.cooperate
     const sessionId = this.editSessionId
     const patch = { text: html, richText: true }
@@ -700,6 +710,7 @@ class RichText {
       }
     })
     this.quill.on('text-change', () => {
+      this._editTextTouched = true
       this.syncEditSessionDraft()
       // Keep in-progress IME candidates in the private draft only. Rendering
       // them into the map would expose half-composed text to other UI paths.

@@ -2559,6 +2559,29 @@ class Render {
     this.mindMap.render()
   }
 
+  // 本次删除列表中「必须保留、不能被删」的宿主节点。
+  //
+  // 概要（以及概要虚拟子树里的节点）只是挂在 owner 上的一条 annotation，
+  // 数据存在 owner.generalization 里；owner 是主树上的真实节点。用户把概要
+  // 和 owner 一起选中（或 active 列表里恰好残留了 owner）时，如果不做保护，
+  // owner 会走普通节点分支被 removeFromParentNodeData 摘掉 —— 表现就是
+  // 「删概要却把概要绑定的节点连同整棵子树全删了」。
+  collectProtectedOwners(list = []) {
+    const owners = new Set()
+    ;(list || []).forEach(node => {
+      let cur = node
+      let guard = 0
+      while (cur && guard++ < 1000) {
+        if (cur.isGeneralization) {
+          if (cur.generalizationBelongNode) owners.add(cur.generalizationBelongNode)
+          return
+        }
+        cur = cur.parent
+      }
+    })
+    return owners
+  }
+
   //  移除节点
   removeNode(appointNodes = []) {
     appointNodes = formatDataToArray(appointNodes)
@@ -2569,6 +2592,13 @@ class Render {
     let needActiveNode = null
     let isAppointNodes = appointNodes.length > 0
     let list = isAppointNodes ? appointNodes : this.activeNodeList
+    // 删概要时必须保住宿主（见 collectProtectedOwners）
+    const protectedOwners = this.collectProtectedOwners(list)
+    if (protectedOwners.size) {
+      list = list.filter(node => !protectedOwners.has(node))
+      if (isAppointNodes) appointNodes = list
+    }
+    if (!list.length) return
     let root = list.find(node => {
       return node.isRoot
     })
@@ -2660,6 +2690,13 @@ class Render {
     list = list.filter(node => {
       return !node.isRoot
     })
+    // 删概要时必须保住宿主（见 collectProtectedOwners）
+    const protectedOwners = this.collectProtectedOwners(list)
+    if (protectedOwners.size) {
+      list = list.filter(node => !protectedOwners.has(node))
+      if (isAppointNodes) appointNodes = list
+    }
+    if (!list.length) return
     if (
       this.runAfterHydrate(
         list,
@@ -2674,8 +2711,11 @@ class Render {
     for (let i = 0; i < list.length; i++) {
       let node = list[i]
       if (node.isGeneralization) {
-        // 删除概要节点
+        // 删除概要节点。清理顺序必须和 removeNode 一致：先让所属节点摘掉
+        // 这条概要（含画布元素），再把概要节点自身移出激活列表。否则它会
+        // 留在 activeNodeList 里，下次渲染又被当成激活节点画出一个残留边框。
         this.deleteNodeGeneralization(node)
+        this.removeNodeFromActiveList(node)
       } else {
         this.mindMap.command.recordContentChange?.({ removed: [{ data: node.nodeData.data, children: [] }] })
         const parent = node.parent
@@ -3852,6 +3892,44 @@ class Render {
       ;(current._generalizationList || []).forEach(item => pending.push(item.generalizationNode))
     }
   }
+
+  // 遍历「画布上所有可见节点」：主树 + 每一层概要子树（概要节点自身及其后代）。
+  //
+  // 概要子树的数据挂在所属节点的 data.generalization 里，不在主树的 children
+  // 上，所以 walk/bfsWalk(root) 永远遍历不到它们。后果是概要里的节点看着和普通
+  // 节点一样，实际却用不了一批功能（关联线连不上、终点检测不到、拖拽列表里没有）。
+  // 凡是需要「对所有节点一视同仁」的逻辑都走这里，别直接 walk(root)。
+  //
+  // options.includeGeneralizationNode：是否把概要节点自身也交给回调（默认 true，
+  // 由调用方按需过滤 isGeneralization）。
+  forEachRenderedNode(callback, options = {}) {
+    if (typeof callback !== 'function') return
+    const includeGenNode = options.includeGeneralizationNode !== false
+    const seen = new Set()
+    const visit = node => {
+      if (!node || seen.has(node)) return
+      seen.add(node)
+      callback(node)
+      ;(node.children || []).forEach(visit)
+      ;(node._generalizationList || []).forEach(item => {
+        const gNode = item && item.generalizationNode
+        if (!gNode || seen.has(gNode)) return
+        if (includeGenNode) {
+          seen.add(gNode)
+          callback(gNode)
+        }
+        // 概要节点自身不参与时，它的子节点仍要遍历（概要下的节点才是普通节点）
+        ;(gNode.children || []).forEach(visit)
+        // 概要节点自己的 _generalizationList 也要展开（嵌套概要）
+        ;(gNode._generalizationList || []).forEach(sub => {
+          const subNode = sub && sub.generalizationNode
+          if (subNode) visit(subNode)
+        })
+      })
+    }
+    visit(this.root)
+  }
+
 
   unregisterNodeIndex(node) {
     if (!node || !this.nodeIndex) return

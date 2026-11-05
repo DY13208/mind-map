@@ -27,6 +27,34 @@ function normalizeGeneralizationChildren(list) {
   }
 }
 
+function asGeneralizationList(value) {
+  if (value == null) return []
+  return Array.isArray(value) ? value : [value]
+}
+
+// 清掉渲染期的节点实例引用（`_node`）。它指向 MindMapNode、带循环引用，
+// 一旦混进 generalization 数据：postMessage 结构化克隆会抛
+// OUTBOX_NON_CLONEABLE_PAYLOAD（同步失败），JSON 深拷贝会因循环返回 null
+// （后续往 null 写字段直接 TypeError，整次渲染中断 → 画布空白）。
+function stripNodeRef(list, depth = 0) {
+  if (!Array.isArray(list) || depth > 50) return
+  list.forEach(node => {
+    if (!node || typeof node !== 'object') return
+    delete node._node
+    const data = node.data
+    if (data && typeof data === 'object') {
+      delete data._node
+      asGeneralizationList(data.generalization).forEach(nested => {
+        if (nested && typeof nested === 'object') {
+          delete nested._node
+          stripNodeRef(nested.children, depth + 1)
+        }
+      })
+    }
+    stripNodeRef(node.children, depth + 1)
+  })
+}
+
 //  检查是否存在概要
 function checkHasGeneralization() {
   return this.formatGetGeneralization().length > 0
@@ -124,6 +152,82 @@ function getGeneralizationNodeIndex(node) {
   })
 }
 
+// 概要子树的结构签名：uid + 展开态 + 嵌套形状。
+// 只要结构没变（只是改文字），就不该把整棵子树拆掉重建 —— 拆建会替换掉
+// 正在编辑的节点实例/编辑框，导致输入内容丢失（表现为节点变空）。
+function generalizationStructureSignature(item) {
+  const walk = (list, depth) => {
+    if (!Array.isArray(list) || depth > 50) return ''
+    return list
+      .map(node => {
+        const uid = (node && node.data && node.data.uid) || ''
+        const expand = node && node.data && node.data.expand === false ? '0' : '1'
+        return uid + ':' + expand + '(' + walk(node && node.children, depth + 1) + ')'
+      })
+      .join(',')
+  }
+  const range = Array.isArray(item && item.range) ? item.range.join('-') : ''
+  return (item && item.uid) + '|' + range + '|' + walk(item && item.children, 0)
+}
+
+// 递归给概要子树补量尺寸，并从深到浅重算每一层的 childrenAreaHeight。
+//
+// 复用分支不重建子树，于是跳过了两件「重建路径顺带完成」的事：
+//   1. createNode → getSize()  重新量宽高
+//   2. createGeneralizationChildNodes 末尾那段「逐层算 childrenAreaHeight」
+// 只补顶层是不够的：嵌套层的兄弟节点靠**它自己父节点**的 childrenAreaHeight
+// 定位（layoutGeneralizationChildren 里 `cur.top = totalTop; totalTop +=
+// cur.height + marginY`）。父节点那个值不更新，它的子节点就全部算在同一个
+// top 上 —— 表现就是整列节点糊成一团，正是「概要后面新增节点全叠在一起」。
+function refreshGeneralizationSubtree(gNode, layout, depth = 0) {
+  if (!gNode || depth > 50) return
+  const kids = Array.isArray(gNode.children) ? gNode.children : []
+  kids.forEach(child => {
+    if (!child) return
+    if (typeof child.getSize === 'function') {
+      const snapshot = child.nodeDataSnapshot
+      // 没有快照说明还没量过；有快照则按数据变没变判断（忽略 isActive/expand，
+      // 避免选中态变化引起无谓重算）。
+      const dataDirty =
+        !snapshot ||
+        typeof layout.checkIsNodeDataChange !== 'function' ||
+        layout.checkIsNodeDataChange(
+          snapshot,
+          child.nodeData && child.nodeData.data
+        )
+      // 高度缺失/为 0 的节点直接参与排版会让所有兄弟叠在同一行。
+      const sizeMissing = !(child.height > 0)
+      if (dataDirty || sizeMissing) {
+        child.getSize()
+        child.needLayout = true
+        // 子节点自己也可能挂着嵌套概要，尺寸变了要一起刷新
+        if (typeof child.updateGeneralization === 'function') {
+          child.updateGeneralization()
+        }
+      }
+    }
+    // 先处理更深的层，自己的高度才是最终值
+    refreshGeneralizationSubtree(child, layout, depth + 1)
+  })
+  // 逐层重算（与 Base.createGeneralizationChildNodes 的 after 回调口径一致）
+  const collapsed =
+    typeof gNode.getData === 'function' && gNode.getData('expand') === false
+  const len = collapsed ? 0 : kids.length
+  // 按「子树高度」累加，不是节点自身高度：自己有子节点的兄弟占用更多纵向
+  // 空间，只算自身高度会把下一个兄弟排进它的子树里（多层重叠）。
+  gNode.childrenAreaHeight = len
+    ? kids.reduce(
+        (h, item) =>
+          h +
+          (typeof layout.generalizationSubtreeHeight === 'function'
+            ? layout.generalizationSubtreeHeight(item, 'h')
+            : item.height),
+        0
+      ) +
+      (len + 1) * layout.getMarginY((gNode.layerIndex || 0) + 1)
+    : 0
+}
+
 //  创建概要节点
 // 概要节点自身也可以拥有概要（概要下的子节点再加概要），所以这里不再排除
 // isGeneralization。递归由数据决定，不存在无限展开。
@@ -169,6 +273,12 @@ function createGeneralizationNode() {
     ) {
       this.lineDraw.add(cur.generalizationLine)
     }
+    // 给连线打上所属节点类名：删除概要时如果引用丢了（复用/重建过程中
+    // item 被替换），还能按类名把残留的括号线清干净。
+    const lineOwnerUid = (this.getData && this.getData('uid')) || this.uid
+    if (lineOwnerUid && cur.generalizationLine && cur.generalizationLine.addClass) {
+      cur.generalizationLine.addClass('generalization-line_' + lineOwnerUid)
+    }
     if (!cur.generalizationNode) {
       cur.generalizationNode = new MindMapNode({
         data: {
@@ -198,7 +308,35 @@ function createGeneralizationNode() {
     // 关联所属节点
     cur.generalizationNode.generalizationBelongNode = this
     cur.generalizationNode.parent = this
-    layout.createGeneralizationChildNodes(cur.generalizationNode)
+    // 结构没变就别拆建：实时渲染会在每次输入后整树重排，如果这里每次都
+    // child.remove() + 重建，正在编辑的节点会被拆掉，输入内容随之丢失。
+    const structureSig = generalizationStructureSignature(item)
+    const kids = cur.generalizationNode.children
+    const reusable =
+      !!cur.structureSig &&
+      cur.structureSig === structureSig &&
+      cur.childrenRef === item.children &&
+      Array.isArray(kids) &&
+      kids.length === item.children.length &&
+      kids.every(child => child && child.group)
+    if (!reusable) {
+      layout.createGeneralizationChildNodes(cur.generalizationNode)
+      cur.structureSig = structureSig
+      cur.childrenRef = item.children
+    }
+    // 无条件补一次「量尺寸 + 逐层重算 childrenAreaHeight」：
+    //  - 复用分支：跳过了 createNode 的 getSize 和逐层重算，必须补。
+    //  - 重建分支：新建的 MindMapNode 初始宽高是 0，而
+    //    createGeneralizationChildNodes 是**当场**按这些 0 高度算 area 的，
+    //    于是这一层的兄弟节点全被算到同一个 top 上（新增节点后整列重叠）。
+    //    这里补量后重算，保证进入 measureGeneralizationTree / 最终布局前
+    //    每层的高度都是真实值。
+    refreshGeneralizationSubtree(cur.generalizationNode, layout)
+    // 渲染期节点引用必须清掉：createGeneralizationChildNodes 末尾本来就做这件事，
+    // 复用分支跳过了它，_node 就可能漏进 generalization 数据 → 结构化克隆失败
+    // （同步失败）+ JSON 深拷贝返回 null（渲染中断、画布空白）。这里统一兜一遍。
+    stripNodeRef(item.children)
+    delete item._node
     if (this.renderer.registerNodeIndex) {
       this.renderer.registerNodeIndex(cur.generalizationNode)
     }
@@ -333,24 +471,48 @@ function removeGeneralization() {
       item.generalizationLine = null
     }
     if (item.generalizationNode) {
+      const genNode = item.generalizationNode
       if (this.renderer.unregisterNodeIndex) {
-        this.renderer.unregisterNodeIndex(item.generalizationNode)
+        this.renderer.unregisterNodeIndex(genNode)
       }
       // 删除概要节点时要同步从激活节点里删除
-      this.renderer.removeNodeFromActiveList(item.generalizationNode)
-      item.generalizationNode.remove()
+      this.renderer.removeNodeFromActiveList(genNode)
+      genNode.remove()
+      // 实例已经离开画布，缓存里再留着它，下次渲染一旦命中 lru 就会把
+      // 已经 remove 的 group 重新挂回 nodeDraw，表现为「概要删了框还在」。
+      const genUid = genNode.uid
+      if (genUid) {
+        const renderer = this.renderer || {}
+        if (renderer.nodeCache) delete renderer.nodeCache[genUid]
+        if (renderer.lastNodeCache) delete renderer.lastNodeCache[genUid]
+        if (this.renderer && this.renderer.layout && this.renderer.layout.lru) {
+          const lru = this.renderer.layout.lru
+          if (typeof lru.delete === 'function') lru.delete(genUid)
+        }
+      }
       item.generalizationNode = null
     }
   })
   this._generalizationList = []
   this._generalizationSig = ''
-  // hack修复当激活一个节点时创建概要，然后立即激活创建的概要节点后会重复创建概要节点并且无法删除的问题
-  // 概要节点自身的 group 也带着 generalization_<所属节点uid> 类名，
-  // 这里如果对概要节点执行，会把它自己从画布上删掉。
-  if (!this.isGeneralization && this.generalizationBelongNode) {
-    this.nodeDraw
-      .find('.generalization_' + this.generalizationBelongNode.uid)
-      .remove()
+  // 按类名兜底清理画布残留。
+  // 上面只按 _generalizationList 里的引用去删；一旦某个条目的引用丢了
+  // （重建/复用过程中 item 被替换、group 提前被移出又挂回），就会在画布上
+  // 留下一个空的概要框或括号线，看起来像「删了概要但边框还在」。
+  // 概要节点的 group 带 generalization_<ownerUid>，连线带
+  // generalization-line_<ownerUid>，这里按 owner 的 uid 一次性清理。
+  // 只对所属节点（owner）执行：概要节点自身也带同名类名，对它执行会把
+  // 自己（以及需要保留的兄弟概要）误删。
+  if (!this.isGeneralization) {
+    const ownerUid = (this.getData && this.getData('uid')) || this.uid
+    if (ownerUid) {
+      if (this.nodeDraw && this.nodeDraw.find) {
+        this.nodeDraw.find('.generalization_' + ownerUid).remove()
+      }
+      if (this.lineDraw && this.lineDraw.find) {
+        this.lineDraw.find('.generalization-line_' + ownerUid).remove()
+      }
+    }
   }
 }
 
