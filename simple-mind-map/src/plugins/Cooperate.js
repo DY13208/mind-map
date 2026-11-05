@@ -372,6 +372,26 @@ function generalizationUidsOf(data) {
   )
 }
 
+// 概要虚拟子树：概要节点自身，以及挂在概要节点下的后代。它们都没有服务端
+// 节点行，只能随 owner 节点的 generalization 字段整体同步；若按普通节点发
+// node.insert / node.update，服务端 resolveParent / getLive 拿不到行，返回
+// NODE_DELETED，前端表现为「同步失败」。
+// isGeneralization 只标在概要节点本身（子节点不能继承，否则无法在概要子节点
+// 下继续插子节点），所以这里沿 parent 链向上找到概要点。
+function generalizationScopeOwner(node) {
+  let cur = node
+  let guard = 0
+  while (cur && guard++ < 1000) {
+    if (cur.isGeneralization) return cur.generalizationBelongNode || null
+    cur = cur.parent
+  }
+  return null
+}
+
+function isGeneralizationScopeNode(node) {
+  return !!generalizationScopeOwner(node) || !!(node && node.isGeneralization)
+}
+
 function v2Trace(layer, detail) {
   collabTrace(layer, detail)
 }
@@ -2159,7 +2179,8 @@ class Cooperate {
     }
     if (this.collabV2Adapter && (name === 'SET_NODE_TEXT' || name === 'SET_NODE_NOTE')) {
       const node = arguments[1]
-      if (node && node.getData) {
+      // 概要虚拟子树节点不进文本队列：它们由 generalization 通道整体提交。
+      if (node && node.getData && !isGeneralizationScopeNode(node)) {
         if (!this._pendingTextUids) this._pendingTextUids = new Set()
         this._pendingTextUids.add(node.getData('uid'))
       }
@@ -3888,11 +3909,31 @@ class Cooperate {
       renderer && typeof renderer.findNodeByUid === 'function'
         ? renderer.findNodeByUid(parentUid)
         : null
+    // 父节点位于概要虚拟子树内（概要自身或概要后代）：新建的子节点同样是
+    // 虚拟的，服务端没有它的行，不能走 node.insert。
+    if (parentNode && isGeneralizationScopeNode(parentNode)) return true
     const parentData = parentNode && parentNode.getData ? parentNode.getData() : null
     if (parentData && generalizationUidsOf(parentData).has(uid)) return true
     const tree = renderer && renderer.renderTree
     const treeNode = tree && this.findTreeNode(tree, parentUid)
-    return !!(treeNode && treeNode.data && generalizationUidsOf(treeNode.data).has(uid))
+    if (treeNode && treeNode.data && generalizationUidsOf(treeNode.data).has(uid)) {
+      return true
+    }
+    const childNode =
+      renderer && typeof renderer.findNodeByUid === 'function'
+        ? renderer.findNodeByUid(uid)
+        : null
+    return !!childNode && isGeneralizationScopeNode(childNode)
+  }
+
+  // 概要虚拟子树内的节点没有服务端节点行，统一随 owner 的 generalization 同步。
+  isGeneralizationScopeNode(node) {
+    return isGeneralizationScopeNode(node)
+  }
+
+  // 概要虚拟子树节点对应的真实 owner 节点（用于把编辑映射到 generalization 通道）。
+  generalizationScopeOwner(node) {
+    return generalizationScopeOwner(node)
   }
 
   requestRemoteApplyRender(uids, callback, source = 'remote apply') {
@@ -7055,14 +7096,28 @@ class Cooperate {
     }
     const consider = node => {
       if (!node) return
-      if (node.isGeneralization && node.generalizationBelongNode) {
-        addOwner(node.generalizationBelongNode)
-      }
+      // 概要节点自身与概要子树内的节点都映射到同一个 owner：它们的改动
+      // 都写在 owner 的 generalization 数据里，只能走同一条同步通道。
+      const owner = generalizationScopeOwner(node)
+      if (owner) addOwner(owner)
     }
-    consider(args[0])
+    // 各命令的实参形态不一：INSERT_CHILD_NODE 第一参是 openEdit 布尔值，
+    // 节点在第 2 参或是一个数组。必须把全部实参（含嵌套数组）都过一遍，
+    // 只看 args[0] 会漏掉插入路径。
+    const scan = value => {
+      if (!value) return
+      if (Array.isArray(value)) {
+        value.forEach(scan)
+        return
+      }
+      if (typeof value !== 'object') return
+      if (typeof value.getData === 'function' || value.nodeData) consider(value)
+    }
+    args.forEach(scan)
     if (
       name === 'SET_NODE_DATA' &&
       args[0] &&
+      typeof args[0] === 'object' &&
       !args[0].isGeneralization &&
       args[1] &&
       Object.prototype.hasOwnProperty.call(args[1], 'generalization')
@@ -7233,6 +7288,12 @@ class Cooperate {
       return
     }
     if (INSERT_COMMANDS[name]) {
+      // 在概要虚拟子树上插子节点：新节点没有服务端节点行，不能进 node.insert。
+      // 它的数据已经写进 owner.generalization 的 children，这里直接刷 owner。
+      const genOwnersOnInsert = this.collectGeneralizationOwners(name, args)
+      if (genOwnersOnInsert.length) {
+        genOwnersOnInsert.forEach(owner => this.syncHttpGeneralization(owner))
+      }
       this._v2InsertFromCommand = true
       const inserted = this.flushHttpInsert()
       if (name === 'INSERT_PARENT_NODE') {
@@ -7719,6 +7780,9 @@ class Cooperate {
 
   hasUnsyncedLocalText(node) {
     if (!node) return false
+    // 概要虚拟子树节点没有服务端节点行，node.update 一定会被 NODE_DELETED
+    // 拒绝。它们的改动由 syncHttpGeneralization(owner) 整体提交。
+    if (isGeneralizationScopeNode(node)) return false
     const uid = node.getData && node.getData('uid')
     const attachmentPatchPending =
       uid && this._pendingAttachmentPatchByUid &&
@@ -7760,6 +7824,7 @@ class Cooperate {
     const skipUid = uid =>
       uid && this.abandonedInsertUids && this.abandonedInsertUids.has(uid)
     ;(renderer.activeNodeList || []).forEach(node => {
+      if (isGeneralizationScopeNode(node)) return
       const target = this.resolveHttpPatchNode(node)
       const uid = target.getData && target.getData('uid')
       if (uid && !skipUid(uid)) byUid.set(uid, target)
@@ -8411,6 +8476,8 @@ class Cooperate {
       if (this.abandonedInsertUids && this.abandonedInsertUids.has(row.uid)) {
         return false
       }
+      // 概要虚拟子树内的新节点只能随 owner 的 generalization 同步。
+      if (this.isGeneralizationUid(row.parent, row.uid)) return false
       return true
     })
     // Records may reference live node data. Freeze exactly what this insert
@@ -10030,5 +10097,8 @@ class Cooperate {
 }
 
 Cooperate.instanceName = 'cooperate'
+// 概要虚拟子树的判定逻辑在单测里直接复用，避免测试重复实现一份规则。
+Cooperate.generalizationScopeOwner = generalizationScopeOwner
+Cooperate.isGeneralizationScopeNode = isGeneralizationScopeNode
 
 export default Cooperate

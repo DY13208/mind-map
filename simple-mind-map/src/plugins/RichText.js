@@ -520,6 +520,16 @@ class RichText {
     return true
   }
 
+  // 概要节点自身与概要子树内的节点都不存在服务端节点行，不能建协同编辑会话。
+  isVirtualGeneralizationNode(node, cooperate) {
+    if (!node) return false
+    if (node.isGeneralization) return true
+    if (cooperate && typeof cooperate.isGeneralizationScopeNode === 'function') {
+      return !!cooperate.isGeneralizationScopeNode(node)
+    }
+    return false
+  }
+
   beginEditSession(node, isFromScale) {
     const cooperate = this.mindMap && this.mindMap.cooperate
     if (!cooperate || !cooperate.httpCollabMode || !cooperate.collabV2Adapter) return
@@ -531,7 +541,8 @@ class RichText {
     // 提交 node.update 会被 NODE_DELETED 拒绝。概要富文本编辑改由
     // SET_NODE_TEXT 兜底 → collectGeneralizationOwners →
     // syncHttpGeneralization(owner) 通道同步到 owner 节点。
-    if (node && node.isGeneralization) {
+    // 概要子树内的子节点同样是虚拟的，一样不能建编辑会话。
+    if (node && this.isVirtualGeneralizationNode(node, cooperate)) {
       this.editSessionId = null
       return
     }

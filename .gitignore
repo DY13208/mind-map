@@ -135,6 +135,8 @@ output/*.py
 !/web/tests/knowledgeFileOpen.test.cjs
 !/web/tests/knowledgeFilePickerSearch.test.cjs
 !/web/tests/generalization-edit-session.test.cjs
+!/web/tests/generalization-subtree-sync.test.cjs
+!/web/tests/generalization-subtree-persist.test.cjs
 
 # 环境配置与备份
 .env

@@ -463,6 +463,16 @@ export default class TextEdit {
     this.beginEditSession(node, isFromScale)
   }
 
+  // 概要节点自身与概要子树内的节点都不存在服务端节点行，不能建协同编辑会话。
+  isVirtualGeneralizationNode(node, cooperate) {
+    if (!node) return false
+    if (node.isGeneralization) return true
+    if (cooperate && typeof cooperate.isGeneralizationScopeNode === 'function') {
+      return !!cooperate.isGeneralizationScopeNode(node)
+    }
+    return false
+  }
+
   beginEditSession(node, isFromScale) {
     const cooperate = this.mindMap && this.mindMap.cooperate
     if (!cooperate || !cooperate.httpCollabMode || !cooperate.collabV2Adapter) return
@@ -475,7 +485,8 @@ export default class TextEdit {
     // 概要文本编辑改走 SET_NODE_TEXT 命令兜底，由 Cooperate 的
     // collectGeneralizationOwners → syncHttpGeneralization(owner) 通道
     // 合并进 owner 节点的 generalization 字段落库（与 ADD/REMOVE_GENERALIZATION 同路）。
-    if (node && node.isGeneralization) {
+    // 概要子树内的子节点同样是虚拟的，一样不能建编辑会话。
+    if (node && this.isVirtualGeneralizationNode(node, cooperate)) {
       this.editSessionId = null
       return
     }
