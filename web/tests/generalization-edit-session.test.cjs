@@ -173,8 +173,8 @@ function fakeNode({ uid, isGeneralization }) {
   const beginIdx = src.indexOf('beginEditSession(node, isFromScale)', first + 1)
   const body = src.slice(beginIdx, beginIdx + 1600)
   check(
-    'RichText.beginEditSession 里有 isGeneralization 守卫',
-    beginIdx >= 0 && /isGeneralization/.test(body),
+    'RichText.beginEditSession 里有概要虚拟子树守卫',
+    beginIdx >= 0 && /isVirtualGeneralizationNode\(node, cooperate\)/.test(body),
     beginIdx < 0 ? 'definition not found' : ''
   )
 }
@@ -186,8 +186,8 @@ function fakeNode({ uid, isGeneralization }) {
   const beginIdx = src.indexOf('beginEditSession(node, isFromScale)', first + 1)
   const body = src.slice(beginIdx, beginIdx + 1600)
   check(
-    'TextEdit.beginEditSession 里有 isGeneralization 守卫',
-    beginIdx >= 0 && /isGeneralization/.test(body),
+    'TextEdit.beginEditSession 里有概要虚拟子树守卫',
+    beginIdx >= 0 && /isVirtualGeneralizationNode\(node, cooperate\)/.test(body),
     beginIdx < 0 ? 'definition not found' : ''
   )
 }
