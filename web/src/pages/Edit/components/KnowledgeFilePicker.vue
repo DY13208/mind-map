@@ -9,35 +9,36 @@
           <span slot-scope="{ data, node }" class="picker-row" :class="{ 'picker-row-folder': data.kind !== 'file' }">
             <i :class="data.kind === 'folder' ? 'el-icon-folder' : data.kind === 'more' ? 'el-icon-more' : 'el-icon-document'" />
             <span class="picker-name" :title="data.name" @click="data.kind === 'folder' && (node.expanded ? node.collapse() : node.expand())">{{ data.name }}</span>
-            <template v-if="data.kind === 'file'"><small>{{ size(data.size) }}</small><el-button type="text" size="mini" @click.stop="details = data; detailsVisible = true">查看解析</el-button></template>
+            <template v-if="data.kind === 'file'"><small>{{ size(data.size) }}</small><el-button type="text" size="mini" @click.stop="preview(data)">预览</el-button></template>
+            <el-button v-else-if="data.kind === 'folder'" type="text" size="mini" @click.stop="preview(data)">浏览</el-button>
           </span>
         </el-tree>
       </div>
-      <div class="picker-selected"><strong>已选 {{ selectedFiles.length }} 项（文件夹 / 文件）</strong><div v-for="file in selectedFiles" :key="selectionKey(file)" class="picker-selected-file"><el-tag :closable="!busy && !readonly" @close="remove(file)"><span v-if="file.kind === 'folder'">文件夹：{{ file.name || file.fileName }}</span><a v-else :href="fileUrl(file)" target="_blank" rel="noopener" :aria-label="`打开文件 ${file.name || file.fileName}`">{{ file.name || file.fileName }}</a></el-tag><small v-if="file.kind === 'folder'">含子文件夹 · 自动纳入新增文件</small><el-button v-else type="text" size="mini" @click="details = file; detailsVisible = true">查看解析</el-button></div></div>
+      <div class="picker-selected"><strong>已选 {{ selectedFiles.length }} 项（文件夹 / 文件）</strong><div v-for="file in selectedFiles" :key="selectionKey(file)" class="picker-selected-file"><el-tag :closable="!busy && !readonly" @close="remove(file)"><a href="#" @click.prevent="preview(file)" :aria-label="`打开${file.kind === 'folder' ? '文件夹' : '文件'} ${file.name || file.fileName}`"><span v-if="file.kind === 'folder'">文件夹：</span>{{ file.name || file.fileName }}</a></el-tag><small v-if="file.kind === 'folder'">含子文件夹 · 自动纳入新增文件</small><el-button v-else type="text" size="mini" @click="preview(file)">预览</el-button></div></div>
       <p v-if="saveError" class="picker-error" role="alert">{{ saveError }}</p>
       <span slot="footer"><el-button :disabled="busy" @click="$emit('close')">关闭</el-button><el-button v-if="!readonly" type="primary" :loading="busy" :disabled="selectedFiles.length > maxFiles" @click="$emit('choose', selectedFiles)">保存挂载（{{ selectedFiles.length }}）</el-button></span>
     </el-dialog>
-    <KnowledgeFileDetails :file="details" :visible="detailsVisible" @close="detailsVisible = false" />
+    <KnowledgeFileBrowser :entries="previewEntries" :visible="previewVisible" @close="previewVisible = false" />
   </div>
 </template>
 <script>
 import kbApi from '@/features/knowledge-base/services/kbApi'
 import { formatSize } from '@/features/knowledge-base/utils/format'
-import { MAX_KNOWLEDGE_FILES, knowledgeFileUrl } from '@/utils/knowledgeFiles'
-import KnowledgeFileDetails from './KnowledgeFileDetails.vue'
+import { MAX_KNOWLEDGE_FILES } from '@/utils/knowledgeFiles'
+import KnowledgeFileBrowser from './KnowledgeFileBrowser.vue'
 export default {
-  name: 'KnowledgeFilePicker', components: { KnowledgeFileDetails },
+  name: 'KnowledgeFilePicker', components: { KnowledgeFileBrowser },
   props: { visible: Boolean, busy: Boolean, readonly: Boolean, attachedFiles: { type: Array, default: () => [] }, saveError: { type: String, default: '' } },
-  data: () => ({ query: '', selected: {}, loading: false, error: '', treeKey: 0, request: 0, details: null, detailsVisible: false, maxFiles: MAX_KNOWLEDGE_FILES }),
+  data: () => ({ query: '', selected: {}, loading: false, error: '', treeKey: 0, request: 0, previewEntries: [], previewVisible: false, maxFiles: MAX_KNOWLEDGE_FILES }),
   computed: {
     selectedFiles() { return Object.values(this.selected) },
     selectedKeys() { return this.selectedFiles.map(this.selectionKey) },
     treeProps() { return { label: 'name', isLeaf: data => data.kind !== 'folder', disabled: data => data.kind === 'more' || this.busy || this.readonly } }
   },
-  watch: { visible(value) { clearTimeout(this.timer); this.request++; this.detailsVisible = false; if (value) { this.query = ''; this.selected = Object.fromEntries(this.attachedFiles.map(file => [this.selectionKey(file), file])); this.reload() } } },
+  watch: { visible(value) { clearTimeout(this.timer); this.request++; this.previewVisible = false; if (value) { this.query = ''; this.selected = Object.fromEntries(this.attachedFiles.map(file => [this.selectionKey(file), file])); this.reload() } } },
   beforeDestroy() { clearTimeout(this.timer); this.request++ },
   methods: {
-    fileUrl(file) { return knowledgeFileUrl(file) },
+    preview(file) { this.previewEntries = [file]; this.previewVisible = true },
     selectionKey(file) { return `${file.kind === 'folder' ? 'folder' : 'file'}:${file.id}` },
     size: formatSize,
     search() { clearTimeout(this.timer); this.request++; this.timer = setTimeout(this.reload, 300) },

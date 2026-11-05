@@ -2,6 +2,7 @@ import kbApi from '@/features/knowledge-base/services/kbApi'
 export const MAX_KNOWLEDGE_FILES = 20
 export const MAX_KNOWLEDGE_CONTEXT_CHARS = 200000
 export function knowledgeFileUrl(file) {
+  if (file.kind === 'folder') return `/kb/files?shell=full&folder=${encodeURIComponent(file.id)}`
   return `/kb/parse?shell=full&view=source&file=${encodeURIComponent(file.id)}`
 }
 
@@ -104,7 +105,7 @@ export async function readKnowledgeFileReference(item) {
   if (item.kind === 'folder') {
     const folder = await kbApi.getFolder(item.id)
     return { id: folder.id, name: folder.name, kind: 'folder', recursive: true,
-      url: `/kb/files?shell=full&folder=${encodeURIComponent(folder.id)}` }
+      url: knowledgeFileUrl({ ...folder, kind: 'folder' }) }
   }
   const file = await kbApi.getFile(item.id)
   const result = await kbApi.getBlocks(item.id, { limit: 50 })

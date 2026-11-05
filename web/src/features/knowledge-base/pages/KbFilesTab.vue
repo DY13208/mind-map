@@ -106,7 +106,7 @@ export default {
   components: { KbFolderTree, KbUploadPanel, KbFileTable, KbStateBlock, KbCursorPager, KbPermissionDialog, KbBatchPermissionDialog, KbBatchDrawer },
   data() {
     return {
-      folderId: '', folderPath: [], files: [], total: null, limit: DEFAULT_LIMIT, q: '', globalSearch: '', status: '',
+      folderId: typeof this.$route.query.folder === 'string' ? this.$route.query.folder : '', folderPath: [], files: [], total: null, limit: DEFAULT_LIMIT, q: '', globalSearch: '', status: '',
       cursor: createCursorState(), loading: false, loaded: false, error: null, showUpload: false,
       aclVisible: false, aclTarget: null, statuses: FILE_STATUS, reqSeq: 0, localActiveBatches: [],
       batchAclVisible: false, batchAclTargets: [],
@@ -121,11 +121,17 @@ export default {
     batchId() { const v = this.$route.query.batch; return typeof v === 'string' && /^[0-9a-f-]{36}$/i.test(v) ? v : '' }
   },
   watch: {
+    '$route.query.folder'(id) {
+      this.globalSearch = ''; this.q = ''; this.status = ''
+      this.folderId = typeof id === 'string' ? id : ''
+      this.loadLinkedFolderPath()
+    },
     folderId() { this.reload() },
     hasActive(v) { if (v) this.poller.start(); else this.poller.stop() }
   },
   created() {
     this.poller = createPoller(() => this.refreshActive())
+    this.loadLinkedFolderPath()
     this.load()
   },
   activated() { if (this.hasActive) this.poller.start() },
@@ -135,6 +141,18 @@ export default {
     clearTimeout(this.timer)
   },
   methods: {
+    async loadLinkedFolderPath() {
+      const id = this.folderId
+      this.folderPath = []
+      if (!id) return
+      try {
+        const folder = await kbApi.getFolder(id)
+        if (this.folderId === id) this.folderPath = [{ id: folder.id, name: folder.name }]
+      } catch (error) {
+        // File listing supplies the normal access/deletion error state.
+        if (this.folderId === id) this.folderPath = [{ id, name: '挂载文件夹' }]
+      }
+    },
     onGlobalSearch(value) {
       this.globalSearch = value
       this.reqSeq += 1

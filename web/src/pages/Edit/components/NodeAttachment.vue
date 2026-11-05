@@ -1,6 +1,7 @@
 <template>
   <div>
   <KnowledgeFilePicker :visible="knowledgeVisible" :busy="knowledgeBusy" :readonly="knowledgeReadonly" :attached-files="knowledgeFiles" :save-error="knowledgeError" @close="closeKnowledgePicker" @choose="onKnowledgeFilePicked" />
+  <KnowledgeFileBrowser :visible="knowledgePreviewVisible" :entries="knowledgePreviewEntries" @close="knowledgePreviewVisible = false" />
   <input
     ref="fileInput"
     class="node-attachment-input"
@@ -15,9 +16,10 @@
 import { roomFromLocation } from '@/utils/roomLocation'
 import { attachmentUploadNotice } from '@/utils/attachmentProgressiveText'
 import KnowledgeFilePicker from './KnowledgeFilePicker.vue'
+import KnowledgeFileBrowser from './KnowledgeFileBrowser.vue'
 import { normalizeAttachmentFileName } from 'simple-mind-map/src/utils/attachmentFileName'
 import { ARCHIVE_EXTENSIONS } from 'simple-mind-map/src/utils/attachmentFileType'
-import { MAX_KNOWLEDGE_FILES, readKnowledgeFileReference, knowledgeFileUrl } from '@/utils/knowledgeFiles'
+import { MAX_KNOWLEDGE_FILES, readKnowledgeFileReference } from '@/utils/knowledgeFiles'
 import {
   getNodeAttachment,
   getRoomRevision,
@@ -123,7 +125,7 @@ function waitForAttachmentWriteRetry(attempt) {
 
 export default {
   name: 'NodeAttachment',
-  components: { KnowledgeFilePicker },
+  components: { KnowledgeFilePicker, KnowledgeFileBrowser },
   props: {
     mindMap: {
       type: Object,
@@ -140,6 +142,8 @@ export default {
     return {
       pendingNodes: [],
       knowledgeVisible: false,
+      knowledgePreviewVisible: false,
+      knowledgePreviewEntries: [],
       knowledgeBusy: false,
       knowledgeTargets: [],
       knowledgeFiles: [],
@@ -198,11 +202,8 @@ export default {
   methods: {
     onViewKnowledgeFiles(node) {
       const entries = node && node.getData ? node.getData('knowledgeFiles') || [] : []
-      if (entries.length === 1 && entries[0].kind !== 'folder') {
-        window.open(knowledgeFileUrl(entries[0]), '_blank', 'noopener')
-        return
-      }
-      this.openKnowledgePicker([node], true)
+      this.knowledgePreviewEntries = entries
+      this.knowledgePreviewVisible = true
     },
     onSelectKnowledgeFile(nodes) {
       this.openKnowledgePicker(nodes, false)
@@ -377,6 +378,8 @@ export default {
       this.knowledgeTargets = []
       this.knowledgeFiles = []
       this.knowledgeVisible = false
+      this.knowledgePreviewVisible = false
+      this.knowledgePreviewEntries = []
       this.knowledgeBusy = false
       this.knowledgeError = ''
       Object.keys(this.inflight).forEach(uid => this.abortInflight(uid))
