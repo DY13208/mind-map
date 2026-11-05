@@ -104,7 +104,19 @@ check(
 )
 check(
   '复用分支不调用 createGeneralizationChildNodes',
-  /if \(reusable\) \{[\s\S]{0,400}?\} else \{\s*layout\.createGeneralizationChildNodes/.test(genSrc)
+  // 复用分支里会先补量尺寸再算高度，代码段较长，这里只校验「reusable 分支内
+  // 没有重建、重建只发生在 else 分支」这一结构。
+  (() => {
+    const start = genSrc.indexOf('if (reusable) {')
+    const elseIdx = genSrc.indexOf('} else {', start)
+    if (start < 0 || elseIdx < 0) return false
+    const reusableBlock = genSrc.slice(start, elseIdx)
+    const elseBlock = genSrc.slice(elseIdx, elseIdx + 200)
+    return (
+      !reusableBlock.includes('layout.createGeneralizationChildNodes') &&
+      elseBlock.includes('layout.createGeneralizationChildNodes')
+    )
+  })()
 )
 check(
   '数组对象换了（远端快照替换）时强制重建',
@@ -112,7 +124,12 @@ check(
 )
 check(
   '复用分支重算了 childrenAreaHeight',
-  /if \(reusable\) \{[\s\S]{0,400}?childrenAreaHeight/.test(genSrc)
+  (() => {
+    const start = genSrc.indexOf('if (reusable) {')
+    const elseIdx = genSrc.indexOf('} else {', start)
+    if (start < 0 || elseIdx < 0) return false
+    return genSrc.slice(start, elseIdx).includes('childrenAreaHeight')
+  })()
 )
 
 // ---- 3. 假空保护 ----

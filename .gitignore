@@ -143,6 +143,7 @@ output/*.py
 !/web/tests/generalization-subtree-delete.test.cjs
 !/web/tests/generalization-delete-guard-404.test.cjs
 !/web/tests/generalization-remove-residue.test.cjs
+!/web/tests/generalization-child-overlap.test.cjs
 
 # 环境配置与备份
 .env

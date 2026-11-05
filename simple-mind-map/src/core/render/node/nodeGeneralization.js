@@ -252,7 +252,6 @@ function createGeneralizationNode() {
     cur.generalizationNode.parent = this
     // 结构没变就别拆建：实时渲染会在每次输入后整树重排，如果这里每次都
     // child.remove() + 重建，正在编辑的节点会被拆掉，输入内容随之丢失。
-    // 文字/样式变化的重新测量由节点自身的 render 完成。
     const structureSig = generalizationStructureSignature(item)
     const kids = cur.generalizationNode.children
     const reusable =
@@ -263,6 +262,32 @@ function createGeneralizationNode() {
       kids.length === item.children.length &&
       kids.every(child => child && child.group)
     if (reusable) {
+      // 复用实例就不会再走 createNode，而 createNode 才是负责 getSize 的地方。
+      // 不补这一步，文字变长/换行的节点仍按旧宽高参与排版，后一个兄弟就被放到
+      // 前一个身上 —— 表现就是概要后面的子节点重叠。这里对数据变过的子节点
+      // 重新量一次尺寸（判定方式与 Base.checkIsNodeDataChange 一致，忽略
+      // isActive/expand，避免选中态变化引起无谓重算）。
+      kids.forEach(child => {
+        if (!child || typeof child.getSize !== 'function') return
+        const snapshot = child.nodeDataSnapshot
+        // 没有快照说明这个实例还没量过尺寸，必须量；有快照则按数据是否变过判断。
+        const dataDirty =
+          !snapshot ||
+          typeof layout.checkIsNodeDataChange !== 'function' ||
+          layout.checkIsNodeDataChange(
+            snapshot,
+            child.nodeData && child.nodeData.data
+          )
+        // 高度缺失/为 0 的节点如果直接参与排版，会所有兄弟叠在同一行。
+        const sizeMissing = !(child.height > 0)
+        if (!dataDirty && !sizeMissing) return
+        child.getSize()
+        child.needLayout = true
+        // 子节点自己也可能挂着嵌套概要，尺寸变了要一起刷新
+        if (typeof child.updateGeneralization === 'function') {
+          child.updateGeneralization()
+        }
+      })
       const len = kids.length
       cur.generalizationNode.childrenAreaHeight = len
         ? kids.reduce((h, item2) => h + item2.height, 0) +
