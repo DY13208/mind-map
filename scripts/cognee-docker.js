@@ -98,7 +98,7 @@ async function checkCogneeHealth(port = DEFAULT_PORT) {
 
 function hasDocker() {
   try {
-    execSync('docker info', { stdio: 'ignore' })
+    execSync('docker info', { stdio: 'ignore', windowsHide: true })
     return true
   } catch (e) {
     return false
