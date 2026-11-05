@@ -84,11 +84,22 @@ function collectDeleteRoots(activeNodes = [], commandName = 'REMOVE_NODE', opts 
   roots.forEach(item => {
     item.descendantUids.forEach(id => descendantOfSelected.add(id))
   })
-  const filtered = roots.filter(item => !descendantOfSelected.has(item.uid))
+  // 删概要绝不能连带删宿主。
+  // 概要（及其虚拟子树）只是挂在 owner 上的一条 annotation，数据在
+  // owner.generalization 里；owner 是主树上的真实节点。用户把概要一起选中
+  // （或 active 列表里刚好残留了 owner）时，roots 会带上 owner，
+  // 生成 node.delete(owner) → 服务端把 owner 连同整棵子树删掉 ——
+  // 这正是「删概要却把绑定节点全删了」。
+  // 只要本次有概要进入 owners，就把这些 owner 从删除根里剔除。
+  const protectedOwnerUids = new Set(owners.map(owner => nodeUid(owner)).filter(Boolean))
+  const filtered = roots.filter(
+    item => !descendantOfSelected.has(item.uid) && !protectedOwnerUids.has(item.uid)
+  )
   return {
     command: commandName,
     roots: filtered,
     owners,
+    protectedOwnerUids: Array.from(protectedOwnerUids),
     rootUids: filtered.map(item => item.uid),
     descendantUids: filtered.reduce((list, item) => list.concat(item.descendantUids), [])
   }
