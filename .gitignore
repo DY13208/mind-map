@@ -148,6 +148,7 @@ output/*.py
 !/web/tests/generalization-nested-overlap.test.cjs
 !/web/tests/generalization-move.test.cjs
 !/web/tests/generalization-delete-protect-owner.test.cjs
+!/web/tests/generalization-subtree-spacing.test.cjs
 
 # 环境配置与备份
 .env

@@ -55,11 +55,24 @@ function extractFn(src, name) {
 }
 
 const layoutFnSrc = extractFn(baseRaw, 'layoutGeneralizationChildren')
+const measureFnSrc = extractFn(baseRaw, 'measureGeneralizationTree')
+const subtreeHFnSrc = extractFn(baseRaw, 'generalizationSubtreeHeight')
 check('抽出布局函数 layoutGeneralizationChildren', !!layoutFnSrc)
 
 const MARGIN = 20
-const layoutTarget = {}
-new Function('target', `${layoutFnSrc}\ntarget.layoutGeneralizationChildren = layoutGeneralizationChildren`)(layoutTarget)
+const layoutTarget = {
+  getMarginX: () => MARGIN,
+  getMarginY: () => MARGIN,
+  getNestedGeneralizationExtent: () => 0
+}
+new Function('target', `
+  ${measureFnSrc}
+  ${subtreeHFnSrc}
+  ${layoutFnSrc}
+  target.measureGeneralizationTree = measureGeneralizationTree
+  target.generalizationSubtreeHeight = generalizationSubtreeHeight
+  target.layoutGeneralizationChildren = layoutGeneralizationChildren
+`)(layoutTarget)
 const layoutGeneralizationChildren = layoutTarget.layoutGeneralizationChildren
 
 // 布局函数内部是 this.layoutGeneralizationChildren 递归调用，所以必须挂到
@@ -67,6 +80,18 @@ const layoutGeneralizationChildren = layoutTarget.layoutGeneralizationChildren
 function runLayout(host, gNode, dir = 'h', isLeft = false) {
   if (!host.layoutGeneralizationChildren) {
     host.layoutGeneralizationChildren = layoutGeneralizationChildren
+  }
+  // 布局内部会调 this.generalizationSubtreeHeight / this.measureGeneralizationTree
+  if (!host.generalizationSubtreeHeight) {
+    host.generalizationSubtreeHeight = layoutTarget.generalizationSubtreeHeight
+  }
+  if (!host.measureGeneralizationTree) {
+    host.measureGeneralizationTree = layoutTarget.measureGeneralizationTree
+  }
+  if (!host.getMarginX) host.getMarginX = layoutTarget.getMarginX
+  if (!host.getMarginY) host.getMarginY = layoutTarget.getMarginY
+  if (!host.getNestedGeneralizationExtent) {
+    host.getNestedGeneralizationExtent = layoutTarget.getNestedGeneralizationExtent
   }
   return layoutGeneralizationChildren.call(host, gNode, dir, isLeft)
 }

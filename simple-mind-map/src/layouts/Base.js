@@ -464,9 +464,11 @@ class Base {
         if (isRoot || !cur._node) return
         const len =
           cur.data.expand === false ? 0 : cur._node.children.length
+        // 按「子树高度」累加，不是节点自身高度：自己有子节点的兄弟占用更多
+        // 纵向空间，只算自身高度会把下一个兄弟排进它的子树里（多层重叠）。
         cur._node.childrenAreaHeight = len
           ? cur._node.children.reduce((h, item) => {
-              return h + item.height
+              return h + this.generalizationSubtreeHeight(item, 'h')
             }, 0) +
             (len + 1) * this.getMarginY(gNode.layerIndex + layerIndex + 1)
           : 0
@@ -477,7 +479,7 @@ class Base {
     const len = gNode.children.length
     gNode.childrenAreaHeight = len
       ? gNode.children.reduce((h, item) => {
-          return h + item.height
+          return h + this.generalizationSubtreeHeight(item, 'h')
         }, 0) +
         (len + 1) * this.getMarginY(gNode.layerIndex + 1)
       : 0
@@ -567,6 +569,26 @@ class Base {
     }
   }
 
+  // 概要子树在纵向（'h' 布局）占用的高度 / 横向（'v' 布局）占用的宽度。
+  // 叶子节点退化为自身尺寸。
+  //
+  // 必须用这个而不是 node.height / node.width：一个「自己有子节点」的兄弟，
+  // 它向下（或向右）占用的空间远大于自身尺寸。只按自身尺寸排下一个兄弟，
+  // 下一个兄弟就会被摆进它的子树里 —— 表现就是多层节点叠在一起。
+  generalizationSubtreeHeight(node, dir = 'h') {
+    if (!node) return 0
+    const size = this.measureGeneralizationTree(node, dir)
+    const value = size && typeof size.height === 'number' ? size.height : node.height
+    return value > 0 ? value : node.height || 0
+  }
+
+  generalizationSubtreeWidth(node, dir = 'v') {
+    if (!node) return 0
+    const size = this.measureGeneralizationTree(node, dir)
+    const value = size && typeof size.width === 'number' ? size.width : node.width
+    return value > 0 ? value : node.width || 0
+  }
+
   // 定位概要节点的子树
   layoutGeneralizationChildren(gNode, dir = 'h', isLeft = false) {
     if (!gNode || gNode.getData('expand') === false) return
@@ -574,27 +596,36 @@ class Base {
     const marginX = this.getMarginX(gNode.layerIndex + 1)
     const marginY = this.getMarginY(gNode.layerIndex + 1)
     if (dir === 'v') {
-      const areaW = gNode.children.reduce((w, item) => w + item.width, 0)
+      // 横向排布：每个子节点按「子树宽度」分档，节点在档内水平居中。
+      const bands = gNode.children.map(cur => this.generalizationSubtreeWidth(cur, dir))
+      const areaW = bands.reduce((w, band) => w + band, 0)
       let left =
         gNode.left + gNode.width / 2 - (areaW + (gNode.children.length + 1) * marginY) / 2
       let totalLeft = left + marginY
-      gNode.children.forEach(cur => {
-        cur.left = totalLeft
+      gNode.children.forEach((cur, i) => {
+        const bandW = bands[i]
+        cur.left = totalLeft + (bandW - cur.width) / 2
         cur.top = gNode.top + gNode.height + marginX
-        totalLeft += cur.width + marginY
+        totalLeft += bandW + marginY
         this.layoutGeneralizationChildren(cur, dir, isLeft)
       })
       return
     }
-    const areaH = gNode.childrenAreaHeight || gNode.height
+    // 纵向排布：每个子节点按「子树高度」分档，节点在档内垂直居中。
+    // 居中很关键：节点自己的子树是以它为中心向上下展开的，如果把它摆在档顶，
+    // 子树就会向上溢出压到上一个兄弟。
+    const bands = gNode.children.map(cur => this.generalizationSubtreeHeight(cur, dir))
+    const bandTotal = bands.reduce((h, band) => h + band, 0)
+    const areaH = gNode.childrenAreaHeight || bandTotal || gNode.height
     let top = gNode.top + gNode.height / 2 - areaH / 2
     let totalTop = top + marginY
-    gNode.children.forEach(cur => {
+    gNode.children.forEach((cur, i) => {
+      const bandH = bands[i]
       cur.left = isLeft
         ? gNode.left - marginX - cur.width
         : gNode.left + gNode.width + marginX
-      cur.top = totalTop
-      totalTop += cur.height + marginY
+      cur.top = totalTop + (bandH - cur.height) / 2
+      totalTop += bandH + marginY
       this.layoutGeneralizationChildren(cur, dir, isLeft)
     })
   }

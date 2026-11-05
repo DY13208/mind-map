@@ -213,8 +213,17 @@ function refreshGeneralizationSubtree(gNode, layout, depth = 0) {
   const collapsed =
     typeof gNode.getData === 'function' && gNode.getData('expand') === false
   const len = collapsed ? 0 : kids.length
+  // 按「子树高度」累加，不是节点自身高度：自己有子节点的兄弟占用更多纵向
+  // 空间，只算自身高度会把下一个兄弟排进它的子树里（多层重叠）。
   gNode.childrenAreaHeight = len
-    ? kids.reduce((h, item) => h + item.height, 0) +
+    ? kids.reduce(
+        (h, item) =>
+          h +
+          (typeof layout.generalizationSubtreeHeight === 'function'
+            ? layout.generalizationSubtreeHeight(item, 'h')
+            : item.height),
+        0
+      ) +
       (len + 1) * layout.getMarginY((gNode.layerIndex || 0) + 1)
     : 0
 }
