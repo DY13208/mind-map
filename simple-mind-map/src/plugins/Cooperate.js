@@ -1245,15 +1245,27 @@ class Cooperate {
     }
     return (async () => {
       const locations = new Map(), deleteGuards = new Map()
-      const ids = new Set(targets.map(item => item.uid))
+      // 概要虚拟子树里的节点没有服务端节点行，拿去 nodes/query 查守卫会 404
+      // （NODE_NOT_FOUND），守卫一抛错整个移动就被中止 —— 表现就是「概要里的
+      // 节点拖不动」。这类节点的父子关系存在 owner 的 generalization 里，
+      // 不需要单节点写保护，直接收集实例时就把它们排除掉。
+      const ids = new Set()
+      const addUid = node => {
+        if (!node || typeof node.getData !== 'function') return
+        if (isGeneralizationScopeNode(node)) return
+        const uid = node.getData('uid')
+        if (uid) ids.add(uid)
+      }
+      targets.forEach(item => addUid(item.node))
       if (moving) {
-        args.forEach(value => { if (value && value.getData) ids.add(value.getData('uid')) })
+        args.forEach(value => {
+          if (Array.isArray(value)) value.forEach(addUid)
+          else addUid(value)
+        })
         explicit.forEach(node => {
+          addUid(node)
           if (node.parent) {
-            ids.add(node.parent.getData('uid'))
-            if (node.parent.parent) ids.add(node.parent.parent.getData('uid'))
-            const siblings = node.parent.children || [], index = siblings.indexOf(node)
-            siblings.slice(Math.max(0, index - 2), index + 3).forEach(item => ids.add(item.getData('uid')))
+            addUid(node.parent.parent || null)
           }
         })
       }
@@ -8770,10 +8782,30 @@ class Cooperate {
     }
     const origins = (this.pendingMoveCommand && this.pendingMoveCommand.origins) || []
     const originByUid = new Map(origins.map(item => [item.uid, item]))
-    const moves = this.collectMovesFromCommand(name, args)
+    const collected = this.collectMovesFromCommand(name, args)
     this.pendingMoveCommand = null
+    // 概要虚拟子树内的移动不能发 node.move：这些节点没有服务端节点行，
+    // 服务端 resolveParent/getLive 拿不到行会返回 NODE_DELETED，前端表现为
+    // 「拖完又弹回去」。它们的父子关系本来就存在 owner 的 generalization 里，
+    // 整体同步 owner 即可。
+    const moves = []
+    const virtualOwners = new Set()
+    collected.forEach(item => {
+      if (isGeneralizationScopeNode(item.node)) {
+        const owner = generalizationScopeOwner(item.node)
+        if (owner) virtualOwners.add(owner)
+        return
+      }
+      moves.push(item)
+    })
+    if (virtualOwners.size) {
+      virtualOwners.forEach(owner => this.syncHttpGeneralization(owner))
+    }
     if (!moves.length) {
-      v2Trace('local.move.skip', { name, reason: 'no-nodes' })
+      v2Trace('local.move.skip', {
+        name,
+        reason: virtualOwners.size ? 'generalization-only' : 'no-nodes'
+      })
       return Promise.resolve()
     }
     const submitOne = item => {

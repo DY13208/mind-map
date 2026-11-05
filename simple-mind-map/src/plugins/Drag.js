@@ -504,7 +504,26 @@ class Drag extends Base {
   // 节点由树转换成数组，从子节点到根节点
   nodeTreeToList() {
     const list = []
-    bfsWalk(this.mindMap.renderer.root, node => {
+    // 概要子树里的节点也要能作为拖放目标（前后兄弟、作为子节点）。
+    // 它们不在主树 children 上，bfsWalk(root) 遍历不到 —— 只走主树的话，
+    // 概要里的节点根本找不到落点，表现就是「概要后面的节点无法移动」。
+    //
+    // 但只允许「概要内拖到概要内」：把主树的真实节点拖进概要子树会让它从主树
+    // 消失，而它对应的服务端节点行还在（会重复出现/同步失败）。所以拖拽源在
+    // 概要子树里时，落点也只在概要子树里找；反之亦然。
+    // 概要节点自身仍排除：它不是真实节点，落点用它的子节点（前后兄弟）即可。
+    const renderer = this.mindMap.renderer
+    const isVirtual = node => {
+      let cur = node
+      let guard = 0
+      while (cur && guard++ < 1000) {
+        if (cur.isGeneralization) return true
+        cur = cur.parent
+      }
+      return false
+    }
+    const draggingVirtual = (this.beingDragNodeList || []).some(isVirtual)
+    const collect = node => {
       if (!node || node.isGeneralization) {
         return
       }
@@ -512,11 +531,17 @@ class Drag extends Base {
       if (this.checkIsInBeingDragNodeList(node)) {
         return
       }
+      if (isVirtual(node) !== draggingVirtual) return
       if (!list[node.layerIndex]) {
         list[node.layerIndex] = []
       }
       list[node.layerIndex].push(node)
-    })
+    }
+    if (renderer && typeof renderer.forEachRenderedNode === 'function') {
+      renderer.forEachRenderedNode(collect)
+    } else {
+      bfsWalk(renderer.root, collect)
+    }
     this.nodeList = list.reduceRight((res, cur) => {
       return [...res, ...cur]
     }, [])
