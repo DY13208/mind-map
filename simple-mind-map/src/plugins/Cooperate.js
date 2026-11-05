@@ -1224,7 +1224,19 @@ class Cooperate {
     const renderer = this.mindMap.renderer
     const active = (renderer.activeNodeList || []).slice()
     const explicit = Array.isArray(args[0]) ? args[0] : args[0] && args[0].getData ? [args[0]] : active
-    const targets = deleting ? collabDelete.collectDeleteRoots(explicit, name).roots : explicit.map(node => ({ uid: node.getData('uid'), node }))
+    // 写保护守卫要拿目标 uid 去服务端查 node 行（nodes/query）。概要虚拟子树
+    // 内的节点没有服务端节点行，查出来是 404 NODE_NOT_FOUND，守卫一抛错整个
+    // 删除就被中止（「删不掉」）。这类节点的写入走 owner 的 generalization
+    // 通道，本来就不需要单节点写保护，这里直接把它们排除在守卫目标之外。
+    const deleteSelection = deleting
+      ? collabDelete.collectDeleteRoots(explicit, name, {
+          isVirtualSubtree: node => isGeneralizationScopeNode(node)
+        })
+      : null
+    const targets = deleting
+      ? deleteSelection.roots
+      : explicit.map(node => ({ uid: node.getData('uid'), node }))
+    // 纯虚拟子树删除时 targets 为空：没有需要守卫的真实节点，直接放行命令。
     if (!targets.length) return
     if (this._guardIntentActive) return Promise.resolve(false)
     this._guardIntentActive = true
