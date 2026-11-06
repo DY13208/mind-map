@@ -3440,10 +3440,22 @@ class Cooperate {
       // setData/updateData can replace the local tree without advancing the
       // server head. Rebind the queued op to that same room's current model;
       // returning false would still let the adapter acknowledge an unapplied op.
+      //
+      // 必须给这个等待加硬边界：渲染只要有一次没能正常收尾，isRendering 就会
+      // 一直是 true，waitV2RendererReady 也等不到 render_end，这里就会永远
+      // 转下去 —— 表现为「点删除后页面卡死」。渲染侧已补了失败释放，这里
+      // 再兜一层，超限就放弃这次远端应用（本地稍后靠全量刷新对齐）。
+      let waited = 0
       while (true) {
         if (!this.rebaseV2RemoteApplyContext(context)) return false
         if (await this.waitV2RendererReady(context)) {
           if (this.isV2RemoteApplyCurrent(context)) break
+        }
+        waited += 1
+        if (waited > 200) {
+          v2Trace('remote.render-wait.abort', { type, opRevision, waited })
+          console.warn('[mind-map] renderer never became ready, skip remote op', type)
+          return false
         }
       }
       const currentRevision = Number(this.lastAppliedVersion) || 0

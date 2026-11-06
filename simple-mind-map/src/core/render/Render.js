@@ -880,18 +880,59 @@ class Render {
     const layoutDiagnostic = performanceObserver.enabled()
     const layoutShape = layoutDiagnostic ? performanceObserver.treeShape(this.renderTree) : null
     const layoutStarted = layoutDiagnostic ? performance.now() : 0
-    this.layout.doLayout(root => {
-      if (layoutDiagnostic) performanceObserver.record('layout', {
-        ...layoutShape,
-        layout: this.layout instanceof CompactStructure ? 'compactStructure' : this.mindMap.opt.layout,
-        compactPreference: this.mindMap.opt.compactLayout,
-        elapsedMs: performance.now() - layoutStarted,
-        superseded: renderGeneration !== this._renderGeneration
-      })
+    // 布局可能抛错，而各个 layout 的 doLayout 在抛错时**不会回调** callback
+    // （性能分支只是 catch 后 errorHandler，非性能分支的 asyncRun 也停在出错
+    // 的那一步）。isRendering 只在 callback 里复位，所以一次布局异常就会让它
+    // 永久为 true：
+    //   - 之后每次 render() 都走 hasWaitRendering 分支，画布再也不更新；
+    //   - 协作层的 applyV2RemoteOperation 在 while(true) 里等
+    //     waitV2RendererReady（要求 !isRendering），于是死转 —— 表现为
+    //     「点删除后整个页面卡死」。
+    // 这里兜住：布局抛错/不回调时，把这一轮标记为失败并释放渲染状态。
+    let layoutSettled = false
+    let layoutWatchdog = null
+    const releaseOnLayoutFailure = err => {
+      if (layoutSettled) return
+      layoutSettled = true
+      if (layoutWatchdog) {
+        clearTimeout(layoutWatchdog)
+        layoutWatchdog = null
+      }
+      if (err) console.error('[mind-map] layout failed', err)
+      if (this._destroyed) return
       if (renderGeneration !== this._renderGeneration) {
         this.finishSupersededRender(renderGeneration)
         return
       }
+      this.isRendering = false
+      this.hasWaitRendering = false
+      this.mindMap.emit('node_tree_render_end', { reason: 'layout-error' })
+    }
+    // 性能分支的 doLayout 把异常交给 errorHandler 后既不回调也不抛出，
+    // 上面的 try/catch 兜不住。这里加看门狗：一轮布局迟迟不回调就强制释放，
+    // 避免协作层的 while(true) 永远等一个不会再来的 render_end。
+    layoutWatchdog = setTimeout(() => {
+      if (this._destroyed || layoutSettled) return
+      releaseOnLayoutFailure(new Error('layout did not finish in time'))
+    }, 15000)
+    try {
+      this.layout.doLayout(root => {
+        layoutSettled = true
+        if (layoutWatchdog) {
+          clearTimeout(layoutWatchdog)
+          layoutWatchdog = null
+        }
+        if (layoutDiagnostic) performanceObserver.record('layout', {
+          ...layoutShape,
+          layout: this.layout instanceof CompactStructure ? 'compactStructure' : this.mindMap.opt.layout,
+          compactPreference: this.mindMap.opt.compactLayout,
+          elapsedMs: performance.now() - layoutStarted,
+          superseded: renderGeneration !== this._renderGeneration
+        })
+        if (renderGeneration !== this._renderGeneration) {
+          this.finishSupersededRender(renderGeneration)
+          return
+        }
       const stale = destroyStaleLayoutNodes(this.lastNodeCache, this.nodeCache)
       stale.destroyed.forEach(uid => {
         const prev = this.lastNodeCache[uid]
@@ -935,7 +976,10 @@ class Render {
         isLayoutSwitch || forceOverviewPaint,
         asyncPaint
       )
-    })
+      })
+    } catch (err) {
+      releaseOnLayoutFailure(err)
+    }
     this.emitNodeActiveEvent()
   }
 
@@ -2629,6 +2673,17 @@ class Render {
           this.removeNodeFromActiveList(node)
           this.mindMap.command.recordContentChange?.({ removed: [node] })
           removeFromParentNodeData(node)
+          // 同步父节点的实例数组。
+          // removeFromParentNodeData 只改 nodeData.children，实例数组还留着被删
+          // 节点。概要子树的节点尤其危险：它的 parent 是概要节点，而概要子树
+          // 的兄弟激活/布局/lru 都按实例数组走 —— 残留的已删实例会被重新激活
+          // 或参与排版，它背后的 SVG group 可能已经移除，渲染随即抛错；
+          // isRendering 卡在 true，协作层就在 while 里死等，页面表现为卡死。
+          const parentNode = node.parent
+          if (parentNode && Array.isArray(parentNode.children)) {
+            const idx = parentNode.children.indexOf(node)
+            if (idx > -1) parentNode.children.splice(idx, 1)
+          }
           i--
         }
       }
@@ -2720,11 +2775,29 @@ class Render {
         this.mindMap.command.recordContentChange?.({ removed: [{ data: node.nodeData.data, children: [] }] })
         const parent = node.parent
         const index = getNodeDataIndex(node)
-        parent.nodeData.children.splice(
-          index,
-          1,
-          ...(node.nodeData.children || [])
-        )
+        if (index > -1) {
+          parent.nodeData.children.splice(
+            index,
+            1,
+            ...(node.nodeData.children || [])
+          )
+        } else if (Array.isArray(parent.nodeData.children)) {
+          // 索引对不上时按 uid 过滤，绝不 splice(-1)（那会删掉最后一个兄弟）
+          const uid = node.getData('uid')
+          const kept = parent.nodeData.children.filter(
+            item => !(item && item.data && item.data.uid === uid)
+          )
+          parent.nodeData.children.splice(
+            0,
+            parent.nodeData.children.length,
+            ...kept
+          )
+        }
+        // 同步实例数组（同 removeNode 的理由）
+        if (Array.isArray(parent.children)) {
+          const i = parent.children.indexOf(node)
+          if (i > -1) parent.children.splice(i, 1)
+        }
       }
     }
     this.activeNodeList = []
@@ -2749,10 +2822,20 @@ class Render {
       this.mindMap.opt.deleteNodeActive
     ) {
       const node = this.activeNodeList[0]
-      const broList = node.parent.children
+      const broList = node.parent && Array.isArray(node.parent.children)
+        ? node.parent.children
+        : []
       const nodeIndex = getNodeIndexInNodeList(node, broList)
-      // 如果后面有兄弟节点
-      if (nodeIndex < broList.length - 1) {
+      // 索引拿不到（实例数组与数据不同步、或概要子树的兄弟还没重建）时，
+      // 绝不能按 -1 去算 broList[nodeIndex + 1] —— 那会取到 broList[0]，
+      // 可能是刚删掉的节点或另一个不该激活的节点，后续渲染会引用已移除的
+      // DOM，进而把渲染卡住。这种情况退回激活父节点。
+      if (nodeIndex === -1) {
+        needActiveNode = node.parent && !node.parent.isGeneralization
+          ? node.parent
+          : null
+      } else if (nodeIndex < broList.length - 1) {
+        // 如果后面有兄弟节点
         needActiveNode = broList[nodeIndex + 1]
       } else {
         // 如果前面有兄弟节点

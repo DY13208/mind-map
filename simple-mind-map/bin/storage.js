@@ -1663,8 +1663,21 @@ async function initSchema() {
       return
     } catch (err) {
       lastErr = err
-      if (err.code !== '23505' && err.code !== '42P07') throw err
-      await new Promise(resolve => setTimeout(resolve, 40 * (attempt + 1)))
+      // 23505 唯一冲突 / 42P07 对象已存在：另一个进程刚建好。
+      // 40P01 deadlock / 40001 序列化失败：多个进程（collab / mcp / ai）
+      // 同时启动、并发对同一批表做 DDL，PostgreSQL 会互等 ShareLock 直到判定
+      // 死锁，并把其中一个连接杀掉。原来只重试前两个码，死锁会直接把进程
+      // 顶下去 —— gateway 重启 collab，期间前端的协作请求全部挂起，
+      // 表现为「操作卡死」。这两类必须重试。
+      if (
+        err.code !== '23505' &&
+        err.code !== '42P07' &&
+        err.code !== '40P01' &&
+        err.code !== '40001'
+      ) {
+        throw err
+      }
+      await new Promise(resolve => setTimeout(resolve, 200 * (attempt + 1)))
     }
   }
   throw lastErr

@@ -153,6 +153,7 @@ output/*.py
 !/web/tests/generalization-move.test.cjs
 !/web/tests/generalization-delete-protect-owner.test.cjs
 !/web/tests/generalization-subtree-spacing.test.cjs
+!/web/tests/generalization-delete-freeze.test.cjs
 
 # 环境配置与备份
 .env
@@ -186,5 +187,7 @@ output/*.py
 *.spec.*
 /tests/
 /simple-mind-map/test/
-/web/tests/
 /web/scripts/test*.cjs
+
+# 概要相关回归测试（放在末尾，覆盖上面 /web/tests/ 的忽略）
+!/web/tests/generalization-*.test.cjs
