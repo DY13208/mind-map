@@ -25,13 +25,13 @@ async function main() {
         await new Promise(resolve => setTimeout(resolve, 300))
       }
     }
-    sql(`create table rooms(room_key text primary key,folder_id text,deleted_at timestamptz);
+    sql(`create table rooms(room_key text primary key,folder_id text,deleted_at timestamptz,owner_id text);
       create table folder_members(folder_id text,user_id text,role text);
       create table room_members(room_key text not null references rooms, user_id text not null,role text not null,
         direct_role text,team_role text,folder_role text,override_role text,acl_v2 boolean not null default false,
         direct_role_archive text,source text default 'direct_share',source_team_id text,source_folder_id text,
         created_at timestamptz default now(),updated_at timestamptz default '2000-01-01',primary key(room_key,user_id));
-      insert into rooms values('room','folder',null);
+      insert into rooms values('room','folder',null,'owner');
       insert into folder_members values
         ('folder','manager','editor'),('folder','viewer','editor'),('folder','editor','viewer'),
         ('folder','inherit','viewer'),('folder','legacy','editor'),('folder','owner','editor');
@@ -54,20 +54,20 @@ async function main() {
       assert.equal(byId(id).role, acl.resolveMemberRole(byId(id)), id + ' agrees with authorization')
     }
     for (const row of initial) {
-      assert.equal(byId(row.user_id).override_role, row.override_role, 'startup never changes overrides')
-      assert.equal(byId(row.user_id).acl_v2, row.acl_v2, 'startup never changes ACL model')
+      assert.equal(byId(row.user_id).override_role, null, 'override is frozen as a direct role')
+      assert.equal(byId(row.user_id).acl_v2, false, 'all rows are independent direct grants')
     }
-    assert.equal(byId('manager').source, 'override')
-    assert.equal(byId('viewer').source, 'override')
-    assert.equal(byId('inherit').source, 'inherit')
-    assert.equal(byId('no-folder').direct_role, null, 'legacy backfill cannot manufacture a V2 direct grant')
+    assert.equal(byId('manager').source, 'direct_share')
+    assert.equal(byId('viewer').source, 'direct_share')
+    assert.equal(byId('inherit').source, 'direct_share')
+    assert.equal(byId('no-folder').direct_role, 'viewer', 'preserve the effective viewer override')
     assert.equal(byId('no-team').team_role, null, 'legacy backfill cannot manufacture a V2 team grant')
     sql('select pg_sleep(0.02);' + startup)
     assert.deepEqual(snapshot(), first, 'repeated startup must not rewrite unchanged rows or timestamps')
     sql(`update folder_members set role='editor' where user_id='inherit'; update folder_members set role='viewer' where user_id='manager';` + startup)
     const changed = snapshot()
     assert.equal(changed.find(row => row.user_id === 'manager').role, 'manager', 'folder changes cannot downgrade explicit manager')
-    assert.equal(changed.find(row => row.user_id === 'inherit').role, 'editor', 'inherit still follows folder changes')
+    assert.equal(changed.find(row => row.user_id === 'inherit').role, 'viewer', 'folder changes no longer change file grants')
     const staleRows = initial.filter(row => ['manager','viewer'].includes(row.user_id))
     const listed = await acl.listMembers({ query: async () => ({ rows: staleRows }) }, 'room')
     assert.deepEqual(listed.map(row => row.role).sort(), ['manager','viewer'], 'list reads through previously corrupted summaries')

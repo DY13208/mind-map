@@ -119,7 +119,6 @@ function createFileSystem(options = {}) {
     }
     const userId = roomAcl.normalizeUserId(input.userId || '')
     const teamId = String(input.teamId || input.team_id || '').trim()
-    const teamMembers = Array.isArray(input.teamMembers) ? input.teamMembers : []
     const folderId = parseFolderId(input.folderId || input.folder_id)
     if (await store.isDeleted(roomKey)) {
       throw fsError('ROOM_DELETED', '房间已删除，如需重建请使用新房间号', 409)
@@ -162,37 +161,6 @@ function createFileSystem(options = {}) {
       if (userId) {
         await store.insertMember(
           { room_key: roomKey, user_id: userId, role: 'owner' },
-          db
-        )
-      }
-      if (folderId && store.listFolderMembers) {
-        const inherited = await store.listFolderMembers(folderId)
-        const aclDb =
-          db && (typeof db.query === 'function' || Array.isArray(db.members))
-            ? db
-            : store
-        for (const member of inherited) {
-          if (!member.user_id || member.user_id === userId) continue
-          await roomAcl.setFolderRole(
-            aclDb,
-            roomKey,
-            member.user_id,
-            member.role,
-            folderId
-          )
-        }
-      }
-      for (const member of teamMembers) {
-        const memberId = roomAcl.normalizeUserId(member.userId || member.user_id)
-        if (!memberId || memberId === userId) continue
-        await store.insertMember(
-          {
-            room_key: roomKey,
-            user_id: memberId,
-            role: 'editor',
-            source: 'team',
-            source_team_id: teamId
-          },
           db
         )
       }
@@ -265,7 +233,7 @@ function createFileSystem(options = {}) {
       }
     }
     const userId = roomAcl.normalizeUserId(input.userId || '')
-    const bypass = !!input.bypass || !userId
+    const bypass = !!input.bypass
     const q = String(input.q || input.search || '').trim()
     const folderRaw = input.folderId
     const folderFilter =
@@ -316,7 +284,7 @@ function createFileSystem(options = {}) {
       return {
         ...row,
         role,
-        legacy_open: list.length === 0,
+        legacy_open: false,
         owner_user_id: (owner && owner.user_id) || row.owner_id || '',
         owner_name: (owner && owner.user_id) || row.owner_id || ''
       }
@@ -385,41 +353,17 @@ function createFileSystem(options = {}) {
       stateParam = params.length
       if (!opts.bypass) {
         userParam = stateParam
-        if (kind === 'trash') {
-          where += ` and (
-            exists (
-              select 1 from room_members m
-              where m.room_key = r.room_key
-                and m.user_id = $${userParam}
-                and m.role = 'owner'
-            )
-            or not exists (
-              select 1 from room_members m where m.room_key = r.room_key
-            )
-          )`
-        } else if (opts.shared) {
-          where += ` and exists (
-            select 1 from room_members m
-            where m.room_key = r.room_key
-              and m.user_id = $${userParam}
-              and m.role in ('manager', 'editor', 'viewer')
-          )`
-        } else {
-          where += ` and (
-            exists (
-              select 1 from room_members m
-              where m.room_key = r.room_key and m.user_id = $${userParam}
-            )
-            or not exists (
-              select 1 from room_members m where m.room_key = r.room_key
-            )
-          )`
-        }
+        const roles = kind === 'trash' ? "('owner')" : opts.shared
+          ? "('manager', 'editor', 'viewer')" : "('owner', 'manager', 'editor', 'viewer')"
+        where += ` and exists (
+          select 1 from room_members m
+          where m.room_key = r.room_key and m.user_id = $${userParam}
+            and m.role in ${roles}
+        )`
       } else if (opts.shared) {
-        // bypass 时「与我共享」没有当前用户语义，返回空集。
         where += ' and false'
       }
-    } else if (opts.shared) {
+    } else if (!opts.bypass || opts.shared) {
       where += ' and false'
     }
     if (kind === 'recent') {
@@ -465,8 +409,8 @@ function createFileSystem(options = {}) {
           'my.override_role',
           'my.acl_v2'
         )} as role,
-         (not exists (select 1 from room_members mx where mx.room_key = r.room_key)) as legacy_open`
-      : `, null::text as role, true as legacy_open`
+         false as legacy_open`
+      : `, null::text as role, false as legacy_open`
     const stateSelect = stateParam
       ? `, us.is_favorite as is_favorite, us.last_opened_at as last_opened_at`
       : `, false as is_favorite, null::timestamptz as last_opened_at`
@@ -521,12 +465,12 @@ function createFileSystem(options = {}) {
       throw fsError('ROOM_TRASHED', '房间已在回收站', 409)
     }
     const userId = roomAcl.normalizeUserId(input.userId || '')
-    const bypass = !!input.bypass || !userId
+    const bypass = !!input.bypass
     let role = null
-    let legacyOpen = true
+    let legacyOpen = false
     if (store.kind === 'memory') {
       const members = await store.listMembersForRooms([roomKey])
-      legacyOpen = members.length === 0
+      legacyOpen = false
       const mine = members.find(item => item.user_id === userId)
       role = memberRoleFromRow(mine).role
       const owner = members.find(item => item.role === 'owner')
@@ -629,27 +573,10 @@ function createFileSystem(options = {}) {
       }
       await assertFolderEditable(folderId, userId, bypass)
     }
-    const fromFolderId = before.folder_id || null
-    const toFolderId = folderId || null
-
-    const runMove = async db => {
-      const conn = db || store
-      if (fromFolderId && String(fromFolderId) !== String(toFolderId || '')) {
-        await roomAcl.clearRoomFolderRoles(conn, roomKey)
-      }
-      const moved = await store.updateFolder(roomKey, folderId, conn !== store ? conn : undefined)
-      if (!moved || !moved.row) throw fsError('ROOM_NOT_FOUND', 'room not found', 404)
-      if (toFolderId && String(fromFolderId || '') !== String(toFolderId)) {
-        const members = await store.listFolderMembers(toFolderId)
-        await roomAcl.applyFolderRoles(conn, roomKey, toFolderId, members)
-      }
-      return moved
-    }
-
     const moved =
       typeof store.withTx === 'function'
-        ? await store.withTx(runMove)
-        : await runMove()
+        ? await store.withTx(db => store.updateFolder(roomKey, folderId, db))
+        : await store.updateFolder(roomKey, folderId)
     if (!moved || !moved.row) throw fsError('ROOM_NOT_FOUND', 'room not found', 404)
     return {
       file: publicFile(
@@ -711,7 +638,7 @@ function createFileSystem(options = {}) {
 
   async function listFolders(input = {}) {
     const userId = roomAcl.normalizeUserId(input.userId || '')
-    const bypass = !!input.bypass || !userId
+    const bypass = !!input.bypass
     const teamId =
       input.teamId !== undefined || input.team_id !== undefined
         ? String(input.teamId || input.team_id || '').trim() || null
@@ -767,10 +694,9 @@ function createFileSystem(options = {}) {
           .filter(item => item.user_id === userId)
           .map(item => item.room_key)
       )
-      accessibleFolderIds = new Set()
+      accessibleFolderIds = new Set((store.folderMembers || []).filter(m => m.user_id === userId).map(m => m.folder_id))
       rooms.forEach(room => {
-        const list = members.filter(item => item.room_key === room.room_key)
-        const allowed = mine.has(room.room_key) || list.length === 0
+        const allowed = mine.has(room.room_key)
         if (allowed && room.folder_id) accessibleFolderIds.add(room.folder_id)
       })
     }
@@ -863,7 +789,7 @@ function createFileSystem(options = {}) {
       return {
         ...row,
         role,
-        legacy_open: list.length === 0,
+        legacy_open: false,
         owner_user_id: (owner && owner.user_id) || row.owner_id || '',
         owner_name: (owner && owner.user_id) || row.owner_id || ''
       }
@@ -872,7 +798,7 @@ function createFileSystem(options = {}) {
 
   async function listRecent(input = {}) {
     const userId = roomAcl.normalizeUserId(input.userId || '')
-    const bypass = !!input.bypass || !userId
+    const bypass = !!input.bypass
     if (store.kind === 'pg') {
       return listRoomsPg({
         userId,
@@ -905,7 +831,7 @@ function createFileSystem(options = {}) {
 
   async function listFavorites(input = {}) {
     const userId = roomAcl.normalizeUserId(input.userId || '')
-    const bypass = !!input.bypass || !userId
+    const bypass = !!input.bypass
     if (store.kind === 'pg') {
       return listRoomsPg({
         userId,
@@ -936,7 +862,7 @@ function createFileSystem(options = {}) {
 
   async function listTrash(input = {}) {
     const userId = roomAcl.normalizeUserId(input.userId || '')
-    const bypass = !!input.bypass || !userId
+    const bypass = !!input.bypass
     if (store.kind === 'pg') {
       return listRoomsPg({
         userId,

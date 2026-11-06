@@ -37,9 +37,8 @@ test('preview counts the entire subtree without writing; foreign users cannot in
   await assert.rejects(f.fs.previewFolderDeletion(f.source.id, { userId: 'other' }), rejected('FORBIDDEN'))
 })
 
-test('move preserves nested folders, content/version and direct grants, replaces root folder grants', async () => {
+test('move preserves nested folders, content/version and independent grants', async () => {
   const f = await fixture()
-  await f.store.insertMember({ room_key: f.direct, user_id: 'old', role: 'viewer', source: 'folder', source_folder_id: f.source.id })
   await f.store.insertMember({ room_key: f.direct, user_id: 'old', role: 'editor' })
   await f.store.setFolderMember(f.target.id, 'new', 'viewer')
   const graph = await f.store.getNodes(f.direct)
@@ -55,7 +54,7 @@ test('move preserves nested folders, content/version and direct grants, replaces
   const old = f.store.members.find(m => m.user_id === 'old')
   assert.equal(old.direct_role, 'editor')
   assert.equal(old.folder_role, null)
-  assert.equal(f.store.members.find(m => m.user_id === 'new').source_folder_id, f.target.id)
+  assert.equal(f.store.members.find(m => m.user_id === 'new'), undefined)
 })
 
 test('trash includes nested maps, preserves data and allows restoration to root', async () => {
@@ -109,7 +108,6 @@ test('partial ownership cannot authorize deletion of others maps; team scope is 
 
 test('transaction failure rolls back moves and ACL changes; root destination works', async () => {
   const f = await fixture()
-  await f.store.insertMember({ room_key: f.direct, user_id: 'old', role: 'viewer', source: 'folder', source_folder_id: f.source.id })
   await f.store.setFolderMember(f.target.id, 'new', 'viewer')
   const preview = await f.fs.previewFolderDeletion(f.source.id, { userId: 'owner' })
   const finish = f.store.finishFolderDeletion
@@ -121,7 +119,7 @@ test('transaction failure rolls back moves and ACL changes; root destination wor
   assert.ok(await f.store.getFolder(f.source.id))
   assert.equal((await f.store.getFolder(f.child.id)).parent_id, f.source.id)
   assert.equal((await f.store.getRoom(f.direct)).folder_id, f.source.id)
-  assert.equal(f.store.members.find(m => m.user_id === 'old').source_folder_id, f.source.id)
+  assert.equal(f.store.members.filter(m => m.room_key === f.direct).length, 1, 'owner ACL survives rollback')
   assert.equal(f.store.members.find(m => m.user_id === 'new'), undefined)
   f.store.finishFolderDeletion = finish
   await f.fs.deleteFolderContents(f.source.id, input(preview, 'move', { targetFolderId: null }))

@@ -178,3 +178,13 @@ output/*.py
 !/simple-mind-map/bin/knowledge/attachmentSourceIndex.test.js
 !/integrations/wiki-graph/attachments.test.cjs
 !/integrations/wiki-graph/attachments.pg.test.cjs
+
+# Local tests and Markdown documents stay on disk, outside new Git additions.
+*.md
+*.MD
+*.test.*
+*.spec.*
+/tests/
+/simple-mind-map/test/
+/web/tests/
+/web/scripts/test*.cjs

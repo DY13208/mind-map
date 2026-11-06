@@ -3,7 +3,7 @@ const fs = require('fs'), path = require('path'), Module = require('module')
 const esbuild = require('esbuild'), compiler = require('vue-template-compiler')
 async function main() {
   const root = path.resolve(__dirname, '..')
-  const built = await esbuild.build({stdin:{resolveDir:root,contents:"export { default as Dialog } from './src/pages/ProductShell/components/ShareFolderDialog.vue';export {setProductHttp} from './src/services/productHttp';export {normalizeMemberDto,normalizeRoomDto} from './src/services/roomDto';"},bundle:true,write:false,platform:'node',format:'cjs',alias:{'@':path.join(root,'src')},plugins:[{name:'sfc-script',setup(b){b.onLoad({filter:/\.vue$/},a=>({contents:compiler.parseComponent(fs.readFileSync(a.path,'utf8')).script.content,resolveDir:path.dirname(a.path),loader:'js'}));b.onLoad({filter:/src\/utils\/auth\.js$/},()=>({contents:'export const getCurrentUser=()=>({id:"owner"})',loader:'js'}))}}]})
+  const built = await esbuild.build({stdin:{resolveDir:root,contents:"export { default as Dialog } from './src/pages/ProductShell/components/ShareFolderDialog.vue';export {setProductHttp} from './src/services/productHttp';export {normalizeMemberDto,normalizeRoomDto} from './src/services/roomDto';"},bundle:true,write:false,platform:'node',format:'cjs',alias:{'@':path.join(root,'src')},plugins:[{name:'sfc-script',setup(b){b.onLoad({filter:/\.vue$/},a=>({contents:compiler.parseComponent(fs.readFileSync(a.path,'utf8')).script.content,resolveDir:path.dirname(a.path),loader:'js'}));b.onLoad({filter:/src[\\/]utils[\\/]auth\.js$/},()=>({contents:'export const getCurrentUser=()=>({id:"owner"})',loader:'js'}))}}]})
   const mod = new Module(__filename, module);mod.paths=module.paths;mod._compile(built.outputFiles[0].text,__filename)
   const {Dialog,setProductHttp,normalizeMemberDto,normalizeRoomDto}=mod.exports
   const Vue = require('vue'), C = Vue.extend(Dialog), writes=[]
@@ -33,19 +33,24 @@ async function main() {
   vm.autoSelectMembers=false;vm.clearSelection();await vm.toggleRow({type:'department',id:'1'},true);assert.equal(vm.selectedUserIds.length,0);assert.deepEqual(vm.selectedDepartmentIds,['1'])
   vm.page=2;vm.roleFilter='viewer';await Vue.nextTick();assert.equal(vm.page,1);assert.equal(vm.filteredMembers.length,12)
   vm.memberQuery='成员13';await Vue.nextTick();assert.equal(vm.filteredMembers.length,1);vm.roleFilter='manager';await Vue.nextTick();assert.equal(vm.filteredMembers.length,0)
-  vm.$props.resourceType='room';vm.members=[normalizeMemberDto({user_id:'id-0',wecom_userid:'wx-0',role:'editor',direct_role:null,folder_role:'editor'})];vm.role='Editor'
-  assert.equal(vm.isInheritedOnly(vm.members[0]),true);assert.equal(vm.needsRoleChange(vm.members[0]),true,'Direct grant differs from inherited access')
+  vm.$props.resourceType='room';vm.members=[normalizeMemberDto({user_id:'id-0',wecom_userid:'wx-0',role:'editor',direct_role:'editor'})];vm.role='Editor'
+  assert.equal(vm.isInheritedOnly(vm.members[0]),false)
+  assert.equal(vm.needsRoleChange(vm.members[0]),false)
+  assert.equal(vm.memberRoleSelectOptions.some(option=>option.value==='Inherit'),false)
   assert.equal(normalizeRoomDto({room_key:'room',role:'manager'}).canManage,true)
-  const inherited = vm.members[0]
-  assert.equal(vm.editableMemberRole(inherited),'Inherit','Pure inheritance selects the explicit restore-inheritance option')
-  assert.equal(vm.editableMemberRole({...inherited,directRole:'viewer'}),'Viewer','Normalize backend role casing to UI options')
-  let patchCount=0
-  const patched={user_id:'id-0',role:'editor',direct_role:'viewer',folder_role:'editor'}
-  setProductHttp(async (url, options={})=>{if(options.method==='PATCH'){patchCount++;return patched}if(options.method==='DELETE'){patched.direct_role=null;return {ok:true}}return {list:[patched]}})
-  await vm.updateRole(inherited,'Viewer')
+  const member=vm.members[0]
+  assert.equal(vm.editableMemberRole(member),'Editor')
+  let patchCount=0, removed=false
+  const patched={user_id:'id-0',role:'viewer',direct_role:'viewer'}
+  setProductHttp(async (url, options={})=>{
+    if(options.method==='PATCH'){patchCount++;return patched}
+    if(options.method==='DELETE'){removed=true;return {ok:true}}
+    return {list:removed?[]:[patched]}
+  })
+  await vm.updateRole(member,'Viewer')
   assert.equal(patchCount,1)
   assert.equal(vm.members[0].directRole,'viewer')
-  assert.equal(vm.members[0].role,'Editor')
+  assert.equal(vm.members[0].role,'Viewer')
   assert.match(messages.pop(),/权限已更新/)
   await vm.updateRole(vm.members[0],'Viewer')
   assert.equal(patchCount,1,'Unchanged direct grant must not submit again')
@@ -53,33 +58,13 @@ async function main() {
   await vm.updateRole(vm.members[0],'Editor')
   assert.equal(patchCount,1,'Read-only mode must not submit mutations')
   vm.$props.readOnly=false
-  await vm.remove(vm.members[0])
-  assert.equal(vm.members[0].directRole,null)
-  assert.equal(vm.members[0].role,'Editor')
-  assert.match(messages.pop(),/已移除单独授权.*仍有继承权限/,'Explain remaining inherited access after removal')
-  // New deployments allow per-file overrides in both directions. The effective
-  // role is authoritative; a viewer override must not display the folder editor.
-  Object.assign(patched,{acl_v2:true,direct_role:null,override_role:'viewer',role:'viewer'})
-  await vm.loadMembers()
-  assert.equal(vm.members[0].role,'Viewer')
-  assert.equal(vm.editableMemberRole(vm.members[0]),'Viewer')
-  assert.equal(vm.isInheritedOnly(vm.members[0]),false)
-  assert.match(vm.memberSourceLabel(vm.members[0]),/本图单独设置，覆盖文件夹继承/)
-  await vm.updateRole(vm.members[0],'Viewer')
-  assert.equal(patchCount,1,'Unchanged per-file override must not submit again')
-  setProductHttp(async (url, options={})=>{
-    if(options.method==='PATCH'){
-      assert.equal(JSON.parse(options.body).role,'inherit')
-      patchCount++;patched.override_role=null;patched.role='editor';return patched
-    }
-    return {list:[patched]}
-  })
+  assert.match(vm.memberSourceLabel(vm.members[0]),/本图独立授权/)
   await vm.updateRole(vm.members[0],'Inherit')
-  assert.equal(patchCount,2)
-  assert.equal(vm.members[0].role,'Editor')
-  assert.equal(vm.editableMemberRole(vm.members[0]),'Inherit')
-  assert.equal(vm.isInheritedOnly(vm.members[0]),true)
-  assert.match(messages.pop(),/已恢复继承.*可编辑.*文件夹继承/)
+  assert.equal(patchCount,1,'UI rejects obsolete inheritance requests')
+  assert.match(messages.pop(),/独立授权/)
+  await vm.remove(vm.members[0])
+  assert.equal(vm.members.length,0)
+  assert.match(messages.pop(),/已移除.*访问权限/)
   const template=compiler.parseComponent(fs.readFileSync(path.join(root,'src/pages/Edit/components/CooperateDialog.vue'),'utf8')).template.content
   assert.deepEqual(compiler.compile(template).errors,[])
   assert.match(template,/<ShareFolderDialog/)
@@ -89,6 +74,6 @@ async function main() {
   // Late reads from a closed/switched dialog must not replace current ACL data.
   let resolveRead;setProductHttp(()=>new Promise(resolve=>{resolveRead=resolve}));const pending=vm.loadMembers();vm.loadVersion++;const current=vm.members;resolveRead({list:[{user_id:'stale',role:'owner'}]});await pending;assert.equal(vm.members,current)
   vm.$destroy();setProductHttp(null)
-  console.log('Permission dialog checks passed: defaults, identity badges, independent selection, no-op/delta saves, department scope/half state, filters/pagination, inheritance, stale reads')
+  console.log('Permission dialog checks passed: defaults, identity badges, independent selection, no-op/delta saves, department scope/half state, filters/pagination, independent file grants, stale reads')
 }
 main().catch(e=>{console.error(e);process.exitCode=1})

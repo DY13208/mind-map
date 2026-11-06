@@ -393,7 +393,7 @@ async function testAccessAndMembers() {
 
   db.rooms.add('legacy')
   const legacy = await roomAcl.getAccess(db, 'legacy', 'anyone')
-  assert.strictEqual(legacy.legacyOpen, true)
+  assert.strictEqual(legacy.legacyOpen, false)
   assert.strictEqual(
     roomAcl.roleAllows(null, 'edit', { legacyOpen: true }),
     true
@@ -416,11 +416,8 @@ async function testMultiSourceGrants() {
 
   await roomAcl.removeMember(db, 'room-shared', 'member-1')
   const afterDirectRemoval = db.members.find(item => item.user_id === 'member-1')
-  assert(afterDirectRemoval, 'team grant must keep the ACL row after direct-share removal')
-  assert.strictEqual(afterDirectRemoval.direct_role, null)
-  assert.strictEqual(afterDirectRemoval.team_role, 'editor')
-  assert.strictEqual(afterDirectRemoval.role, 'editor')
-  assert.strictEqual((await roomAcl.getAccess(db, 'room-shared', 'member-1')).role, 'editor')
+  assert.strictEqual(afterDirectRemoval, undefined, 'removal revokes file access regardless of historical team source')
+  assert.strictEqual((await roomAcl.getAccess(db, 'room-shared', 'member-1')).role, null)
 }
 
 async function testSearchUsersPassesCorpId() {
@@ -572,13 +569,9 @@ async function testPerFileOverrideModel() {
   await roomAcl.setFolderRole(db, 'room-x', 'bob', 'manager', 'folder-1')
   assert.strictEqual((await roomAcl.getAccess(db, 'room-x', 'bob')).role, 'viewer')
 
-  // Restoring inheritance adopts the current folder result.
-  await roomAcl.setMember(db, 'room-x', 'bob', 'inherit', 'owner')
-  bob = db.members.find(item => item.user_id === 'bob')
-  assert.strictEqual(bob.override_role, null)
-  assert.strictEqual(bob.acl_v2, true)
-  assert.strictEqual(bob.folder_role, 'manager')
-  assert.strictEqual((await roomAcl.getAccess(db, 'room-x', 'bob')).role, 'editor')
+  // Inheritance is no longer a valid file setting.
+  await assert.rejects(roomAcl.setMember(db, 'room-x', 'bob', 'inherit', 'owner'), { code: 'BAD_REQUEST' })
+  assert.strictEqual((await roomAcl.getAccess(db, 'room-x', 'bob')).role, 'viewer')
 
   // Folder viewer + per-file editor → editor.
   await roomAcl.setFolderRole(db, 'room-x', 'carol', 'viewer', 'folder-1')
@@ -587,10 +580,10 @@ async function testPerFileOverrideModel() {
   assert.strictEqual(access.role, 'editor')
   assert.strictEqual(access.overrideActive, true)
 
-  // Removing the per-file setting drops back to the inherited result.
+  // Removing a file member revokes access, including historical inherited access.
   await roomAcl.removeMember(db, 'room-x', 'carol', '', 'owner')
   access = await roomAcl.getAccess(db, 'room-x', 'carol')
-  assert.strictEqual(access.role, 'viewer')
+  assert.strictEqual(access.role, null)
   assert.strictEqual(access.overrideActive, false)
 
   // One member's setting does not leak to other members.

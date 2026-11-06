@@ -66,12 +66,12 @@ function resolveMemberRole(row = {}) {
   return effectiveRole(row.direct_role, row.team_role, row.folder_role, scoped ? '' : row.role)
 }
 
-/** True when this member has a per-file setting that overrides inheritance. */
+/** Explicit file grants cap the privileges a node share link can supply. */
 function overrideLocksShare(row = {}) {
   const direct = normalizeRole(row.direct_role)
   const summary = normalizeRole(row.role)
   if (direct === 'owner' || summary === 'owner') return false
-  return !!row.acl_v2 && !!normalizeOverrideRole(row.override_role)
+  return !!direct || (!!row.acl_v2 && !!normalizeOverrideRole(row.override_role))
 }
 
 /** Which rule actually produced the member's access (for UI and diagnostics). */
@@ -450,7 +450,7 @@ async function initSchema(db) {
     on room_members(source_folder_id)
     where source_folder_id is not null
   `)
-  await migrateFolderRoles(db)
+  await require('./independentFileAcl').migrateIndependentFileAcl(db)
 }
 
 /**
@@ -654,7 +654,7 @@ async function getAccess(db, roomKey, userId) {
     overrideRole: mine ? normalizeOverrideRole(mine.override_role) || null : null,
     overrideActive: mine ? overrideLocksShare(mine) : false,
     source: mine ? memberAccessSource(mine) : null,
-    legacyOpen: members.rows.length === 0,
+    legacyOpen: false,
     members: members.rows.length
   }
 }
@@ -781,10 +781,6 @@ async function listAccessibleRooms(db, options = {}) {
         select 1 from room_members m
         where m.room_key = r.room_key and m.user_id = $${userParam}
       )
-      or not exists (
-        select 1 from room_members m
-        where m.room_key = r.room_key
-      )
     )`
   }
   const countRes = await db.query(
@@ -808,9 +804,7 @@ async function listAccessibleRooms(db, options = {}) {
         'my.override_role',
         'my.acl_v2'
       )} as role,
-       (not exists (
-         select 1 from room_members mx where mx.room_key = r.room_key
-       )) as legacy_open`
+       false as legacy_open`
     : `, null::text as role, false as legacy_open`
   const listSql = `select r.room_key, r.title, r.cos_key, r.version, r.created_at, r.updated_at
          ${roleSelect}
@@ -1118,9 +1112,8 @@ async function setMember(db, roomKey, targetUserId, role, actorUserId, corpId = 
   const rawRole = String(role || '').trim().toLowerCase()
   const nextRole = normalizeRole(rawRole)
   const overrideRole = normalizeOverrideRole(rawRole)
-  const inherit = rawRole === 'inherit'
   if (!uid) throw aclError(400, 'BAD_REQUEST', '缺少用户')
-  if (!nextRole && !overrideRole && !inherit) {
+  if (!nextRole) {
     throw aclError(400, 'BAD_REQUEST', '无效的权限角色')
   }
   const columns = `user_id, role, direct_role, team_role, folder_role, override_role, acl_v2`
@@ -1161,40 +1154,6 @@ async function setMember(db, roomKey, targetUserId, role, actorUserId, corpId = 
       [roomKey, uid]
     )
     if (!res.rows.length) throw aclError(403, 'OWNER_REQUIRED', '只有所有者可以修改所有者权限')
-    notifyAclChanged(roomKey)
-    return res.rows[0]
-  }
-
-  if (inherit) {
-    if (!current) {
-      // Nothing to restore: no per-file setting and no inherited source.
-      return { room_key: roomKey, user_id: uid, role: null, restored: 'none' }
-    }
-    if (currentEffective === 'owner') {
-      throw aclError(400, 'OWNER_REQUIRED', '所有者身份请使用所有权转移流程')
-    }
-    if (!normalizeFolderRole(current.folder_role) && !normalizeRole(current.team_role)) {
-      const del = await db.query(
-        `delete from room_members where room_key = $1 and user_id = $2`,
-        [roomKey, uid]
-      )
-      notifyAclChanged(roomKey)
-      return { room_key: roomKey, user_id: uid, role: null, restored: 'none', removed: true, deleted: del.rowCount }
-    }
-    const res = await db.query(
-      `update room_members
-       set acl_v2 = true,
-           override_role = null,
-           direct_role_archive = coalesce(direct_role_archive, direct_role),
-           direct_role = null,
-           role = ${sqlResolveMemberRole('null::text', 'team_role', 'folder_role', 'null::text', 'null::text', 'true')},
-           source = ${sqlPrimarySource('null::text', 'team_role', 'folder_role')},
-           updated_at = now()
-       where room_key = $1 and user_id = $2
-       returning ${returning}`,
-      [roomKey, uid]
-    )
-    if (!res.rows.length) throw aclError(404, 'NOT_FOUND', '成员不存在')
     notifyAclChanged(roomKey)
     return res.rows[0]
   }
@@ -1257,45 +1216,10 @@ async function removeMember(db, roomKey, targetUserId, corpId = '', actorUserId 
       throw aclError(400, 'LAST_OWNER', '不能删除最后一个所有者')
     }
   }
-  let result
-  if (currentRow.acl_v2) {
-    // Override rows: removing the per-file setting restores inheritance when
-    // a folder/team source exists, otherwise the member loses access.
-    if (!normalizeFolderRole(currentRow.folder_role) && !normalizeRole(currentRow.team_role)) {
-      result = await db.query(
-        `delete from room_members where room_key = $1 and user_id = $2 and (not $3::boolean or role <> 'owner')`,
-        [roomKey, uid, managerActor]
-      )
-    } else {
-      result = await db.query(
-        `update room_members
-         set override_role = null,
-             acl_v2 = true,
-             direct_role_archive = coalesce(direct_role_archive, direct_role),
-             direct_role = null,
-             role = ${sqlResolveMemberRole('null::text', 'team_role', 'folder_role', 'null::text', 'null::text', 'true')},
-             source = ${sqlPrimarySource('null::text', 'team_role', 'folder_role')},
-             updated_at = now()
-         where room_key = $1 and user_id = $2 and (not $3::boolean or role <> 'owner')`,
-        [roomKey, uid, managerActor]
-      )
-    }
-  } else if (currentRow.team_role || currentRow.folder_role) {
-    result = await db.query(
-      `update room_members
-       set direct_role = null,
-           role = ${sqlEffectiveRole('null::text', 'team_role', 'folder_role')},
-           source = ${sqlPrimarySource('null::text', 'team_role', 'folder_role')},
-           updated_at = now()
-       where room_key = $1 and user_id = $2 and (not $3::boolean or role <> 'owner')`,
-      [roomKey, uid, managerActor]
-    )
-  } else {
-    result = await db.query(
-      `delete from room_members where room_key = $1 and user_id = $2 and (not $3::boolean or role <> 'owner')`,
-      [roomKey, uid, managerActor]
-    )
-  }
+  const result = await db.query(
+    `delete from room_members where room_key = $1 and user_id = $2 and (not $3::boolean or role <> 'owner')`,
+    [roomKey, uid, managerActor]
+  )
   if (managerActor && result.rowCount === 0) throw aclError(403, 'OWNER_REQUIRED', '成员权限已变化，请刷新后重试')
   notifyAclChanged(roomKey)
   return { ok: true, user_id: uid }

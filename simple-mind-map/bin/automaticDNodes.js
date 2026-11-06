@@ -50,8 +50,7 @@ function accessibleSql(actor, params) {
   if (!actor.id) throw Object.assign(new Error('请先登录'), { statusCode: 401, code: 'unauthorized' })
   params.push(actor.id)
   const role = sqlResolveMemberRole('m.direct_role', 'm.team_role', 'm.folder_role', 'm.role', 'm.override_role', 'm.acl_v2')
-  return `(not exists(select 1 from room_members m where m.room_key = r.room_key)
-    or exists(select 1 from room_members m where m.room_key = r.room_key and m.user_id = $${params.length}
+  return `(exists(select 1 from room_members m where m.room_key = r.room_key and m.user_id = $${params.length}
       and (${role}) in ('owner', 'manager', 'editor', 'viewer')))`
 }
 

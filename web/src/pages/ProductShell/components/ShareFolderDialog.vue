@@ -279,7 +279,7 @@
                   v-if="isOwnerRole(member.role) || readOnly || (adapter && member.inheritedOnly)"
                   class="ownerRoleLabel"
                   >{{ roleLabel(member.role) }}</span
-                ><button v-else-if="isMobileViewport" type="button" class="mobileMemberRole" :aria-label="`修改${member.name || member.id}的权限`" @click="mobileRoleMember = member">{{ roleLabel(editableMemberRole(member)) || '跟随继承' }} <i class="el-icon-arrow-down" /></button><el-select
+                ><button v-else-if="isMobileViewport" type="button" class="mobileMemberRole" :aria-label="`修改${member.name || member.id}的权限`" @click="mobileRoleMember = member">{{ roleLabel(editableMemberRole(member)) || '可查看' }} <i class="el-icon-arrow-down" /></button><el-select
                   v-else
                   size="mini"
                   :class="['memberRoleSelect', String(member.role).toLowerCase()]"
@@ -306,7 +306,7 @@
                   v-else-if="!readOnly"
                   class="removeBtn"
                   :disabled="isInheritedOnly(member)"
-                  :title="isInheritedOnly(member) ? '该成员的权限来自文件夹或团队继承，请到来源处调整' : '移除单独授权，之后按继承权限生效'"
+                  :title="isInheritedOnly(member) ? '该成员的权限来自继承，请到来源处调整' : '移除该成员对此文件的访问权限'"
                   :aria-label="`移除${member.name || member.id}的单独授权`"
                   type="button"
                   @click="remove(member)"
@@ -516,10 +516,10 @@ export default {
     },
     resourceDescription() {
       if (this.adapter) return this.adapter.description || ''
-      if (this.isTeam) return '权限将应用于整个团队空间与成员协作'
+      if (this.isTeam) return '权限应用于团队空间；其中的脑图分别授权'
       return this.isRoom
-        ? '修改当前脑图的成员设置；单独设置优先于文件夹和团队继承'
-        : '权限应用于直属现有及后续脑图；子文件夹需要单独授权'
+        ? '当前脑图独立授权；文件夹和团队成员不会自动获得内容访问权限'
+        : '权限仅应用于当前文件夹；其中的脑图和子文件夹分别授权'
     },
     roleOptions() {
       if (this.adapter) return this.adapter.roleOptions
@@ -536,12 +536,6 @@ export default {
       ]
     },
     memberRoleSelectOptions() {
-      if (this.isRoom) {
-        return [
-          { value: 'Inherit', label: '跟随继承' },
-          ...this.roleOptions.map(option => ({ ...option, label: option.title }))
-        ]
-      }
       return this.roleOptions.map(option => ({ ...option, label: option.title }))
     },
     defaultRole() {
@@ -1172,7 +1166,7 @@ export default {
       if (this.isRoom) {
         // Per-file setting first (override model), then the legacy direct grant.
         const current = member.aclV2 ? member.overrideRole : member.directRole
-        return this.roleSelectValue(current) || 'Inherit'
+        return this.roleSelectValue(current || member.role) || 'Viewer'
       }
       const role = member.role
       const option = this.roleOptions.find(item => String(item.value).toLowerCase() === String(role).toLowerCase())
@@ -1180,35 +1174,12 @@ export default {
     },
     isInheritedOnly(member) {
       if (this.adapter) return !!(member && member.inheritedOnly)
-      if (!this.isRoom) return false
-      const hasPerFileSetting = member.aclV2 ? !!member.overrideRole : !!member.directRole
-      return !hasPerFileSetting && !!(member.folderRole || member.teamRole)
-    },
-    inheritedSourceLabel(member) {
-      if (member.folderRole) return '文件夹继承'
-      if (member.teamRole) return '团队继承'
-      return ''
+      return false
     },
     memberSourceLabel(member) {
       if (this.adapter) return (member && member.sourceLabel) || ''
       if (!this.isRoom) return ''
-      const parts = []
-      const actual = String(member.role || '').toLowerCase()
-      if (actual && actual !== 'owner') parts.push(`实际${this.roleLabel(member.role)}`)
-      if (member.aclV2) {
-        if (member.overrideRole) {
-          const inherited = this.inheritedSourceLabel(member)
-          parts.push(inherited ? `本图单独设置，覆盖${inherited}` : '本图单独设置')
-        } else {
-          parts.push(this.inheritedSourceLabel(member) || '无有效来源')
-        }
-      } else if (member.directRole) {
-        const inherited = this.inheritedSourceLabel(member)
-        parts.push(inherited ? `历史直接授权，与${inherited}取较高权限` : '历史直接授权')
-      } else {
-        parts.push(this.inheritedSourceLabel(member) || '无有效来源')
-      }
-      return parts.filter(Boolean).join(' · ')
+      return '本图独立授权'
     },
     needsRoleChange(member) {
       if (!member) return true
@@ -1540,31 +1511,20 @@ export default {
     },
     async run(action, requestedRole, removedId) {
       if (this.readOnly || this.busy || this.loadFailed) return
+      if (this.isRoom && String(requestedRole).toLowerCase() === 'inherit') {
+        this.$message.error('脑图采用独立授权，请选择具体权限')
+        return
+      }
       const version = this.loadVersion
-      const requested = String(requestedRole || '').toLowerCase()
       this.busy = true
       try {
-        const updated = await action()
+        await action()
         if (version !== this.loadVersion) return
         await this.loadMembers()
         if (version !== this.loadVersion) return
         this.$emit('changed')
         if (this.isRoom && removedId) {
-          const remaining = this.members.find(member => member.id === removedId)
-          if (remaining && (remaining.folderRole || remaining.teamRole)) {
-            this.$message.warning(`已移除单独授权；该成员仍有继承权限（实际${this.roleLabel(remaining.role)}），如需收回请在来源文件夹或团队调整`)
-          } else {
-            this.$message.success('已移除该成员的本图授权')
-          }
-        } else if (this.isRoom && requested === 'inherit') {
-          const remaining =
-            updated && this.members.find(member => member.id === (updated.user_id || updated.userId))
-          if (remaining && remaining.role) {
-            const source = this.inheritedSourceLabel(remaining)
-            this.$message.success(`已恢复继承，实际为${this.roleLabel(remaining.role)}${source ? ` · ${source}` : ''}`)
-          } else {
-            this.$message.success('已恢复继承，该成员当前无继承权限')
-          }
+          this.$message.success('已移除该成员的本图访问权限')
         } else {
           this.$message.success(`${this.resourceLabel}权限已更新`)
         }

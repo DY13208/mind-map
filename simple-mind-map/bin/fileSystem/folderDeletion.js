@@ -101,11 +101,6 @@ function createFolderDeletion(store, notifyStorage) {
             throw fsError('FOLDER_NAME_CONFLICT', '目标位置已有同名子文件夹，请选择其他位置', 409)
           }
         }
-        for (const room of contents.rooms.filter(r => r.folder_id === id)) {
-          const conn = db || store
-          await roomAcl.clearRoomFolderRoles(conn, room.room_key)
-          if (targetId) await roomAcl.applyFolderRoles(conn, room.room_key, targetId, targetMembers)
-        }
       }
       await store.finishFolderDeletion(id, contents, { action: input.action, targetId, userId }, db)
       return { ...state.preview, action: input.action, targetFolderId: targetId,

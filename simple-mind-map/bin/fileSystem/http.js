@@ -252,34 +252,6 @@ async function handleFileSystemApi(req, res, options = {}) {
           await fs.store.setFolderMember(id, previousOwner, 'manager')
         }
       }
-      const roomKeys = []
-      for (const id of folderIds) {
-        const keys = await fs.store.roomKeysInFolder(id)
-        roomKeys.push(...keys)
-      }
-      for (const roomKey of Array.from(new Set(roomKeys))) {
-        const room = await fs.store.getRoom(roomKey)
-        if (!room) continue
-        if (previousOwner && room.owner_id === previousOwner) {
-          await roomAcl.transferOwnership(
-            fs.store,
-            roomKey,
-            targetId,
-            previousOwner,
-            req.authUser && req.authUser.corpId
-          )
-          continue
-        }
-        if (room.owner_id === targetId) continue
-        await roomAcl.setFolderRole(
-          fs.store,
-          roomKey,
-          targetId,
-          'manager',
-          room.folder_id || transferFolderId,
-          req.authUser && req.authUser.corpId
-        )
-      }
       const list = await listFolderMembersWithOwner(fs.store, transferFolderId)
       sendJson(res, 200, { ok: true, list, ownerId: targetId })
       return true
@@ -364,40 +336,6 @@ async function handleFileSystemApi(req, res, options = {}) {
              on conflict(folder_id, user_id) do update set role = excluded.role, updated_at = now()`,
             [bulkFolderId, userIds, role]
           )
-          await db.query(
-            `with target_users as (
-               select unnest($2::text[]) as user_id
-             ), folder_rooms as (
-               select room_key, owner_id from rooms
-               where folder_id = $1 and deleted_at is null
-             )
-             insert into room_members (
-               room_key, user_id, role, direct_role, team_role, folder_role, source, source_folder_id
-             )
-             select room_key, user_id,
-               ${roomAcl.sqlEffectiveRole('null::text', 'null::text', '$3')},
-               null, null, $3, 'folder', $1
-             from folder_rooms cross join target_users
-             where coalesce(owner_id, '') <> user_id
-             on conflict(room_key, user_id) do update set
-               folder_role = excluded.folder_role,
-               source_folder_id = excluded.source_folder_id,
-               role = ${roomAcl.sqlResolveMemberRole(
-                 'room_members.direct_role',
-                 'room_members.team_role',
-                 'excluded.folder_role',
-                 'room_members.role',
-                 'room_members.override_role',
-                 'room_members.acl_v2'
-               )},
-               source = case
-                 when room_members.acl_v2 and room_members.override_role is not null then 'override'
-                 when room_members.acl_v2 then 'inherit'
-                 else ${roomAcl.sqlPrimarySource('room_members.direct_role', 'room_members.team_role', 'excluded.folder_role')}
-               end,
-               updated_at = now()`,
-            [bulkFolderId, userIds, role]
-          )
         })
       }
       sendJson(res, 200, {
@@ -453,17 +391,6 @@ async function handleFileSystemApi(req, res, options = {}) {
           throw Object.assign(new Error('文件夹所有者权限不能修改'), { code: 'FORBIDDEN', statusCode: 403 })
         }
         await fs.store.setFolderMember(folderAcl.id, targetId, role)
-        const roomKeys = await fs.store.roomKeysInFolder(folderAcl.id)
-        for (const roomKey of roomKeys) {
-          await roomAcl.setFolderRole(
-            fs.store,
-            roomKey,
-            targetId,
-            role,
-            folderAcl.id,
-            req.authUser && req.authUser.corpId
-          )
-        }
         const list = await listFolderMembersWithOwner(fs.store, folderAcl.id)
         sendJson(res, 200, { ok: true, list })
         return true
@@ -475,17 +402,6 @@ async function handleFileSystemApi(req, res, options = {}) {
           req.authUser && req.authUser.corpId
         )
         await fs.store.removeFolderMember(folderAcl.id, targetId)
-        const roomKeys = await fs.store.roomKeysInFolder(folderAcl.id)
-        for (const roomKey of roomKeys) {
-          await roomAcl
-            .clearFolderRole(
-              fs.store,
-              roomKey,
-              targetId,
-              req.authUser && req.authUser.corpId
-            )
-            .catch(() => {})
-        }
         sendJson(res, 200, { ok: true })
         return true
       }

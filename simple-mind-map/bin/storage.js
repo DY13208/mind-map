@@ -1866,8 +1866,7 @@ async function initSchemaOnce() {
   require('./userActivity').ensureUserActivityIndexes(pool)
   const tombstones = await pool.query('select room_key from room_tombstones')
   tombstones.rows.forEach(row => deletedRooms.add(row.room_key))
-  // Room ACL migrates folder-derived roles, so the folder tables and the
-  // rooms.folder_id column must exist before that migration runs on a fresh DB.
+  // Prepare file metadata before the one-time independent ACL conversion.
   const fileSystemSchema = require('./fileSystem/schema')
   await fileSystemSchema.initFileSystemSchema(pool)
   const roomAcl = require('./roomAcl')
@@ -1879,7 +1878,6 @@ async function initSchemaOnce() {
   require('./leaveWorkflow/hrmsSync').startWorker(pool)
   // 「@我的」提及索引 / 已读状态（幂等建表，新表建索引很快）
   await require('./commentMentions').initSchema(pool)
-  await roomAcl.migrateLegacyOwners(pool)
   const collabV2Schema = require('./collabV2/schema')
   await collabV2Schema.initCollabV2Schema(pool)
   const historySchema = require('./collabHistory/schema')

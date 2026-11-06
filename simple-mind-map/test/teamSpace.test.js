@@ -78,17 +78,16 @@ assert.notStrictEqual(
   const members = await teamSpace.addMembers(db, who, created.id, ['bob'])
   assert.strictEqual(members[0].role, 'owner')
   const sync = db.calls.find(call => call.text.includes("insert into room_members") && call.text.includes("'team'"))
-  assert(sync, 'adding a Team member must persist a Team room ACL source')
+  assert.strictEqual(sync, undefined, 'adding a team member must not authorize existing files')
 
   db.roomMembers.push({
-    room_key: 'room-a', user_id: 'bob', direct_role: 'viewer', team_role: 'editor',
-    role: 'editor', source: 'direct_share', source_team_id: created.id
+    room_key: 'room-a', user_id: 'bob', direct_role: 'viewer', team_role: null,
+    role: 'viewer', source: 'direct_share', source_team_id: null
   })
   const removed = await teamSpace.removeMember(db, who, created.id, 'bob')
   assert.deepStrictEqual(removed, { ok: true, userId: 'bob' })
   const cleanup = db.calls.find(call => call.text.includes('delete from room_members'))
-  assert(cleanup.text.includes('source_team_id'))
-  assert(cleanup.text.includes('direct_role is null'))
+  assert.strictEqual(cleanup, undefined, 'removing a team member must not revoke independent file grants')
   assert.deepStrictEqual(db.roomMembers, [{
     room_key: 'room-a', user_id: 'bob', direct_role: 'viewer', team_role: null,
     role: 'viewer', source: 'direct_share', source_team_id: null
@@ -105,7 +104,7 @@ assert.notStrictEqual(
   const fs = createFileSystem({ store })
   const insertMember = store.insertMember.bind(store)
   store.insertMember = async row => {
-    if (row.source === 'team') throw new Error('模拟 ACL 写入失败')
+    if (row.role === 'owner') throw new Error('模拟 ACL 写入失败')
     return insertMember(row)
   }
   await assert.rejects(

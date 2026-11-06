@@ -286,32 +286,6 @@ async function listMembers(db, who, id) {
   return result.rows.map(memberDto)
 }
 
-async function syncRoomMembers(db, id, userId) {
-  await db.query(`
-    insert into room_members (room_key, user_id, role, direct_role, team_role, folder_role, source, source_team_id)
-    select r.room_key, $2, 'editor', null, 'editor', null, 'team', $1 from rooms r
-    left join room_tombstones rt on rt.room_key = r.room_key
-    where r.team_id = $1 and r.deleted_at is null and rt.room_key is null
-    on conflict (room_key, user_id) do update set
-      team_role = excluded.team_role,
-      role = ${roomAcl.sqlResolveMemberRole(
-        'room_members.direct_role',
-        'excluded.team_role',
-        'room_members.folder_role',
-        'room_members.role',
-        'room_members.override_role',
-        'room_members.acl_v2'
-      )},
-      source = case
-        when room_members.acl_v2 and room_members.override_role is not null then 'override'
-        when room_members.acl_v2 then 'inherit'
-        when room_members.direct_role is not null then 'direct_share'
-        else 'team'
-      end,
-      source_team_id = excluded.source_team_id,
-      updated_at = now()`, [id, userId])
-}
-
 async function resolveMemberId(db, who, value) {
   const raw = String(value || '').trim()
   if (!raw) return raw
@@ -337,7 +311,6 @@ async function addMembers(db, who, id, ids) {
         insert into team_members (team_id, corp_id, user_id, wecom_userid, role) values ($1, $2, $3, $4, 'member')
         on conflict (team_id, user_id) do update set corp_id = excluded.corp_id, updated_at = now()
         where team_members.role <> 'owner'`, [id, who.corpId, userId, wecomUserId])
-      await syncRoomMembers(tx, id, userId)
     }
     return listMembers(tx, who, id)
   })
@@ -362,34 +335,6 @@ async function removeMember(db, who, id, target) {
     const targetId = await resolveMemberId(tx, who, target)
     const result = await tx.query(`delete from team_members where team_id = $1 and corp_id = $2 and user_id = $3 and role <> 'owner' returning user_id`, [id, who.corpId, targetId])
     if (!result.rows.length) throw error(404, 'TEAM_MEMBER_NOT_FOUND', 'Ã¥ÂÂ¢Ã©ÂÂÃ¦ÂÂÃ¥ÂÂÃ¤Â¸ÂÃ¥Â­ÂÃ¥ÂÂ¨Ã¦ÂÂÃ¤Â¸ÂÃ¨ÂÂ½Ã§Â§Â»Ã©ÂÂ¤Ã¦ÂÂÃ¦ÂÂÃ¨ÂÂ')
-    await tx.query(`
-      update room_members
-      set team_role = null,
-          role = ${roomAcl.sqlResolveMemberRole(
-            'direct_role',
-            'null::text',
-            'folder_role',
-            'role',
-            'override_role',
-            'acl_v2'
-          )},
-          source = case
-            when coalesce(acl_v2, false) and override_role is not null then 'override'
-            when coalesce(acl_v2, false) then case when folder_role is not null then 'folder' else 'inherit' end
-            when direct_role is not null then 'direct_share'
-            when folder_role is not null then 'folder'
-            else 'direct_share'
-          end,
-          source_team_id = null,
-          updated_at = now()
-      where source_team_id = $1 and user_id = $2
-        and (direct_role is not null or folder_role is not null
-          or (coalesce(acl_v2, false) and override_role is not null))`, [id, targetId])
-    await tx.query(`
-      delete from room_members
-      where source_team_id = $1 and user_id = $2
-        and direct_role is null and folder_role is null
-        and (not coalesce(acl_v2, false) or override_role is null)`, [id, targetId])
     return { ok: true, userId: target }
   })
 }
@@ -440,6 +385,7 @@ async function listRooms(db, who, id, filters = {}) {
   const offset = roomPageNumber(filters.offset, 0, false)
   const params = [id, who.userId, who.corpId]
   const conditions = ['r.team_id = $1', 'r.deleted_at is null', 'rt.room_key is null']
+  if (!who.superAdmin) conditions.push("m.role in ('owner', 'manager', 'editor', 'viewer')")
   if (filters.folderId != null && filters.folderId !== '') {
     if (filters.folderId === 'root') conditions.push('r.folder_id is null')
     else {
@@ -534,41 +480,11 @@ async function assignRoom(db, who, id, roomKey) {
       throw error(403, 'FORBIDDEN', 'Ã¥ÂÂªÃ¦ÂÂÃ¨ÂÂÃ¥ÂÂ¾Ã¦ÂÂÃ¦ÂÂÃ¨ÂÂÃ¥ÂÂ¯Ã¤Â»Â¥Ã¥Â°ÂÃ¥ÂÂ¶Ã§Â§Â»Ã¥ÂÂ¥Ã¥ÂÂ¢Ã©ÂÂÃ§Â©ÂºÃ©ÂÂ´')
     }
 
-    if (room.rows[0].folder_id) await roomAcl.clearRoomFolderRoles(tx, key)
     await tx.query(
       `update rooms set team_id = $2, folder_id = null, updated_at = now() where room_key = $1`,
       [key, id]
     )
     await tx.query(`update teams set updated_at = now() where id = $1`, [id])
-    const members = await tx.query(
-      `select user_id from team_members where team_id = $1 and corp_id = $2`,
-      [id, who.corpId]
-    )
-    for (const teamMember of members.rows) {
-      await tx.query(
-        `
-      insert into room_members (room_key, user_id, role, direct_role, team_role, folder_role, source, source_team_id) values ($1, $2, 'editor', null, 'editor', null, 'team', $3)
-      on conflict (room_key, user_id) do update set
-        team_role = excluded.team_role,
-        role = ${roomAcl.sqlResolveMemberRole(
-          'room_members.direct_role',
-          'excluded.team_role',
-          'room_members.folder_role',
-          'room_members.role',
-          'room_members.override_role',
-          'room_members.acl_v2'
-        )},
-        source = case
-          when room_members.acl_v2 and room_members.override_role is not null then 'override'
-          when room_members.acl_v2 then 'inherit'
-          when room_members.direct_role is not null then 'direct_share'
-          else 'team'
-        end,
-        source_team_id = excluded.source_team_id,
-        updated_at = now()`,
-        [key, teamMember.user_id, id]
-      )
-    }
     return { roomKey: key, teamId: id }
   })
 }
