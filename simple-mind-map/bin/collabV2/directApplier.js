@@ -165,6 +165,28 @@ async function resolveParent(store, raw) {
   return live
 }
 
+function anchorUidOf(payload) {
+  const raw =
+    payload &&
+    (payload.anchorUid ||
+      payload.anchor_uid ||
+      (payload.expected && payload.expected.anchor_uid))
+  return String(raw || '').trim()
+}
+
+async function resolveInsertIndex(store, parentUid, payload) {
+  const anchorUid = anchorUidOf(payload)
+  if (!anchorUid) return payload && payload.index
+  const kids = (await store.listChildren(parentUid)).filter(
+    item => String(item.uid) !== String((payload && payload.uid) || '')
+  )
+  const anchorIndex = kids.findIndex(item => String(item.uid) === anchorUid)
+  if (anchorIndex < 0) {
+    throw commandError('插入锚点已不在该父节点下', 'ANCHOR_CONFLICT', 409)
+  }
+  return anchorIndex + 1
+}
+
 async function placeAmongSiblings(store, parentUid, uid, index, version) {
   const kids = (await store.listChildren(parentUid)).filter(item => item.uid !== uid)
   const slot = clampIndex(index, kids.length)
@@ -234,7 +256,7 @@ async function applyInsert(store, op, version) {
     store,
     parent.uid,
     uid,
-    payload.index,
+    await resolveInsertIndex(store, parent.uid, payload),
     version
   )
   const extra = dataFields(payload.data || payload)
@@ -885,7 +907,8 @@ async function applyBatch(store, op, options) {
     options.preserveBatchOrder !== true &&
     normalized.length >= 2 &&
     normalized.every(child => normalizeType(child.type) === 'node.insert')
-  if (allInserts && typeof store.insertMany === 'function') {
+  const anchoredInsert = normalized.some(child => anchorUidOf(child.payload))
+  if (allInserts && !anchoredInsert && typeof store.insertMany === 'function') {
     return applyInsertBulk(store, normalized, Number(options.version) || 0, op.roomKey)
   }
   const preconditionBaseline = options.skipWritePreconditions === true

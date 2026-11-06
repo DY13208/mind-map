@@ -8478,6 +8478,34 @@ class Cooperate {
     }
   }
 
+  v2InsertPayload(row) {
+    const payload = {
+      parent: row.parent,
+      uid: row.uid,
+      text: row.text,
+      note: row.note || '',
+      index: row.index,
+      data: row.data || undefined
+    }
+    if (row.anchorUid) payload.anchorUid = row.anchorUid
+    return payload
+  }
+
+  refreshV2InsertPlacement(records) {
+    const renderer = this.mindMap && this.mindMap.renderer
+    const root = renderer && renderer.renderTree
+    if (!root || !records || !records.length) return records
+    return records.map(row => {
+      if (!row || !row.uid) return row
+      const place = collabInsertCollect.findInsertPlacement(root, row.uid)
+      if (!place) return row
+      const next = { ...row, index: place.index }
+      if (place.anchorUid) next.anchorUid = place.anchorUid
+      else delete next.anchorUid
+      return next
+    })
+  }
+
   async flushHttpInsertNow(opts = {}) {
     const fromCommand = !!opts.fromCommand
     let records =
@@ -8537,6 +8565,8 @@ class Cooperate {
         }
       }
     }
+    // 等待文本提交时，后续 Enter 可能已经改过同级顺序。按当前树重算锚点和 index。
+    records = this.refreshV2InsertPlacement(records)
     v2Trace('local.insert.flush', {
       count: records.length,
       uids: records.map(row => row.uid)
@@ -8560,14 +8590,7 @@ class Cooperate {
     if (this.collabV2Adapter && records.length > 1) {
       const ops = records.map(row => ({
         type: 'node.insert',
-        payload: {
-          parent: row.parent,
-          uid: row.uid,
-          text: row.text,
-          note: row.note || '',
-          index: row.index,
-          data: row.data || undefined
-        }
+        payload: this.v2InsertPayload(row)
       }))
       try {
         const submitted = await this.submitV2('node.batch', { ops })
@@ -8600,6 +8623,13 @@ class Cooperate {
         this._lastPastedUids = null
         return
       } catch (err) {
+        if (err && err.code === 'ANCHOR_CONFLICT') {
+          records.forEach(row => {
+            if (this.pendingUids) this.pendingUids.delete(row.uid)
+          })
+          this.mindMap.emit('collab_write_conflict', err)
+          return
+        }
         if (!isPermanentNodeError(err)) {
           console.error('[mind-map] batch insert failed', err)
           if (this.collabV2Adapter && fromCommand) {
@@ -8617,23 +8647,19 @@ class Cooperate {
     for (const row of records) {
       const uid = row.uid
       const parent = row.parent
-      const text = row.text
-      const note = row.note || ''
       try {
         if (!parent) {
           throw new Error('missing parent for insert')
         }
-        await this.httpAddNode({
-          parent,
-          uid,
-          text,
-          note,
-          index: row.index,
-          data: row.data || undefined
-        })
+        await this.httpAddNode(this.v2InsertPayload(row))
         this.acknowledgeInsertedNode(row)
       } catch (err) {
         const msg = String((err && err.message) || err)
+        if (err && err.code === 'ANCHOR_CONFLICT') {
+          if (this.pendingUids) this.pendingUids.delete(uid)
+          this.mindMap.emit('collab_write_conflict', err)
+          continue
+        }
         if (/节点已存在/.test(msg)) {
           this.acknowledgeInsertedNode(row)
         } else if (isPermanentNodeError(err)) {

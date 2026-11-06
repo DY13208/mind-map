@@ -22,6 +22,41 @@ function collectNodeDataUids(item, out = []) {
   return out
 }
 
+function findInsertPlacement(root, uid) {
+  const target = String(uid || '')
+  if (!root || !target) return null
+  let found = null
+  const visit = node => {
+    if (!node || found) return
+    const kids = node.children || []
+    for (let i = 0; i < kids.length; i++) {
+      const child = kids[i]
+      const id = child && child.data && child.data.uid
+      if (String(id || '') === target) {
+        const explicit = child && child._insertAnchorUid ? String(child._insertAnchorUid) : ''
+        if (explicit) {
+          const anchorIndex = kids.findIndex(
+            item => item && item.data && String(item.data.uid || '') === explicit
+          )
+          if (anchorIndex >= 0) {
+            found = { index: anchorIndex + 1, anchorUid: explicit }
+            return
+          }
+        }
+        const prev = i > 0 ? kids[i - 1] : null
+        found = {
+          index: i,
+          anchorUid: prev && prev.data && prev.data.uid ? String(prev.data.uid) : ''
+        }
+        return
+      }
+      visit(child)
+    }
+  }
+  visit(root)
+  return found
+}
+
 function removeUidsFromNodeData(parent, uids) {
   const drop = uids instanceof Set ? uids : new Set(uids || [])
   if (!parent || !Array.isArray(parent.children) || !drop.size) return false
@@ -70,7 +105,7 @@ function collectNewNodeDataInserts(roots, opts = {}) {
       !isTombstoned(parentUid)
     ) {
       seen.add(uid)
-      out.push({
+      const row = {
         uid,
         parent: parentUid,
         text: textOf(item.data),
@@ -78,7 +113,9 @@ function collectNewNodeDataInserts(roots, opts = {}) {
         index,
         depth,
         data: item.data
-      })
+      }
+      if (item._insertAnchorUid) row.anchorUid = String(item._insertAnchorUid)
+      out.push(row)
     }
     const nextDepth = isRoot ? depth : depth + 1
     for (let i = 0; i < kids.length; i++) {
@@ -98,6 +135,7 @@ const api = {
   snapshotNodeDataUids,
   collectNodeDataUids,
   removeUidsFromNodeData,
+  findInsertPlacement,
   collectNewNodeDataInserts
 }
 
