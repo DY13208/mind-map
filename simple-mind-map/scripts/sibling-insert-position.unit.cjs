@@ -57,6 +57,16 @@ function fixture() {
   return { r, parent, children, live }
 }
 function order(parent) { return Array.from(parent.nodeData.children, item => item.data.uid) }
+function storedSiblings(ids) {
+  const positions = generateNKeysBetween(null, null, ids.length)
+  const graph = {
+    parent: { isRoot: true, data: { uid: 'parent' }, children: ids.slice() }
+  }
+  ids.forEach((id, index) => {
+    graph[id] = { data: { uid: id }, position: positions[index], children: [] }
+  })
+  return graph
+}
 
 test('Enter inserts directly after the first, middle, or last selected sibling and preserves the index through server application and event replay', async () => {
   for (let index = 0; index < 3; index++) {
@@ -149,6 +159,84 @@ test('placement hydration can replace node instances before inserting below the 
   assert.equal(order(replacement)[4], 'last')
 })
 
+
+test('rapid Enter before the new node activates keeps each new sibling below the previous one', () => {
+  const { r, parent } = fixture()
+  r.insertNode()
+  const firstNew = order(parent)[2]
+  r.insertNode()
+  r.insertNode()
+  const ids = order(parent)
+  const suffix = id => Number(String(id).replace(/^new-/, ''))
+  assert.deepEqual(ids.slice(0, 2), ['first', 'selected'])
+  assert.equal(ids[2], firstNew)
+  assert.equal(ids[5], 'last')
+  assert.ok(suffix(ids[2]) < suffix(ids[3]) && suffix(ids[3]) < suffix(ids[4]))
+})
+
+test('an already activated sibling stays put when Enter targets the original node again', () => {
+  const { r, parent } = fixture()
+  r.insertNode()
+  const firstNew = order(parent)[2]
+  parent.nodeData.children[2].inserting = false
+  r.insertNode()
+  const ids = order(parent)
+  assert.equal(ids[1], 'selected')
+  assert.equal(ids[3], firstNew)
+  assert.notEqual(ids[2], firstNew)
+  assert.match(ids[2], /^new-/)
+  assert.equal(ids[4], 'last')
+})
+
+test('anchor uid wins over a stale index that would place the sibling above the current node', async () => {
+  const store = createMemoryStore(storedSiblings(['first', 'selected', 'last']))
+  const applied = await applyDirect(store, {
+    type: 'node.insert',
+    payload: { uid: 'created', parent: 'parent', index: 0, anchorUid: 'selected', text: 'created' }
+  }, { version: 1 })
+  assert.deepEqual(store.graph.parent.children, ['first', 'selected', 'created', 'last'])
+  assert.equal(applied.event.payload.index, 2)
+})
+
+test('a missing anchor conflicts and does not insert at another index', async () => {
+  const store = createMemoryStore(storedSiblings(['first', 'selected', 'last']))
+  await assert.rejects(
+    applyDirect(store, {
+      type: 'node.insert',
+      payload: { uid: 'created', parent: 'parent', index: 3, anchorUid: 'gone', text: 'created' }
+    }, { version: 1 }),
+    error => error && error.code === 'ANCHOR_CONFLICT'
+  )
+  assert.equal(store.graph.created, undefined)
+  assert.deepEqual(store.graph.parent.children, ['first', 'selected', 'last'])
+})
+
+test('two clients inserting after the same anchor both remain below that anchor', async () => {
+  const store = createMemoryStore(storedSiblings(['first', 'selected', 'last']))
+  await applyDirect(store, {
+    type: 'node.insert',
+    payload: { uid: 'n1', parent: 'parent', index: 0, anchorUid: 'selected', text: 'n1' }
+  }, { version: 1 })
+  await applyDirect(store, {
+    type: 'node.insert',
+    payload: { uid: 'n2', parent: 'parent', index: 0, anchorUid: 'selected', text: 'n2' }
+  }, { version: 2 })
+  assert.deepEqual(store.graph.parent.children, ['first', 'selected', 'n2', 'n1', 'last'])
+})
+
+test('an anchored batch stays after each anchor instead of appending to the end', async () => {
+  const store = createMemoryStore(storedSiblings(['first', 'selected', 'last']))
+  await applyDirect(store, {
+    type: 'node.batch',
+    payload: {
+      ops: [
+        { type: 'node.insert', payload: { uid: 'n1', parent: 'parent', index: 9, anchorUid: 'selected', text: 'n1' } },
+        { type: 'node.insert', payload: { uid: 'n2', parent: 'parent', index: 0, anchorUid: 'n1', text: 'n2' } }
+      ]
+    }
+  }, { version: 1 })
+  assert.deepEqual(store.graph.parent.children, ['first', 'selected', 'n1', 'n2', 'last'])
+})
 
 test('partial rendered siblings use the full hydrated data order for insertion', () => {
   const { r, parent } = fixture()

@@ -1657,16 +1657,22 @@ class Render {
       const text = isOneLayer
         ? defaultInsertSecondLevelNodeText
         : defaultInsertBelowSecondLevelNodeText
-      // 计算插入位置
-      const index = getNodeDataIndex(node)
+      // 计算插入位置。布局完成前连续按 Enter 时，上一个新节点还没激活，
+      // 选中项仍是原节点。若再次插在原节点后面，新节点会盖到尚未激活的节点上方。
+      let index = getNodeDataIndex(node)
       // 定位失败不能把 -1 + 1 当作 0，否则新节点会被插到最上方。
       if (index < 0) return
+      const siblings = parent.nodeData.children || []
+      while (siblings[index + 1] && siblings[index + 1].inserting) index += 1
+      const anchorUid =
+        siblings[index] && siblings[index].data && siblings[index].data.uid
       // 如果指定的数据就是富文本格式，那么不需要重新创建
       if (alreadyIsRichText && params.resetRichText) {
         delete params.resetRichText
       }
       const newNodeData = {
         inserting,
+        _insertAnchorUid: anchorUid || '',
         data: {
           text: text,
           ...params,

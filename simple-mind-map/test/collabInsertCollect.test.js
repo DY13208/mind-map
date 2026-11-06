@@ -3,6 +3,7 @@ const {
   snapshotNodeDataUids,
   collectNewNodeDataInserts,
   collectNodeDataUids,
+  findInsertPlacement,
   removeUidsFromNodeData
 } = require('../src/utils/collabInsertCollect')
 
@@ -123,6 +124,20 @@ function testTombstonedInsertNotCollected() {
   )
 }
 
+function testEnterAnchorSurvivesAShiftBeforeSubmit() {
+  const created = node('created', '新节点')
+  created._insertAnchorUid = 'selected'
+  const shifted = node('p', 'P', [created, node('selected', '选中'), node('last', '后')])
+  const place = findInsertPlacement(shifted, 'created')
+  assert.strictEqual(place.anchorUid, 'selected')
+  assert.strictEqual(place.index, 2)
+  const rows = collectNewNodeDataInserts([
+    node('p', 'P', [node('selected', '选中'), created])
+  ], { knownUids: new Set(['p', 'selected']) })
+  assert.strictEqual(rows[0].anchorUid, 'selected')
+  assert.strictEqual(rows[0].index, 1)
+}
+
 testSiblingInsertNotFoundByActiveWalk()
 testInsertChild()
 testSkipsKnownUnackedGhost()
@@ -130,4 +145,5 @@ testPasteSubtreeDepthOrder()
 testSkipsAckedAndTombstoned()
 testRemoveUidFromNodeDataBeforeInstanceExists()
 testTombstonedInsertNotCollected()
+testEnterAnchorSurvivesAShiftBeforeSubmit()
 console.log('collabInsertCollect.test.js ok')
