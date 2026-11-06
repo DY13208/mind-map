@@ -1,0 +1,265 @@
+2026-11-06T04:52:53.427400609Z 2026/11/06 04:52:53 [error] 30#30: *8 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /collab-v2/?EIO=4&transport=websocket HTTP/1.1", upstream: "http://172.29.0.13:80/collab-v2/?EIO=4&transport=websocket", host: "ai.stillgroup.net:8989"
+2026-11-06T04:52:53.476656448Z 2026/11/06 04:52:53 [error] 32#32: *7 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /collab-v2/?EIO=4&transport=websocket HTTP/1.1", upstream: "http://172.29.0.13:80/collab-v2/?EIO=4&transport=websocket", host: "ai.stillgroup.net:8989"
+2026-11-06T04:52:53.502062951Z 2026/11/06 04:52:53 [error] 32#32: *16 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /api/workflow-definitions?room_key=room-fyr2s0pb HTTP/2.0", upstream: "http://172.29.0.13:80/api/workflow-definitions?room_key=room-fyr2s0pb", host: "ai.stillgroup.net:8989", referrer: "https://ai.stillgroup.net:8989/?room=room-fyr2s0pb&shell=full&returnTo=%2Ffiles%2Ffolder%2F11f883f6-7a44-4944-b6a3-39bf1809edf1&nav=8306c9bdfaa9471999ffff4cd7cbef2a"
+2026-11-06T04:52:53.504431768Z 2026/11/06 04:52:53 [error] 34#34: *14 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /collab-v2/?EIO=4&transport=websocket HTTP/1.1", upstream: "http://172.29.0.13:80/collab-v2/?EIO=4&transport=websocket", host: "ai.stillgroup.net:8989"
+2026-11-06T04:52:53.563071652Z 2026/11/06 04:52:53 [error] 32#32: *21 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /collab-v2/?EIO=4&transport=websocket HTTP/1.1", upstream: "http://172.29.0.13:80/collab-v2/?EIO=4&transport=websocket", host: "ai.stillgroup.net:8989"
+2026-11-06T04:52:53.587049119Z 2026/11/06 04:52:53 [error] 32#32: *20 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /collab-v2/?EIO=4&transport=websocket HTTP/1.1", upstream: "http://172.29.0.13:80/collab-v2/?EIO=4&transport=websocket", host: "ai.stillgroup.net:8989"
+2026-11-06T04:52:53.587156680Z 2026/11/06 04:52:53 [error] 32#32: *1 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /collab-v2/?EIO=4&transport=websocket HTTP/1.1", upstream: "http://172.29.0.13:80/collab-v2/?EIO=4&transport=websocket", host: "ai.stillgroup.net:8989"
+2026-11-06T04:52:53.587280411Z 2026/11/06 04:52:53 [error] 37#37: *5 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /collab-v2/?EIO=4&transport=websocket HTTP/1.1", upstream: "http://172.29.0.13:80/collab-v2/?EIO=4&transport=websocket", host: "ai.stillgroup.net:8989"
+2026-11-06T04:52:53.587399806Z 2026/11/06 04:52:53 [error] 36#36: *6 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /collab-v2/?EIO=4&transport=websocket HTTP/1.1", upstream: "http://172.29.0.13:80/collab-v2/?EIO=4&transport=websocket", host: "ai.stillgroup.net:8989"
+2026-11-06T04:52:53.587409427Z 2026/11/06 04:52:53 [error] 31#31: *4 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /api/collab-v2/ops?roomKey=room-piho042b&afterRevision=2506&limit=500 HTTP/2.0", upstream: "http://172.29.0.13:80/api/collab-v2/ops?roomKey=room-piho042b&afterRevision=2506&limit=500", host: "ai.stillgroup.net:8989", referrer: "https://ai.stillgroup.net:8989/files/folder/3e8de864-23e6-4d48-9757-9bebc6932ca8?shell=full"
+2026-11-06T04:52:53.587968467Z 2026/11/06 04:52:53 [error] 32#32: *23 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /collab-v2/?EIO=4&transport=websocket HTTP/1.1", upstream: "http://172.29.0.13:80/collab-v2/?EIO=4&transport=websocket", host: "ai.stillgroup.net:8989"
+2026-11-06T04:52:53.642715646Z 2026/11/06 04:52:53 [error] 32#32: *33 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /api/workflow-definitions?room_key=room-li7w80mv HTTP/2.0", upstream: "http://172.29.0.13:80/api/workflow-definitions?room_key=room-li7w80mv", host: "ai.stillgroup.net:8989", referrer: "https://ai.stillgroup.net:8989/?room=room-li7w80mv&shell=full&returnTo=%2Ffiles%2Ffolder%2Fa09d0049-d288-401a-9d56-83eb523adf1c&nav=a1c03649a91d4163b9eebc9b75a5d9ed"
+2026-11-06T04:52:53.642756015Z 2026/11/06 04:52:53 [error] 32#32: *33 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /api/leave-notifications HTTP/2.0", upstream: "http://172.29.0.13:80/api/leave-notifications", host: "ai.stillgroup.net:8989", referrer: "https://ai.stillgroup.net:8989/?room=room-li7w80mv&shell=full&returnTo=%2Ffiles%2Ffolder%2Fa09d0049-d288-401a-9d56-83eb523adf1c&nav=a1c03649a91d4163b9eebc9b75a5d9ed"
+2026-11-06T04:52:53.642761924Z 2026/11/06 04:52:53 [error] 32#32: *33 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /api/files/room-li7w80mv/ref-resolve HTTP/2.0", upstream: "http://172.29.0.13:80/api/files/room-li7w80mv/ref-resolve", host: "ai.stillgroup.net:8989", referrer: "https://ai.stillgroup.net:8989/?room=room-li7w80mv&shell=full&returnTo=%2Ffiles%2Ffolder%2Fa09d0049-d288-401a-9d56-83eb523adf1c&nav=a1c03649a91d4163b9eebc9b75a5d9ed"
+2026-11-06T04:52:53.642767243Z 2026/11/06 04:52:53 [error] 32#32: *33 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /api/notifications/access-results?limit=20&offset=0 HTTP/2.0", upstream: "http://172.29.0.13:80/api/notifications/access-results?limit=20&offset=0", host: "ai.stillgroup.net:8989", referrer: "https://ai.stillgroup.net:8989/?room=room-li7w80mv&shell=full&returnTo=%2Ffiles%2Ffolder%2Fa09d0049-d288-401a-9d56-83eb523adf1c&nav=a1c03649a91d4163b9eebc9b75a5d9ed"
+2026-11-06T04:52:53.642771453Z 2026/11/06 04:52:53 [error] 32#32: *33 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "POST /api/files/room-li7w80mv/presence HTTP/2.0", upstream: "http://172.29.0.13:80/api/files/room-li7w80mv/presence", host: "ai.stillgroup.net:8989", referrer: "https://ai.stillgroup.net:8989/?room=room-li7w80mv&shell=full&returnTo=%2Ffiles%2Ffolder%2Fa09d0049-d288-401a-9d56-83eb523adf1c&nav=a1c03649a91d4163b9eebc9b75a5d9ed"
+2026-11-06T04:52:53.642942198Z 2026/11/06 04:52:53 [error] 32#32: *33 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /api/users/me/mentions/unread-count HTTP/2.0", upstream: "http://172.29.0.13:80/api/users/me/mentions/unread-count", host: "ai.stillgroup.net:8989", referrer: "https://ai.stillgroup.net:8989/?room=room-li7w80mv&shell=full&returnTo=%2Ffiles%2Ffolder%2Fa09d0049-d288-401a-9d56-83eb523adf1c&nav=a1c03649a91d4163b9eebc9b75a5d9ed"
+2026-11-06T04:52:53.642952277Z 2026/11/06 04:52:53 [error] 32#32: *33 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /api/notifications/access-requests?limit=20&offset=0 HTTP/2.0", upstream: "http://172.29.0.13:80/api/notifications/access-requests?limit=20&offset=0", host: "ai.stillgroup.net:8989", referrer: "https://ai.stillgroup.net:8989/?room=room-li7w80mv&shell=full&returnTo=%2Ffiles%2Ffolder%2Fa09d0049-d288-401a-9d56-83eb523adf1c&nav=a1c03649a91d4163b9eebc9b75a5d9ed"
+2026-11-06T04:52:53.650239599Z 2026/11/06 04:52:53 [error] 32#32: *2 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /collab-v2/?EIO=4&transport=websocket HTTP/1.1", upstream: "http://172.29.0.13:80/collab-v2/?EIO=4&transport=websocket", host: "ai.stillgroup.net:8989"
+2026-11-06T04:52:53.650573460Z 2026/11/06 04:52:53 [error] 35#35: *3 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /collab-v2/?EIO=4&transport=websocket HTTP/1.1", upstream: "http://172.29.0.13:80/collab-v2/?EIO=4&transport=websocket", host: "ai.stillgroup.net:8989"
+2026-11-06T04:52:53.708477387Z 2026/11/06 04:52:53 [error] 35#35: *37 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /collab-v2/?EIO=4&transport=websocket HTTP/1.1", upstream: "http://172.29.0.13:80/collab-v2/?EIO=4&transport=websocket", host: "ai.stillgroup.net:8989"
+2026-11-06T04:52:53.734292860Z 2026/11/06 04:52:53 [error] 32#32: *48 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /collab-v2/?EIO=4&transport=websocket HTTP/1.1", upstream: "http://172.29.0.13:80/collab-v2/?EIO=4&transport=websocket", host: "ai.stillgroup.net:8989"
+2026-11-06T04:52:53.751231281Z 2026/11/06 04:52:53 [error] 32#32: *49 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /collab-v2/?EIO=4&transport=websocket HTTP/1.1", upstream: "http://172.29.0.13:80/collab-v2/?EIO=4&transport=websocket", host: "ai.stillgroup.net:8989"
+2026-11-06T04:52:53.752334110Z 2026/11/06 04:52:53 [error] 32#32: *52 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /api/workflow-definitions?room_key=room-ejoa2q0j HTTP/2.0", upstream: "http://172.29.0.13:80/api/workflow-definitions?room_key=room-ejoa2q0j", host: "ai.stillgroup.net:8989", referrer: "https://ai.stillgroup.net:8989/?room=room-ejoa2q0j&returnTo=%2Ffiles%2Ffolder%2Fdf9f5573-987a-4bcc-a1af-bc8089ec9d71&nav=f77b5b33914a4ef0b70d6a9346472708&shell=full"
+2026-11-06T04:52:53.752345480Z 2026/11/06 04:52:53 [error] 32#32: *52 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /api/files/room-ejoa2q0j/ref-resolve HTTP/2.0", upstream: "http://172.29.0.13:80/api/files/room-ejoa2q0j/ref-resolve", host: "ai.stillgroup.net:8989", referrer: "https://ai.stillgroup.net:8989/?room=room-ejoa2q0j&returnTo=%2Ffiles%2Ffolder%2Fdf9f5573-987a-4bcc-a1af-bc8089ec9d71&nav=f77b5b33914a4ef0b70d6a9346472708&shell=full"
+2026-11-06T04:52:53.752355483Z 2026/11/06 04:52:53 [error] 32#32: *51 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /collab-v2/?EIO=4&transport=websocket HTTP/1.1", upstream: "http://172.29.0.13:80/collab-v2/?EIO=4&transport=websocket", host: "ai.stillgroup.net:8989"
+2026-11-06T04:52:53.776120737Z 2026/11/06 04:52:53 [error] 35#35: *60 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /collab-v2/?EIO=4&transport=websocket HTTP/1.1", upstream: "http://172.29.0.13:80/collab-v2/?EIO=4&transport=websocket", host: "ai.stillgroup.net:8989"
+2026-11-06T04:52:53.780816873Z 2026/11/06 04:52:53 [error] 35#35: *62 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /collab-v2/?EIO=4&transport=websocket HTTP/1.1", upstream: "http://172.29.0.13:80/collab-v2/?EIO=4&transport=websocket", host: "ai.stillgroup.net:8989"
+2026-11-06T04:52:53.828520115Z 2026/11/06 04:52:53 [error] 35#35: *59 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /collab-v2/?EIO=4&transport=websocket HTTP/1.1", upstream: "http://172.29.0.13:80/collab-v2/?EIO=4&transport=websocket", host: "ai.stillgroup.net:8989"
+2026-11-06T04:52:53.830600498Z 2026/11/06 04:52:53 [error] 35#35: *65 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /collab-v2/?EIO=4&transport=websocket HTTP/1.1", upstream: "http://172.29.0.13:80/collab-v2/?EIO=4&transport=websocket", host: "ai.stillgroup.net:8989"
+2026-11-06T04:52:53.861037113Z 2026/11/06 04:52:53 [error] 35#35: *68 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /collab-v2/?EIO=4&transport=websocket HTTP/1.1", upstream: "http://172.29.0.13:80/collab-v2/?EIO=4&transport=websocket", host: "ai.stillgroup.net:8989"
+2026-11-06T04:52:53.863774678Z 2026/11/06 04:52:53 [error] 35#35: *69 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /collab-v2/?EIO=4&transport=websocket HTTP/1.1", upstream: "http://172.29.0.13:80/collab-v2/?EIO=4&transport=websocket", host: "ai.stillgroup.net:8989"
+2026-11-06T04:52:53.897797703Z 2026/11/06 04:52:53 [error] 35#35: *72 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /collab-v2/?EIO=4&transport=websocket HTTP/1.1", upstream: "http://172.29.0.13:80/collab-v2/?EIO=4&transport=websocket", host: "ai.stillgroup.net:8989"
+2026-11-06T04:52:53.902098976Z 2026/11/06 04:52:53 [error] 32#32: *16 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /api/files/room-fyr2s0pb/ref-resolve HTTP/2.0", upstream: "http://172.29.0.13:80/api/files/room-fyr2s0pb/ref-resolve", host: "ai.stillgroup.net:8989", referrer: "https://ai.stillgroup.net:8989/?room=room-fyr2s0pb&shell=full&returnTo=%2Ffiles%2Ffolder%2F11f883f6-7a44-4944-b6a3-39bf1809edf1&nav=8306c9bdfaa9471999ffff4cd7cbef2a"
+2026-11-06T04:52:54.006124016Z 2026/11/06 04:52:54 [error] 35#35: *77 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /api/files/room-q789jhdd/ref-resolve HTTP/2.0", upstream: "http://172.29.0.13:80/api/files/room-q789jhdd/ref-resolve", host: "ai.stillgroup.net:8989", referrer: "https://ai.stillgroup.net:8989/?room=room-0x3922cm&shell=full&returnTo=%2Ffiles%2Ffolder%2Ff53224b0-dce2-4c65-b54e-ca22c46e0438&nav=2cf604798cda479eaa451d0140e1e097"
+2026-11-06T04:52:54.006210916Z 2026/11/06 04:52:54 [error] 35#35: *77 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /api/files/room-yf3hvn8t/ref-resolve HTTP/2.0", upstream: "http://172.29.0.13:80/api/files/room-yf3hvn8t/ref-resolve", host: "ai.stillgroup.net:8989", referrer: "https://ai.stillgroup.net:8989/?room=room-0x3922cm&shell=full&returnTo=%2Ffiles%2Ffolder%2Ff53224b0-dce2-4c65-b54e-ca22c46e0438&nav=2cf604798cda479eaa451d0140e1e097"
+2026-11-06T04:52:54.014708710Z 2026/11/06 04:52:54 [error] 35#35: *79 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /collab-v2/?EIO=4&transport=websocket HTTP/1.1", upstream: "http://172.29.0.13:80/collab-v2/?EIO=4&transport=websocket", host: "ai.stillgroup.net:8989"
+2026-11-06T04:52:54.032595997Z 2026/11/06 04:52:54 [error] 35#35: *83 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /collab-v2/?EIO=4&transport=websocket HTTP/1.1", upstream: "http://172.29.0.13:80/collab-v2/?EIO=4&transport=websocket", host: "ai.stillgroup.net:8989"
+2026-11-06T04:52:54.094501280Z 2026/11/06 04:52:54 [error] 35#35: *75 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /collab-v2/?EIO=4&transport=websocket HTTP/1.1", upstream: "http://172.29.0.13:80/collab-v2/?EIO=4&transport=websocket", host: "ai.stillgroup.net:8989"
+2026-11-06T04:52:54.151853888Z 2026/11/06 04:52:54 [error] 35#35: *77 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /api/files/room-67iyfyuv/ref-resolve HTTP/2.0", upstream: "http://172.29.0.13:80/api/files/room-67iyfyuv/ref-resolve", host: "ai.stillgroup.net:8989", referrer: "https://ai.stillgroup.net:8989/?room=room-0x3922cm&shell=full&returnTo=%2Ffiles%2Ffolder%2Ff53224b0-dce2-4c65-b54e-ca22c46e0438&nav=2cf604798cda479eaa451d0140e1e097"
+2026-11-06T04:52:54.158118905Z 2026/11/06 04:52:54 [error] 35#35: *77 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /api/files/room-su987o10/ref-resolve HTTP/2.0", upstream: "http://172.29.0.13:80/api/files/room-su987o10/ref-resolve", host: "ai.stillgroup.net:8989", referrer: "https://ai.stillgroup.net:8989/?room=room-0x3922cm&shell=full&returnTo=%2Ffiles%2Ffolder%2Ff53224b0-dce2-4c65-b54e-ca22c46e0438&nav=2cf604798cda479eaa451d0140e1e097"
+2026-11-06T04:52:54.176895973Z 2026/11/06 04:52:54 [error] 31#31: *89 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /collab-v2/?EIO=4&transport=websocket HTTP/1.1", upstream: "http://172.29.0.13:80/collab-v2/?EIO=4&transport=websocket", host: "ai.stillgroup.net:8989"
+2026-11-06T04:52:54.342328140Z 2026/11/06 04:52:54 [error] 31#31: *91 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /collab-v2/?EIO=4&transport=websocket HTTP/1.1", upstream: "http://172.29.0.13:80/collab-v2/?EIO=4&transport=websocket", host: "ai.stillgroup.net:8989"
+2026-11-06T04:52:54.428700077Z 2026/11/06 04:52:54 [error] 31#31: *93 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /mcp HTTP/1.1", upstream: "http://172.29.0.13:80/mcp", host: "ai.stillgroup.net:8989"
+2026-11-06T04:52:54.843487527Z 2026/11/06 04:52:54 [error] 32#32: *52 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /api/files/room-ejoa2q0j/ref-resolve HTTP/2.0", upstream: "http://172.29.0.13:80/api/files/room-ejoa2q0j/ref-resolve", host: "ai.stillgroup.net:8989", referrer: "https://ai.stillgroup.net:8989/?room=room-ejoa2q0j&returnTo=%2Ffiles%2Ffolder%2Fdf9f5573-987a-4bcc-a1af-bc8089ec9d71&nav=f77b5b33914a4ef0b70d6a9346472708&shell=full"
+2026-11-06T04:52:54.924980757Z 2026/11/06 04:52:54 [error] 31#31: *96 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /collab-v2/?EIO=4&transport=websocket HTTP/1.1", upstream: "http://172.29.0.13:80/collab-v2/?EIO=4&transport=websocket", host: "ai.stillgroup.net:8989"
+2026-11-06T04:52:54.966609554Z 2026/11/06 04:52:54 [error] 31#31: *98 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /collab-v2/?EIO=4&transport=websocket HTTP/1.1", upstream: "http://172.29.0.13:80/collab-v2/?EIO=4&transport=websocket", host: "ai.stillgroup.net:8989"
+2026-11-06T04:52:54.977880672Z 2026/11/06 04:52:54 [error] 38#38: *100 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /api/workflow-definitions?room_key=room-ejoa2q0j HTTP/2.0", upstream: "http://172.29.0.13:80/api/workflow-definitions?room_key=room-ejoa2q0j", host: "ai.stillgroup.net:8989", referrer: "https://ai.stillgroup.net:8989/?room=room-ejoa2q0j&shell=full&returnTo=%2Ffiles%2Ffolder%2F91f38175-a9a6-432b-9bbe-d6780b09eea1&nav=7ded42b10d5d4ed1953fd7846d89c88c"
+2026-11-06T04:52:55.077165848Z 2026/11/06 04:52:55 [error] 31#31: *103 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /api/files/room-hft1202f/ref-resolve HTTP/2.0", upstream: "http://172.29.0.13:80/api/files/room-hft1202f/ref-resolve", host: "ai.stillgroup.net:8989", referrer: "https://ai.stillgroup.net:8989/?room=room-hft1202f&shell=full&returnTo=%2Ffiles%2Ffolder%2Fd50ea39d-bd9d-4f75-bb50-1b3a93ef6c50&nav=73306b835d65487282ee8795a44c9128"
+2026-11-06T04:52:55.098723578Z 2026/11/06 04:52:55 [error] 31#31: *103 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /api/files/room-qajvo1m3/ref-resolve HTTP/2.0", upstream: "http://172.29.0.13:80/api/files/room-qajvo1m3/ref-resolve", host: "ai.stillgroup.net:8989", referrer: "https://ai.stillgroup.net:8989/?room=room-hft1202f&shell=full&returnTo=%2Ffiles%2Ffolder%2Fd50ea39d-bd9d-4f75-bb50-1b3a93ef6c50&nav=73306b835d65487282ee8795a44c9128"
+2026-11-06T04:52:55.120282171Z 2026/11/06 04:52:55 [error] 31#31: *103 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /api/files/room-cwiluvby/ref-resolve HTTP/2.0", upstream: "http://172.29.0.13:80/api/files/room-cwiluvby/ref-resolve", host: "ai.stillgroup.net:8989", referrer: "https://ai.stillgroup.net:8989/?room=room-hft1202f&shell=full&returnTo=%2Ffiles%2Ffolder%2Fd50ea39d-bd9d-4f75-bb50-1b3a93ef6c50&nav=73306b835d65487282ee8795a44c9128"
+2026-11-06T04:52:55.133205535Z 2026/11/06 04:52:55 [error] 31#31: *103 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /api/workflow-definitions?room_key=room-hft1202f HTTP/2.0", upstream: "http://172.29.0.13:80/api/workflow-definitions?room_key=room-hft1202f", host: "ai.stillgroup.net:8989", referrer: "https://ai.stillgroup.net:8989/?room=room-hft1202f&shell=full&returnTo=%2Ffiles%2Ffolder%2Fd50ea39d-bd9d-4f75-bb50-1b3a93ef6c50&nav=73306b835d65487282ee8795a44c9128"
+2026-11-06T04:52:55.136603615Z 2026/11/06 04:52:55 [error] 31#31: *108 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /collab-v2/?EIO=4&transport=websocket HTTP/1.1", upstream: "http://172.29.0.13:80/collab-v2/?EIO=4&transport=websocket", host: "ai.stillgroup.net:8989"
+2026-11-06T04:52:55.146704351Z 2026/11/06 04:52:55 [error] 31#31: *103 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /api/files/room-0bqxe4mx/ref-resolve HTTP/2.0", upstream: "http://172.29.0.13:80/api/files/room-0bqxe4mx/ref-resolve", host: "ai.stillgroup.net:8989", referrer: "https://ai.stillgroup.net:8989/?room=room-hft1202f&shell=full&returnTo=%2Ffiles%2Ffolder%2Fd50ea39d-bd9d-4f75-bb50-1b3a93ef6c50&nav=73306b835d65487282ee8795a44c9128"
+2026-11-06T04:52:55.174224688Z 2026/11/06 04:52:55 [error] 31#31: *103 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /api/files/room-dk3fkzb5/ref-resolve HTTP/2.0", upstream: "http://172.29.0.13:80/api/files/room-dk3fkzb5/ref-resolve", host: "ai.stillgroup.net:8989", referrer: "https://ai.stillgroup.net:8989/?room=room-hft1202f&shell=full&returnTo=%2Ffiles%2Ffolder%2Fd50ea39d-bd9d-4f75-bb50-1b3a93ef6c50&nav=73306b835d65487282ee8795a44c9128"
+2026-11-06T04:52:55.186796089Z 2026/11/06 04:52:55 [error] 31#31: *103 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /api/files/room-9pj5n0jm/ref-resolve HTTP/2.0", upstream: "http://172.29.0.13:80/api/files/room-9pj5n0jm/ref-resolve", host: "ai.stillgroup.net:8989", referrer: "https://ai.stillgroup.net:8989/?room=room-hft1202f&shell=full&returnTo=%2Ffiles%2Ffolder%2Fd50ea39d-bd9d-4f75-bb50-1b3a93ef6c50&nav=73306b835d65487282ee8795a44c9128"
+2026-11-06T04:52:55.199636857Z 2026/11/06 04:52:55 [error] 31#31: *103 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /api/files/room-00a7oxfd/ref-resolve HTTP/2.0", upstream: "http://172.29.0.13:80/api/files/room-00a7oxfd/ref-resolve", host: "ai.stillgroup.net:8989", referrer: "https://ai.stillgroup.net:8989/?room=room-hft1202f&shell=full&returnTo=%2Ffiles%2Ffolder%2Fd50ea39d-bd9d-4f75-bb50-1b3a93ef6c50&nav=73306b835d65487282ee8795a44c9128"
+2026-11-06T04:52:55.219118390Z 2026/11/06 04:52:55 [error] 31#31: *103 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /api/files/room-fw9w7xfz/ref-resolve HTTP/2.0", upstream: "http://172.29.0.13:80/api/files/room-fw9w7xfz/ref-resolve", host: "ai.stillgroup.net:8989", referrer: "https://ai.stillgroup.net:8989/?room=room-hft1202f&shell=full&returnTo=%2Ffiles%2Ffolder%2Fd50ea39d-bd9d-4f75-bb50-1b3a93ef6c50&nav=73306b835d65487282ee8795a44c9128"
+2026-11-06T04:52:55.229040510Z 2026/11/06 04:52:55 [error] 31#31: *103 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /api/files/room-06tp6o3c/ref-resolve HTTP/2.0", upstream: "http://172.29.0.13:80/api/files/room-06tp6o3c/ref-resolve", host: "ai.stillgroup.net:8989", referrer: "https://ai.stillgroup.net:8989/?room=room-hft1202f&shell=full&returnTo=%2Ffiles%2Ffolder%2Fd50ea39d-bd9d-4f75-bb50-1b3a93ef6c50&nav=73306b835d65487282ee8795a44c9128"
+2026-11-06T04:52:55.445416012Z 2026/11/06 04:52:55 [error] 31#31: *117 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /collab-v2/?EIO=4&transport=websocket HTTP/1.1", upstream: "http://172.29.0.13:80/collab-v2/?EIO=4&transport=websocket", host: "ai.stillgroup.net:8989"
+2026-11-06T04:52:55.492993669Z 2026/11/06 04:52:55 [error] 31#31: *116 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /collab-v2/?EIO=4&transport=websocket HTTP/1.1", upstream: "http://172.29.0.13:80/collab-v2/?EIO=4&transport=websocket", host: "ai.stillgroup.net:8989"
+2026-11-06T04:52:55.831202282Z 2026/11/06 04:52:55 [error] 31#31: *120 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /api/files/room-6j4dw1vl/ref-resolve HTTP/2.0", upstream: "http://172.29.0.13:80/api/files/room-6j4dw1vl/ref-resolve", host: "ai.stillgroup.net:8989", referrer: "https://ai.stillgroup.net:8989/?room=room-6j4dw1vl&shell=focus&returnTo=%2Fmy-maps%2Ffolder%2F59597cc5-fb51-4471-9ebb-f51283b3c7a1&nav=cf0f5597482b42b88e5dc38c08fb166b"
+2026-11-06T04:52:55.831229833Z 2026/11/06 04:52:55 [error] 31#31: *120 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /api/workflow-definitions?room_key=room-6j4dw1vl HTTP/2.0", upstream: "http://172.29.0.13:80/api/workflow-definitions?room_key=room-6j4dw1vl", host: "ai.stillgroup.net:8989", referrer: "https://ai.stillgroup.net:8989/?room=room-6j4dw1vl&shell=focus&returnTo=%2Fmy-maps%2Ffolder%2F59597cc5-fb51-4471-9ebb-f51283b3c7a1&nav=cf0f5597482b42b88e5dc38c08fb166b"
+2026-11-06T04:52:56.083322116Z 2026/11/06 04:52:56 [error] 31#31: *123 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /api/workflow-definitions?room_key=room-60q6noy9 HTTP/2.0", upstream: "http://172.29.0.13:80/api/workflow-definitions?room_key=room-60q6noy9", host: "ai.stillgroup.net:8989", referrer: "https://ai.stillgroup.net:8989/?room=room-60q6noy9&shell=focus&returnTo=%2Fmy-maps%2Ffolder%2Fdfdbc972-9c9b-471a-82a3-5dd8f2195ab9&nav=2eba6fdb8c4d47a18661e483d1abaee8"
+2026-11-06T04:52:56.136001933Z 2026/11/06 04:52:56 [error] 31#31: *123 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /api/files/room-60q6noy9/ref-resolve HTTP/2.0", upstream: "http://172.29.0.13:80/api/files/room-60q6noy9/ref-resolve", host: "ai.stillgroup.net:8989", referrer: "https://ai.stillgroup.net:8989/?room=room-60q6noy9&shell=focus&returnTo=%2Fmy-maps%2Ffolder%2Fdfdbc972-9c9b-471a-82a3-5dd8f2195ab9&nav=2eba6fdb8c4d47a18661e483d1abaee8"
+2026-11-06T04:52:56.175388779Z 2026/11/06 04:52:56 [error] 31#31: *126 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /collab-v2/?EIO=4&transport=websocket HTTP/1.1", upstream: "http://172.29.0.13:80/collab-v2/?EIO=4&transport=websocket", host: "ai.stillgroup.net:8989"
+2026-11-06T04:52:56.236668215Z 2026/11/06 04:52:56 [error] 32#32: *33 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /api/workflow-definitions?room_key=room-li7w80mv HTTP/2.0", upstream: "http://172.29.0.13:80/api/workflow-definitions?room_key=room-li7w80mv", host: "ai.stillgroup.net:8989", referrer: "https://ai.stillgroup.net:8989/?room=room-li7w80mv&shell=full&returnTo=%2Ffiles%2Ffolder%2Fa09d0049-d288-401a-9d56-83eb523adf1c&nav=a1c03649a91d4163b9eebc9b75a5d9ed"
+2026-11-06T04:52:56.505856087Z 2026/11/06 04:52:56 [error] 31#31: *130 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /collab-v2/?EIO=4&transport=websocket HTTP/1.1", upstream: "http://172.29.0.13:80/collab-v2/?EIO=4&transport=websocket", host: "ai.stillgroup.net:8989"
+2026-11-06T04:52:56.613622304Z 2026/11/06 04:52:56 [error] 31#31: *132 connect() failed (111: Connection refused) while connecting to upstream, client: 172.29.0.1, server: _, request: "GET /collab-v2/?EIO=4&transport=websocket HTTP/1.1", upstream: "http://172.29.0.13:80/collab-v2/?EIO=4&transport=websocket", host: "ai.stillgroup.net:8989"
+2026-11-06T04:53:08.525356180Z 2026/11/06 04:53:08 [alert] 1#1: unknown process 61 exited on signal 13
+2026-11-06T04:53:28.735260051Z 2026/11/06 04:53:28 [alert] 1#1: unknown process 78 exited on signal 13
+2026-11-06T04:53:48.879987781Z 2026/11/06 04:53:48 [alert] 1#1: unknown process 94 exited on signal 13
+2026-11-06T04:54:08.994674890Z 2026/11/06 04:54:08 [alert] 1#1: unknown process 110 exited on signal 13
+2026-11-06T04:54:19.063705112Z 2026/11/06 04:54:19 [alert] 1#1: unknown process 118 exited on signal 13
+2026-11-06T04:55:09.378295077Z 2026/11/06 04:55:09 [alert] 1#1: unknown process 157 exited on signal 13
+2026-11-06T04:55:49.650951600Z 2026/11/06 04:55:49 [alert] 1#1: unknown process 189 exited on signal 13
+2026-11-06T04:56:09.777400532Z 2026/11/06 04:56:09 [alert] 1#1: unknown process 205 exited on signal 13
+2026-11-06T04:56:19.836913044Z 2026/11/06 04:56:19 [alert] 1#1: unknown process 213 exited on signal 13
+2026-11-06T04:56:29.882519084Z 2026/11/06 04:56:29 [alert] 1#1: unknown process 221 exited on signal 13
+2026-11-06T04:56:39.929809429Z 2026/11/06 04:56:39 [alert] 1#1: unknown process 229 exited on signal 13
+2026-11-06T04:57:00.034163326Z 2026/11/06 04:57:00 [alert] 1#1: unknown process 246 exited on signal 13
+2026-11-06T04:57:40.225491196Z 2026/11/06 04:57:40 [alert] 1#1: unknown process 278 exited on signal 13
+2026-11-06T04:57:50.278346297Z 2026/11/06 04:57:50 [alert] 1#1: unknown process 286 exited on signal 13
+2026-11-06T04:58:00.332904294Z 2026/11/06 04:58:00 [alert] 1#1: unknown process 294 exited on signal 13
+2026-11-06T04:58:10.377051923Z 2026/11/06 04:58:10 [alert] 1#1: unknown process 302 exited on signal 13
+2026-11-06T04:58:20.441143434Z 2026/11/06 04:58:20 [alert] 1#1: unknown process 310 exited on signal 13
+2026-11-06T04:58:30.498950817Z 2026/11/06 04:58:30 [alert] 1#1: unknown process 318 exited on signal 13
+2026-11-06T04:59:00.716664293Z 2026/11/06 04:59:00 [alert] 1#1: unknown process 342 exited on signal 13
+2026-11-06T04:59:10.793436172Z 2026/11/06 04:59:10 [alert] 1#1: unknown process 350 exited on signal 13
+2026-11-06T04:59:20.867082945Z 2026/11/06 04:59:20 [alert] 1#1: unknown process 358 exited on signal 13
+2026-11-06T04:59:30.925430380Z 2026/11/06 04:59:30 [alert] 1#1: unknown process 366 exited on signal 13
+2026-11-06T05:00:11.211074964Z 2026/11/06 05:00:11 [alert] 1#1: unknown process 398 exited on signal 13
+2026-11-06T05:00:31.349124269Z 2026/11/06 05:00:31 [alert] 1#1: unknown process 414 exited on signal 13
+2026-11-06T05:00:41.421388097Z 2026/11/06 05:00:41 [alert] 1#1: unknown process 422 exited on signal 13
+2026-11-06T05:00:51.489466556Z 2026/11/06 05:00:51 [alert] 1#1: unknown process 430 exited on signal 13
+2026-11-06T05:01:01.533012359Z 2026/11/06 05:01:01 [alert] 1#1: unknown process 438 exited on signal 13
+2026-11-06T05:01:41.787725907Z 2026/11/06 05:01:41 [alert] 1#1: unknown process 471 exited on signal 13
+2026-11-06T05:01:51.853122357Z 2026/11/06 05:01:51 [alert] 1#1: unknown process 479 exited on signal 13
+2026-11-06T05:02:01.898071543Z 2026/11/06 05:02:01 [alert] 1#1: unknown process 487 exited on signal 13
+2026-11-06T05:02:42.149259385Z 2026/11/06 05:02:42 [alert] 1#1: unknown process 519 exited on signal 13
+2026-11-06T05:03:02.306876355Z 2026/11/06 05:03:02 [alert] 1#1: unknown process 535 exited on signal 13
+2026-11-06T05:03:52.602507404Z 2026/11/06 05:03:52 [alert] 1#1: unknown process 575 exited on signal 13
+2026-11-06T05:04:02.669198601Z 2026/11/06 05:04:02 [alert] 1#1: unknown process 584 exited on signal 13
+2026-11-06T05:04:12.720037775Z 2026/11/06 05:04:12 [alert] 1#1: unknown process 592 exited on signal 13
+2026-11-06T05:04:22.777879774Z 2026/11/06 05:04:22 [alert] 1#1: unknown process 600 exited on signal 13
+2026-11-06T05:04:42.893879044Z 2026/11/06 05:04:42 [alert] 1#1: unknown process 616 exited on signal 13
+2026-11-06T05:06:53.673926496Z 2026/11/06 05:06:53 [alert] 1#1: unknown process 720 exited on signal 13
+2026-11-06T05:08:14.188684707Z 2026/11/06 05:08:14 [alert] 1#1: unknown process 785 exited on signal 13
+2026-11-06T05:08:44.385883769Z 2026/11/06 05:08:44 [alert] 1#1: unknown process 809 exited on signal 13
+2026-11-06T05:08:54.461453016Z 2026/11/06 05:08:54 [alert] 1#1: unknown process 817 exited on signal 13
+2026-11-06T05:09:04.517110289Z 2026/11/06 05:09:04 [alert] 1#1: unknown process 825 exited on signal 13
+2026-11-06T05:09:34.713068097Z 2026/11/06 05:09:34 [alert] 1#1: unknown process 849 exited on signal 13
+2026-11-06T05:10:55.179130930Z 2026/11/06 05:10:55 [alert] 1#1: unknown process 913 exited on signal 13
+2026-11-06T05:11:15.293146192Z 2026/11/06 05:11:15 [alert] 1#1: unknown process 929 exited on signal 13
+2026-11-06T05:11:55.544093635Z 2026/11/06 05:11:55 [alert] 1#1: unknown process 962 exited on signal 13
+2026-11-06T05:12:05.601357413Z 2026/11/06 05:12:05 [alert] 1#1: unknown process 971 exited on signal 13
+2026-11-06T05:12:15.661812831Z 2026/11/06 05:12:15 [alert] 1#1: unknown process 979 exited on signal 13
+2026-11-06T05:12:35.778015686Z 2026/11/06 05:12:35 [alert] 1#1: unknown process 995 exited on signal 13
+2026-11-06T05:14:46.593793803Z 2026/11/06 05:14:46 [alert] 1#1: unknown process 1099 exited on signal 13
+2026-11-06T05:14:56.649620631Z 2026/11/06 05:14:56 [alert] 1#1: unknown process 1107 exited on signal 13
+2026-11-06T05:15:06.707941567Z 2026/11/06 05:15:06 [alert] 1#1: unknown process 1115 exited on signal 13
+2026-11-06T05:15:57.016880023Z 2026/11/06 05:15:57 [alert] 1#1: unknown process 1155 exited on signal 13
+2026-11-06T05:17:27.591500395Z 2026/11/06 05:17:27 [alert] 1#1: unknown process 1227 exited on signal 13
+2026-11-06T05:17:47.719705897Z 2026/11/06 05:17:47 [alert] 1#1: unknown process 1243 exited on signal 13
+2026-11-06T05:17:57.789859331Z 2026/11/06 05:17:57 [alert] 1#1: unknown process 1251 exited on signal 13
+2026-11-06T05:18:07.853973997Z 2026/11/06 05:18:07 [alert] 1#1: unknown process 1259 exited on signal 13
+2026-11-06T05:18:17.909091662Z 2026/11/06 05:18:17 [alert] 1#1: unknown process 1267 exited on signal 13
+2026-11-06T05:19:18.271087584Z 2026/11/06 05:19:18 [alert] 1#1: unknown process 1315 exited on signal 13
+2026-11-06T05:19:48.431643207Z 2026/11/06 05:19:48 [alert] 1#1: unknown process 1339 exited on signal 13
+2026-11-06T05:19:58.499044370Z 2026/11/06 05:19:58 [alert] 1#1: unknown process 1347 exited on signal 13
+2026-11-06T05:20:58.867927512Z 2026/11/06 05:20:58 [alert] 1#1: unknown process 1395 exited on signal 13
+2026-11-06T05:21:08.910961700Z 2026/11/06 05:21:08 [alert] 1#1: unknown process 1403 exited on signal 13
+2026-11-06T05:21:18.969027218Z 2026/11/06 05:21:18 [alert] 1#1: unknown process 1411 exited on signal 13
+2026-11-06T05:21:39.093445962Z 2026/11/06 05:21:39 [alert] 1#1: unknown process 1427 exited on signal 13
+2026-11-06T05:22:09.279759162Z 2026/11/06 05:22:09 [alert] 1#1: unknown process 1452 exited on signal 13
+2026-11-06T05:22:29.405257800Z 2026/11/06 05:22:29 [alert] 1#1: unknown process 1468 exited on signal 13
+2026-11-06T05:22:49.526453858Z 2026/11/06 05:22:49 [alert] 1#1: unknown process 1484 exited on signal 13
+2026-11-06T05:23:39.921363863Z 2026/11/06 05:23:39 [alert] 1#1: unknown process 1526 exited on signal 13
+2026-11-06T05:23:49.989254522Z 2026/11/06 05:23:49 [alert] 1#1: unknown process 1534 exited on signal 13
+2026-11-06T05:24:00.055239191Z 2026/11/06 05:24:00 [alert] 1#1: unknown process 1542 exited on signal 13
+2026-11-06T05:24:10.117932453Z 2026/11/06 05:24:10 [alert] 1#1: unknown process 1550 exited on signal 13
+2026-11-06T05:24:20.172878327Z 2026/11/06 05:24:20 [alert] 1#1: unknown process 1558 exited on signal 13
+2026-11-06T05:24:30.219832574Z 2026/11/06 05:24:30 [alert] 1#1: unknown process 1566 exited on signal 13
+2026-11-06T05:25:20.521933265Z 2026/11/06 05:25:20 [alert] 1#1: unknown process 1607 exited on signal 13
+2026-11-06T05:25:40.625552437Z 2026/11/06 05:25:40 [alert] 1#1: unknown process 1624 exited on signal 13
+2026-11-06T05:25:50.672420692Z 2026/11/06 05:25:50 [alert] 1#1: unknown process 1632 exited on signal 13
+2026-11-06T05:26:51.071701110Z 2026/11/06 05:26:51 [alert] 1#1: unknown process 1680 exited on signal 13
+2026-11-06T05:27:11.191304653Z 2026/11/06 05:27:11 [alert] 1#1: unknown process 1696 exited on signal 13
+2026-11-06T05:27:21.235160149Z 2026/11/06 05:27:21 [alert] 1#1: unknown process 1704 exited on signal 13
+2026-11-06T05:27:31.302821960Z 2026/11/06 05:27:31 [alert] 1#1: unknown process 1712 exited on signal 13
+2026-11-06T05:27:51.454274510Z 2026/11/06 05:27:51 [alert] 1#1: unknown process 1728 exited on signal 13
+2026-11-06T05:28:01.531995655Z 2026/11/06 05:28:01 [alert] 1#1: unknown process 1736 exited on signal 13
+2026-11-06T05:28:11.590815935Z 2026/11/06 05:28:11 [alert] 1#1: unknown process 1744 exited on signal 13
+2026-11-06T05:28:31.717236724Z 2026/11/06 05:28:31 [alert] 1#1: unknown process 1760 exited on signal 13
+2026-11-06T05:29:32.127664268Z 2026/11/06 05:29:32 [alert] 1#1: unknown process 1808 exited on signal 13
+2026-11-06T05:30:02.377909785Z 2026/11/06 05:30:02 [alert] 1#1: unknown process 1832 exited on signal 13
+2026-11-06T05:30:22.497265918Z 2026/11/06 05:30:22 [alert] 1#1: unknown process 1848 exited on signal 13
+2026-11-06T05:31:53.110666448Z 2026/11/06 05:31:53 [alert] 1#1: unknown process 1921 exited on signal 13
+2026-11-06T05:32:03.182937050Z 2026/11/06 05:32:03 [alert] 1#1: unknown process 1929 exited on signal 13
+2026-11-06T05:32:13.234397370Z 2026/11/06 05:32:13 [alert] 1#1: unknown process 1937 exited on signal 13
+2026-11-06T05:32:23.302147815Z 2026/11/06 05:32:23 [alert] 1#1: unknown process 1945 exited on signal 13
+2026-11-06T05:34:03.894752740Z 2026/11/06 05:34:03 [alert] 1#1: unknown process 2025 exited on signal 13
+2026-11-06T05:34:24.009618352Z 2026/11/06 05:34:24 [alert] 1#1: unknown process 2041 exited on signal 13
+2026-11-06T05:35:04.335714063Z 2026/11/06 05:35:04 [alert] 1#1: unknown process 2073 exited on signal 13
+2026-11-06T05:36:04.712372400Z 2026/11/06 05:36:04 [alert] 1#1: unknown process 2121 exited on signal 13
+2026-11-06T05:36:14.777745748Z 2026/11/06 05:36:14 [alert] 1#1: unknown process 2129 exited on signal 13
+2026-11-06T05:38:05.511129831Z 2026/11/06 05:38:05 [alert] 1#1: unknown process 2217 exited on signal 13
+2026-11-06T05:38:25.617313435Z 2026/11/06 05:38:25 [alert] 1#1: unknown process 2233 exited on signal 13
+2026-11-06T05:38:35.687524655Z 2026/11/06 05:38:35 [alert] 1#1: unknown process 2241 exited on signal 13
+2026-11-06T05:38:55.806187610Z 2026/11/06 05:38:55 [alert] 1#1: unknown process 2257 exited on signal 13
+2026-11-06T05:39:05.866271315Z 2026/11/06 05:39:05 [alert] 1#1: unknown process 2265 exited on signal 13
+2026-11-06T05:40:46.490527859Z 2026/11/06 05:40:46 [alert] 1#1: unknown process 2347 exited on signal 13
+2026-11-06T05:41:06.606573420Z 2026/11/06 05:41:06 [alert] 1#1: unknown process 2363 exited on signal 13
+2026-11-06T05:41:16.673014380Z 2026/11/06 05:41:16 [alert] 1#1: unknown process 2371 exited on signal 13
+2026-11-06T05:41:26.743849515Z 2026/11/06 05:41:26 [alert] 1#1: unknown process 2379 exited on signal 13
+2026-11-06T05:41:46.862909188Z 2026/11/06 05:41:46 [alert] 1#1: unknown process 2395 exited on signal 13
+2026-11-06T05:42:47.250137307Z 2026/11/06 05:42:47 [alert] 1#1: unknown process 2443 exited on signal 13
+2026-11-06T05:43:47.603710418Z 2026/11/06 05:43:47 [alert] 1#1: unknown process 2491 exited on signal 13
+2026-11-06T05:44:07.722198913Z 2026/11/06 05:44:07 [alert] 1#1: unknown process 2507 exited on signal 13
+2026-11-06T05:45:18.179938578Z 2026/11/06 05:45:18 [alert] 1#1: unknown process 2563 exited on signal 13
+2026-11-06T05:45:28.237978297Z 2026/11/06 05:45:28 [alert] 1#1: unknown process 2571 exited on signal 13
+2026-11-06T05:45:48.384243722Z 2026/11/06 05:45:48 [alert] 1#1: unknown process 2587 exited on signal 13
+2026-11-06T05:45:58.448514213Z 2026/11/06 05:45:58 [alert] 1#1: unknown process 2595 exited on signal 13
+2026-11-06T05:47:29.000135611Z 2026/11/06 05:47:28 [alert] 1#1: unknown process 2668 exited on signal 13
+2026-11-06T05:48:19.328104334Z 2026/11/06 05:48:19 [alert] 1#1: unknown process 2708 exited on signal 13
+2026-11-06T05:48:29.378811175Z 2026/11/06 05:48:29 [alert] 1#1: unknown process 2716 exited on signal 13
+2026-11-06T05:49:09.607890920Z 2026/11/06 05:49:09 [alert] 1#1: unknown process 2748 exited on signal 13
+2026-11-06T05:49:19.670230199Z 2026/11/06 05:49:19 [alert] 1#1: unknown process 2756 exited on signal 13
+2026-11-06T05:49:29.720068786Z 2026/11/06 05:49:29 [alert] 1#1: unknown process 2764 exited on signal 13
+2026-11-06T05:52:51.010910687Z 2026/11/06 05:52:51 [alert] 1#1: unknown process 2924 exited on signal 13
+2026-11-06T05:53:01.100758737Z 2026/11/06 05:53:01 [alert] 1#1: unknown process 2932 exited on signal 13
+2026-11-06T05:53:11.161644816Z 2026/11/06 05:53:11 [alert] 1#1: unknown process 2940 exited on signal 13
+2026-11-06T05:53:41.378530851Z 2026/11/06 05:53:41 [alert] 1#1: unknown process 2964 exited on signal 13
+2026-11-06T05:55:11.922774531Z 2026/11/06 05:55:11 [alert] 1#1: unknown process 3036 exited on signal 13
+2026-11-06T05:56:02.217453231Z 2026/11/06 05:56:02 [alert] 1#1: unknown process 3076 exited on signal 13
+2026-11-06T05:56:42.448909320Z 2026/11/06 05:56:42 [alert] 1#1: unknown process 3108 exited on signal 13
+2026-11-06T05:57:42.823185037Z 2026/11/06 05:57:42 [alert] 1#1: unknown process 3157 exited on signal 13
+2026-11-06T05:57:52.883947661Z 2026/11/06 05:57:52 [alert] 1#1: unknown process 3165 exited on signal 13
+2026-11-06T05:59:43.596311940Z 2026/11/06 05:59:43 [alert] 1#1: unknown process 3253 exited on signal 13
+2026-11-06T05:59:53.673287672Z 2026/11/06 05:59:53 [alert] 1#1: unknown process 3261 exited on signal 13
+2026-11-06T06:00:03.760691316Z 2026/11/06 06:00:03 [alert] 1#1: unknown process 3268 exited on signal 13
+2026-11-06T06:00:54.140432533Z 2026/11/06 06:00:54 [alert] 1#1: unknown process 3308 exited on signal 13
+2026-11-06T06:01:44.448479495Z 2026/11/06 06:01:44 [alert] 1#1: unknown process 3348 exited on signal 13
+2026-11-06T06:03:04.875330316Z 2026/11/06 06:03:04 [alert] 1#1: unknown process 3412 exited on signal 13
+2026-11-06T06:03:55.119193872Z 2026/11/06 06:03:55 [alert] 1#1: unknown process 3452 exited on signal 13
+2026-11-06T06:04:25.258206228Z 2026/11/06 06:04:25 [alert] 1#1: unknown process 3476 exited on signal 13
+2026-11-06T06:06:35.857468363Z 2026/11/06 06:06:35 [alert] 1#1: unknown process 3581 exited on signal 13
+2026-11-06T06:08:06.265905460Z 2026/11/06 06:08:06 [alert] 1#1: unknown process 3653 exited on signal 13
+2026-11-06T06:09:36.671022177Z 2026/11/06 06:09:36 [alert] 1#1: unknown process 3726 exited on signal 13
+2026-11-06T06:09:46.712357436Z 2026/11/06 06:09:46 [alert] 1#1: unknown process 3734 exited on signal 13
+2026-11-06T06:10:26.914660241Z 2026/11/06 06:10:26 [alert] 1#1: unknown process 3766 exited on signal 13
+2026-11-06T06:10:36.956352684Z 2026/11/06 06:10:36 [alert] 1#1: unknown process 3774 exited on signal 13
+2026-11-06T06:10:46.998922453Z 2026/11/06 06:10:46 [alert] 1#1: unknown process 3782 exited on signal 13
+2026-11-06T06:11:27.175036081Z 2026/11/06 06:11:27 [alert] 1#1: unknown process 3814 exited on signal 13
+2026-11-06T06:11:37.219338548Z 2026/11/06 06:11:37 [alert] 1#1: unknown process 3822 exited on signal 13
+2026-11-06T06:11:47.261503865Z 2026/11/06 06:11:47 [alert] 1#1: unknown process 3830 exited on signal 13
+2026-11-06T06:15:18.242482269Z 2026/11/06 06:15:18 [alert] 1#1: unknown process 4000 exited on signal 13
+2026-11-06T06:15:28.286331270Z 2026/11/06 06:15:28 [alert] 1#1: unknown process 4008 exited on signal 13
+2026-11-06T06:17:38.920085928Z 2026/11/06 06:17:38 [alert] 1#1: unknown process 4114 exited on signal 13
+2026-11-06T06:19:39.507284279Z 2026/11/06 06:19:39 [alert] 1#1: unknown process 4210 exited on signal 13
+2026-11-06T06:19:59.595562559Z 2026/11/06 06:19:59 [alert] 1#1: unknown process 4226 exited on signal 13
+2026-11-06T06:21:30.034928694Z 2026/11/06 06:21:30 [alert] 1#1: unknown process 4298 exited on signal 13
+2026-11-06T06:23:00.435440923Z 2026/11/06 06:23:00 [alert] 1#1: unknown process 4370 exited on signal 13
+2026-11-06T06:23:20.522453123Z 2026/11/06 06:23:20 [alert] 1#1: unknown process 4386 exited on signal 13
+2026-11-06T06:23:50.674914325Z 2026/11/06 06:23:50 [alert] 1#1: unknown process 4410 exited on signal 13
+2026-11-06T06:24:00.719755482Z 2026/11/06 06:24:00 [alert] 1#1: unknown process 4418 exited on signal 13
+2026-11-06T06:25:01.000693533Z 2026/11/06 06:25:01 [alert] 1#1: unknown process 4466 exited on signal 13
+2026-11-06T06:27:11.592269638Z 2026/11/06 06:27:11 [alert] 1#1: unknown process 4572 exited on signal 13
+2026-11-06T06:27:21.635777993Z 2026/11/06 06:27:21 [alert] 1#1: unknown process 4580 exited on signal 13
+2026-11-06T06:28:31.992949835Z 2026/11/06 06:28:31 [alert] 1#1: unknown process 4636 exited on signal 13
+2026-11-06T06:29:02.131268840Z 2026/11/06 06:29:02 [alert] 1#1: unknown process 4660 exited on signal 13
+2026-11-06T06:29:22.225617106Z 2026/11/06 06:29:22 [alert] 1#1: unknown process 4676 exited on signal 13
+2026-11-06T06:29:52.365271184Z 2026/11/06 06:29:52 [alert] 1#1: unknown process 4700 exited on signal 13
+2026-11-06T06:31:12.772174967Z 2026/11/06 06:31:12 [alert] 1#1: unknown process 4765 exited on signal 13
+2026-11-06T06:32:13.123757115Z 2026/11/06 06:32:13 [alert] 1#1: unknown process 4813 exited on signal 13
+2026-11-06T06:32:33.229942733Z 2026/11/06 06:32:33 [alert] 1#1: unknown process 4830 exited on signal 13
+2026-11-06T06:33:03.377998211Z 2026/11/06 06:33:03 [alert] 1#1: unknown process 4854 exited on signal 13
+2026-11-06T06:33:13.436619521Z 2026/11/06 06:33:13 [alert] 1#1: unknown process 4862 exited on signal 13
+2026-11-06T06:34:13.740697460Z 2026/11/06 06:34:13 [alert] 1#1: unknown process 4910 exited on signal 13
+2026-11-06T06:34:33.839894452Z 2026/11/06 06:34:33 [alert] 1#1: unknown process 4926 exited on signal 13
+2026-11-06T06:36:04.340622907Z 2026/11/06 06:36:04 [alert] 1#1: unknown process 4998 exited on signal 13
+2026-11-06T06:36:24.444467955Z 2026/11/06 06:36:24 [alert] 1#1: unknown process 5015 exited on signal 13
+2026-11-06T06:36:34.488735831Z 2026/11/06 06:36:34 [alert] 1#1: unknown process 5023 exited on signal 13
+2026-11-06T06:38:45.109647993Z 2026/11/06 06:38:45 [alert] 1#1: unknown process 5127 exited on signal 13
+2026-11-06T06:39:35.360657585Z 2026/11/06 06:39:35 [alert] 1#1: unknown process 5167 exited on signal 13
+2026-11-06T06:40:25.630343455Z 2026/11/06 06:40:25 [alert] 1#1: unknown process 5208 exited on signal 13
+2026-11-06T06:41:15.874011663Z 2026/11/06 06:41:15 [alert] 1#1: unknown process 5249 exited on signal 13
+2026-11-06T06:41:46.042570998Z 2026/11/06 06:41:46 [alert] 1#1: unknown process 5274 exited on signal 13
+2026-11-06T06:42:16.190930435Z 2026/11/06 06:42:16 [alert] 1#1: unknown process 5298 exited on signal 13
+2026-11-06T06:42:36.282108964Z 2026/11/06 06:42:36 [alert] 1#1: unknown process 5314 exited on signal 13
+2026-11-06T06:43:06.425525723Z 2026/11/06 06:43:06 [alert] 1#1: unknown process 5338 exited on signal 13
+2026-11-06T06:43:26.509266206Z 2026/11/06 06:43:26 [alert] 1#1: unknown process 5354 exited on signal 13
+2026-11-06T06:43:36.551482014Z 2026/11/06 06:43:36 [alert] 1#1: unknown process 5362 exited on signal 13
+2026-11-06T06:43:56.660432297Z 2026/11/06 06:43:56 [alert] 1#1: unknown process 5378 exited on signal 13
+2026-11-06T06:44:36.857743034Z 2026/11/06 06:44:36 [alert] 1#1: unknown process 5410 exited on signal 13
+2026-11-06T06:45:07.014699085Z 2026/11/06 06:45:07 [alert] 1#1: unknown process 5434 exited on signal 13
+2026-11-06T06:45:47.193275389Z 2026/11/06 06:45:47 [alert] 1#1: unknown process 5466 exited on signal 13
+2026-11-06T06:46:07.295468164Z 2026/11/06 06:46:07 [alert] 1#1: unknown process 5482 exited on signal 13
+2026-11-06T06:46:17.351651347Z 2026/11/06 06:46:17 [alert] 1#1: unknown process 5491 exited on signal 13
+2026-11-06T06:47:57.887671470Z 2026/11/06 06:47:57 [alert] 1#1: unknown process 5572 exited on signal 13
+2026-11-06T06:48:07.948502664Z 2026/11/06 06:48:07 [alert] 1#1: unknown process 5580 exited on signal 13
+2026-11-06T06:48:18.002174736Z 2026/11/06 06:48:18 [alert] 1#1: unknown process 5588 exited on signal 13
+2026-11-06T06:48:58.248045635Z 2026/11/06 06:48:58 [alert] 1#1: unknown process 5620 exited on signal 13
+2026-11-06T06:49:08.310966388Z 2026/11/06 06:49:08 [alert] 1#1: unknown process 5628 exited on signal 13
+2026-11-06T06:49:18.371625566Z 2026/11/06 06:49:18 [alert] 1#1: unknown process 5636 exited on signal 13

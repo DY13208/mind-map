@@ -1,0 +1,356 @@
+{
+  "400 /mcp <unknown>": {
+    "count": 53,
+    "source": "unknown",
+    "first": "12:52:59",
+    "last": "14:39:25"
+  },
+  "400 /api/leave-template room-li7w80mv": {
+    "count": 9,
+    "source": "referer room",
+    "first": "12:53:04",
+    "last": "13:42:35"
+  },
+  "400 /api/leave-template room-6rinhr3f": {
+    "count": 2,
+    "source": "referer room",
+    "first": "12:56:42",
+    "last": "14:44:09"
+  },
+  "400 /api/leave-template room-o2337gnq": {
+    "count": 4,
+    "source": "referer room",
+    "first": "13:04:31",
+    "last": "13:32:50"
+  },
+  "400 /api/leave-template room-mflie9je": {
+    "count": 6,
+    "source": "referer room",
+    "first": "13:05:33",
+    "last": "13:50:18"
+  },
+  "400 /api/leave-template room-ejoa2q0j": {
+    "count": 2,
+    "source": "referer room",
+    "first": "13:25:37",
+    "last": "14:44:15"
+  },
+  "404 /api/files/:room/locate room-ejoa2q0j": {
+    "count": 1,
+    "source": "target room",
+    "first": "13:25:43",
+    "last": "13:25:43"
+  },
+  "400 /api/leave-template room-dk3fkzb5": {
+    "count": 1,
+    "source": "referer room",
+    "first": "13:25:56",
+    "last": "13:25:56"
+  },
+  "409 /mcp <unknown>": {
+    "count": 2,
+    "source": "unknown",
+    "first": "13:31:14",
+    "last": "13:31:16"
+  },
+  "403 /api/workflow-definitions room-gfzunx60": {
+    "count": 16,
+    "source": "referer room",
+    "first": "13:31:36",
+    "last": "14:23:04"
+  },
+  "404 /mcp <unknown>": {
+    "count": 40,
+    "source": "unknown",
+    "first": "13:32:55",
+    "last": "14:46:39"
+  },
+  "400 /api/leave-template room-xgoibqb8": {
+    "count": 6,
+    "source": "referer room",
+    "first": "13:32:59",
+    "last": "14:47:06"
+  },
+  "400 /api/leave-template room-yk3tz4aj": {
+    "count": 6,
+    "source": "referer room",
+    "first": "13:33:06",
+    "last": "14:03:06"
+  },
+  "403 /api/files/:room/ref-resolve room-6xn4ue0m": {
+    "count": 16,
+    "source": "target room",
+    "first": "13:33:06",
+    "last": "14:03:06"
+  },
+  "403 /api/files/:room/ref-resolve room-hft1202f": {
+    "count": 16,
+    "source": "target room",
+    "first": "13:33:06",
+    "last": "14:03:06"
+  },
+  "403 /api/files/:room/ref-resolve room-0x3922cm": {
+    "count": 15,
+    "source": "target room",
+    "first": "13:33:06",
+    "last": "13:50:16"
+  },
+  "403 /api/files/:room/ref-resolve room-li7w80mv": {
+    "count": 16,
+    "source": "target room",
+    "first": "13:33:06",
+    "last": "14:03:06"
+  },
+  "403 /api/workflow-definitions room-60q6noy9": {
+    "count": 454,
+    "source": "referer room",
+    "first": "13:34:25",
+    "last": "14:22:01"
+  },
+  "400 /api/leave-template room-60q6noy9": {
+    "count": 6,
+    "source": "referer room",
+    "first": "13:34:25",
+    "last": "14:21:20"
+  },
+  "400 /api/leave-template room-dsa2iq0y": {
+    "count": 7,
+    "source": "referer room",
+    "first": "13:36:36",
+    "last": "14:14:17"
+  },
+  "400 /api/leave-template room-5cn5b287": {
+    "count": 4,
+    "source": "referer room",
+    "first": "13:36:41",
+    "last": "14:16:54"
+  },
+  "400 /api/leave-template room-1txy2mj9": {
+    "count": 2,
+    "source": "referer room",
+    "first": "13:37:11",
+    "last": "14:27:33"
+  },
+  "400 /api/leave-template room-6xn4ue0m": {
+    "count": 1,
+    "source": "referer room",
+    "first": "13:38:44",
+    "last": "13:38:44"
+  },
+  "400 /api/leave-template room-efdgvi6h": {
+    "count": 1,
+    "source": "referer room",
+    "first": "13:41:50",
+    "last": "13:41:50"
+  },
+  "400 /api/leave-template room-7g6rak6f": {
+    "count": 2,
+    "source": "referer room",
+    "first": "13:49:11",
+    "last": "13:57:53"
+  },
+  "400 /api/leave-template room-piho042b": {
+    "count": 1,
+    "source": "referer room",
+    "first": "13:50:06",
+    "last": "13:50:06"
+  },
+  "400 /api/leave-template room-gwnriw77": {
+    "count": 3,
+    "source": "referer room",
+    "first": "13:52:49",
+    "last": "13:53:34"
+  },
+  "400 /api/leave-template room-2ya2bfow": {
+    "count": 2,
+    "source": "referer room",
+    "first": "13:59:43",
+    "last": "14:06:46"
+  },
+  "403 /api/files/:room/view-state room-xgoibqb8": {
+    "count": 7,
+    "source": "target room",
+    "first": "14:00:13",
+    "last": "14:07:56"
+  },
+  "400 /api/leave-template room-m0olw01r": {
+    "count": 1,
+    "source": "referer room",
+    "first": "14:00:40",
+    "last": "14:00:40"
+  },
+  "401 /mcp <unknown>": {
+    "count": 1,
+    "source": "unknown",
+    "first": "14:01:14",
+    "last": "14:01:14"
+  },
+  "400 /api/leave-template room-45tx8f90": {
+    "count": 1,
+    "source": "referer room",
+    "first": "14:01:28",
+    "last": "14:01:28"
+  },
+  "403 /api/files/:room/ref-resolve room-va10r59h": {
+    "count": 1,
+    "source": "target room",
+    "first": "14:03:06",
+    "last": "14:03:06"
+  },
+  "403 /api/files/:room/ref-resolve room-22q1zlw0": {
+    "count": 1,
+    "source": "target room",
+    "first": "14:03:06",
+    "last": "14:03:06"
+  },
+  "403 /api/files/:room/ref-resolve room-mflie9je": {
+    "count": 2,
+    "source": "target room",
+    "first": "14:03:06",
+    "last": "14:29:04"
+  },
+  "403 /api/files/:room/ref-resolve room-piho042b": {
+    "count": 1,
+    "source": "target room",
+    "first": "14:03:06",
+    "last": "14:03:06"
+  },
+  "400 /api/leave-template room-oze25aq9": {
+    "count": 1,
+    "source": "referer room",
+    "first": "14:03:40",
+    "last": "14:03:40"
+  },
+  "400 /api/leave-template room-61cqj7t9": {
+    "count": 6,
+    "source": "referer room",
+    "first": "14:04:25",
+    "last": "14:45:14"
+  },
+  "400 /api/leave-template room-1d4owhiy": {
+    "count": 1,
+    "source": "referer room",
+    "first": "14:06:37",
+    "last": "14:06:37"
+  },
+  "400 /api/leave-template room-4r3q5134": {
+    "count": 1,
+    "source": "referer room",
+    "first": "14:07:22",
+    "last": "14:07:22"
+  },
+  "400 /api/leave-template room-67iyfyuv": {
+    "count": 1,
+    "source": "referer room",
+    "first": "14:11:02",
+    "last": "14:11:02"
+  },
+  "400 /api/leave-template room-su987o10": {
+    "count": 1,
+    "source": "referer room",
+    "first": "14:11:11",
+    "last": "14:11:11"
+  },
+  "400 /api/leave-template room-1q77piad": {
+    "count": 2,
+    "source": "referer room",
+    "first": "14:13:53",
+    "last": "14:16:29"
+  },
+  "400 /api/leave-template room-qajvo1m3": {
+    "count": 7,
+    "source": "referer room",
+    "first": "14:15:57",
+    "last": "14:38:11"
+  },
+  "400 /api/leave-template room-yf3hvn8t": {
+    "count": 1,
+    "source": "referer room",
+    "first": "14:16:39",
+    "last": "14:16:39"
+  },
+  "403 /api/workflow-definitions room-mflie9je": {
+    "count": 2,
+    "source": "referer room",
+    "first": "14:29:04",
+    "last": "14:29:07"
+  },
+  "400 /api/leave-template room-ue1u0a10": {
+    "count": 1,
+    "source": "referer room",
+    "first": "14:30:11",
+    "last": "14:30:11"
+  },
+  "403 /api/workflow-definitions room-33vmbjkw": {
+    "count": 23,
+    "source": "referer room",
+    "first": "14:31:03",
+    "last": "14:31:35"
+  },
+  "400 /api/leave-template room-33vmbjkw": {
+    "count": 1,
+    "source": "referer room",
+    "first": "14:31:03",
+    "last": "14:31:03"
+  },
+  "404 /api/files/:room/subtree room-qajvo1m3": {
+    "count": 1,
+    "source": "target room",
+    "first": "14:39:08",
+    "last": "14:39:08"
+  },
+  "404 /api/kb/batches/00000000-0000-0000-0000-000000000000 <unknown>": {
+    "count": 1,
+    "source": "unknown",
+    "first": "14:40:16",
+    "last": "14:40:16"
+  },
+  "499 /api/workflow-definitions room-61cqj7t9": {
+    "count": 1,
+    "source": "referer room",
+    "first": "14:43:35",
+    "last": "14:43:35"
+  },
+  "400 /api/leave-template room-6j4dw1vl": {
+    "count": 1,
+    "source": "referer room",
+    "first": "14:44:06",
+    "last": "14:44:06"
+  },
+  "409 /api/files/:room/info room-6rinhr3f": {
+    "count": 1,
+    "source": "target room",
+    "first": "14:44:09",
+    "last": "14:44:09"
+  },
+  "409 /api/files/:room/meta room-6rinhr3f": {
+    "count": 1,
+    "source": "target room",
+    "first": "14:44:09",
+    "last": "14:44:09"
+  },
+  "400 /api/leave-template room-ouh6h8la": {
+    "count": 1,
+    "source": "referer room",
+    "first": "14:46:14",
+    "last": "14:46:14"
+  },
+  "403 /api/files/:room/view-state room-ouh6h8la": {
+    "count": 1,
+    "source": "target room",
+    "first": "14:46:17",
+    "last": "14:46:17"
+  },
+  "400 /api/leave-template room-kvyu6kb6": {
+    "count": 1,
+    "source": "referer room",
+    "first": "14:46:22",
+    "last": "14:46:22"
+  },
+  "400 /api/leave-template room-22q1zlw0": {
+    "count": 1,
+    "source": "referer room",
+    "first": "14:49:17",
+    "last": "14:49:17"
+  }
+}

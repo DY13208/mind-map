@@ -1,5 +1,6 @@
 const { Server } = require('socket.io')
 const { isAuthEnabled, authenticateWebsocketRequest } = require('../auth')
+const { writeErrorLog } = require('../requestErrorLog')
 const roomAcl = require('../roomAcl')
 const {
   getPool,
@@ -197,12 +198,24 @@ function attachCollabV2(httpServer, options = {}) {
       }
       next()
     } catch (err) {
+      writeErrorLog({ source: 'collab-v2', method: 'connect',
+        code: err.code || 'unauthorized', status: err.statusCode || 401
+      }, socket.request)
       err.data = { code: err.code || 'unauthorized', statusCode: err.statusCode || 401 }
       next(err)
     }
   })
 
   io.on('connection', socket => {
+    const errorReply = (event, body, cb) => result => {
+      if (result && result.ok === false) {
+        writeErrorLog({ source: 'collab-v2', method: event, socketId: socket.id,
+          roomKey: body && (body.roomKey || body.room_key), code: result.code,
+          status: result.statusCode
+        }, { authUser: socket.authUser })
+      }
+      if (typeof cb === 'function') cb(result)
+    }
     socket.data.rooms = new Set()
     socket.data.bridgeRooms = new Set()
     socket.data.watchedRooms = new Set()
@@ -254,7 +267,7 @@ function attachCollabV2(httpServer, options = {}) {
     // Read-only observers receive committed changes without appearing as editors
     // or writing presence. Used by embedded-map titles in other rooms.
     socket.on('map:watch', async (body, cb) => {
-      const reply = typeof cb === 'function' ? cb : () => {}
+      const reply = errorReply('map:watch', body, cb)
       try {
         const roomKey = safeRoomKey(body && body.roomKey)
         if (!roomKey || isDeletedRoom(roomKey)) throw Object.assign(new Error('not found'), { statusCode: 404 })
@@ -288,7 +301,7 @@ function attachCollabV2(httpServer, options = {}) {
     })
 
     socket.on('join', async (body, cb) => {
-      const reply = typeof cb === 'function' ? cb : () => {}
+      const reply = errorReply('join', body, cb)
       try {
         const roomKey = safeRoomKey(body && body.roomKey)
         const clientId = String(
@@ -382,7 +395,7 @@ function attachCollabV2(httpServer, options = {}) {
     })
 
     socket.on('op', async (body, cb) => {
-      const reply = typeof cb === 'function' ? cb : () => {}
+      const reply = errorReply('op', body, cb)
       try {
         const req = Object.assign(socket.request, {
           authUser: socket.authUser,
@@ -478,7 +491,7 @@ function attachCollabV2(httpServer, options = {}) {
     })
 
     socket.on('sync', async (body, cb) => {
-      const reply = typeof cb === 'function' ? cb : () => {}
+      const reply = errorReply('sync', body, cb)
       try {
         const req = Object.assign(socket.request, {
           authUser: socket.authUser,
