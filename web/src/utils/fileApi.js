@@ -799,7 +799,10 @@ export function deleteFileNode(roomKey, uid, options = {}) {
   const payload = {
     keep_children: !!options.keepChildren,
     confirm_sop_change: true,
-    operationId: options.operationId
+    operationId: options.operationId,
+    // 受保护节点的删除必须携带 expected（uid + subtree_token），
+    // 否则服务端 428 PRECONDITION_REQUIRED；由 Cooperate 下潜/删除流程提供。
+    ...(options.expected !== undefined ? { expected: options.expected } : {})
   }
   return request(
     `/api/files/${encodeURIComponent(roomKey)}/nodes/${encodeURIComponent(uid)}`,

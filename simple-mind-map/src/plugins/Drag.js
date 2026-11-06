@@ -514,19 +514,9 @@ class Drag extends Base {
     // 两种跨边界方向：
     //   · 虚拟 → 主树：允许。Cooperate 会把它「提升」成服务端真实节点
     //     （从 owner.generalization 摘出 + node.insert）。
-    //   · 主树 → 虚拟：禁止。主树节点有服务端行，塞进概要子树会让它从主树
-    //     消失而行还在，导致重复出现/同步失败。这类落点直接跳过。
+    //   · 主树 → 虚拟：允许。Cooperate 会把它「下潜」成概要虚拟节点
+    //     （删掉服务端行 + 数据归入 owner.generalization，descendVirtualNode）。
     const renderer = this.mindMap.renderer
-    const isVirtual = node => {
-      let cur = node
-      let guard = 0
-      while (cur && guard++ < 1000) {
-        if (cur.isGeneralization) return true
-        cur = cur.parent
-      }
-      return false
-    }
-    const draggingVirtual = (this.beingDragNodeList || []).some(isVirtual)
     const collect = node => {
       if (!node || node.isGeneralization) {
         return
@@ -535,8 +525,6 @@ class Drag extends Base {
       if (this.checkIsInBeingDragNodeList(node)) {
         return
       }
-      // 主树节点拖拽时，概要子树不能当落点（会产生有行却不在主树的孤点）
-      if (!draggingVirtual && isVirtual(node)) return
       if (!list[node.layerIndex]) {
         list[node.layerIndex] = []
       }
