@@ -1,0 +1,4 @@
+2026-11-06T04:52:54.723579324Z 2026-11-06 04:52:54.723 UTC [61] ERROR:  duplicate key value violates unique constraint "room_version_legacy_map_pkey"
+2026-11-06T04:52:54.723604538Z 2026-11-06 04:52:54.723 UTC [61] STATEMENT:  insert into room_version_legacy_map
+2026-11-06T04:52:54.723605657Z 	       (version_id, room_key, source, old_pk, version_no, tree_snapshot,
+2026-11-06T04:52:54.723609463Z 	     on conflict (room_key, source, old_pk) do nothing

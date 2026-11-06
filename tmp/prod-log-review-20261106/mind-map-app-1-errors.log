@@ -1,0 +1,1767 @@
+2026-11-06T04:52:56.150016271Z Persistence: PostgreSQL rooms + COS mind-map/
+2026-11-06T04:52:57.415191597Z [KnowledgeCompiler][room=room-11rdjk0x] failed: ENOENT: no such file or directory, lstat '/app/knowledge/room-11rdjk0x/README.md' (failCount=1 cooldownMs=5000)
+2026-11-06T04:52:57.447233719Z [WikiCompiler] reconcile rooms=211
+2026-11-06T04:52:58.279106316Z [KnowledgeCompiler][room=room-7suwuo8b] version=0 mode=full dirty=0 changedFiles=0 unchangedFiles=1 deletedFiles=0 duration=183ms
+2026-11-06T04:53:00.117327074Z [KnowledgeCompiler][room=room-li7w80mv] version=3640 mode=incremental dirty=16 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=609ms
+2026-11-06T04:53:02.955881998Z [KnowledgeCompiler][room=room-x6oywn1p] failed: ENOENT: no such file or directory, lstat '/app/knowledge/room-x6oywn1p/README.md' (failCount=1 cooldownMs=5000)
+2026-11-06T04:53:03.147665168Z [KnowledgeCompiler][room=room-7suwuo8b] version=0 mode=full dirty=0 changedFiles=0 unchangedFiles=1 deletedFiles=0 duration=708ms
+2026-11-06T04:53:04.130671030Z [WikiCompiler] contract supplements paused: contract tree missing room=room-au05qkq6
+2026-11-06T04:53:05.549014923Z ROOM_INTEGRITY_REPORT {
+2026-11-06T04:53:05.549049134Z   roomKey: 'room-li7w80mv',
+2026-11-06T04:53:05.549218907Z   errors: [],
+2026-11-06T04:53:05.549220539Z   warnings: [],
+2026-11-06T04:53:05.676539946Z ROOM_INTEGRITY_REPORT {
+2026-11-06T04:53:05.676587940Z   roomKey: 'room-li7w80mv',
+2026-11-06T04:53:05.676824104Z   errors: [],
+2026-11-06T04:53:05.676825696Z   warnings: [],
+2026-11-06T04:53:07.634007185Z [KnowledgeCompiler][room=room-li7w80mv] version=3642 mode=incremental dirty=3 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=319ms
+2026-11-06T04:53:07.775630982Z [WikiCompiler][room=room-li7w80mv] version=3642 generation=eda7e3ff-674d-43ec-bd25-791b5280bc9c topics=6
+2026-11-06T04:53:14.198366880Z [KnowledgeCompiler][room=room-li7w80mv] version=3643 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=292ms
+2026-11-06T04:53:14.351165498Z [WikiCompiler][room=room-li7w80mv] version=3643 generation=8ad0b58b-e8f8-4cd2-bdcd-1d5c2c1b1569 topics=6
+2026-11-06T04:53:20.294326954Z [KnowledgeCompiler][room=room-li7w80mv] version=3647 mode=incremental dirty=4 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=294ms
+2026-11-06T04:53:20.429012009Z [WikiCompiler][room=room-li7w80mv] version=3647 generation=cc8b1afd-37fb-44cc-b235-73d62e1a24df topics=6
+2026-11-06T04:53:33.886486106Z ROOM_INTEGRITY_REPORT {
+2026-11-06T04:53:33.886517937Z   roomKey: 'room-li7w80mv',
+2026-11-06T04:53:33.886651424Z   errors: [],
+2026-11-06T04:53:33.886652929Z   warnings: [],
+2026-11-06T04:53:34.034446728Z ROOM_INTEGRITY_REPORT {
+2026-11-06T04:53:34.034473161Z   roomKey: 'room-li7w80mv',
+2026-11-06T04:53:34.034573747Z   errors: [],
+2026-11-06T04:53:34.034574702Z   warnings: [],
+2026-11-06T04:53:41.182913387Z [KnowledgeCompiler][room=room-li7w80mv] version=3649 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=302ms
+2026-11-06T04:53:41.329479621Z [WikiCompiler][room=room-li7w80mv] version=3649 generation=c60f7bf8-858e-4726-baaf-28b5507bbdec topics=6
+2026-11-06T04:53:45.446695331Z [KnowledgeCompiler][room=room-li7w80mv] version=3651 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=290ms
+2026-11-06T04:53:45.818214264Z [KnowledgeCompiler][room=room-li7w80mv] version=3652 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=300ms
+2026-11-06T04:53:46.142825913Z [KnowledgeCompiler][room=room-li7w80mv] version=3653 mode=incremental dirty=2 changedFiles=0 unchangedFiles=6 deletedFiles=0 duration=253ms
+2026-11-06T04:53:46.265901821Z [WikiCompiler][room=room-li7w80mv] version=3653 generation=c1bff112-ccda-4e1e-9567-88510fd461c0 topics=6
+2026-11-06T04:53:54.225540380Z ROOM_INTEGRITY_REPORT {
+2026-11-06T04:53:54.225561688Z   roomKey: 'room-li7w80mv',
+2026-11-06T04:53:54.225671618Z   errors: [],
+2026-11-06T04:53:54.225672561Z   warnings: [],
+2026-11-06T04:53:54.344530503Z ROOM_INTEGRITY_REPORT {
+2026-11-06T04:53:54.344551189Z   roomKey: 'room-li7w80mv',
+2026-11-06T04:53:54.344652676Z   errors: [],
+2026-11-06T04:53:54.344653689Z   warnings: [],
+2026-11-06T04:54:00.833793421Z [KnowledgeCompiler][room=room-li7w80mv] version=3655 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=272ms
+2026-11-06T04:54:00.970248954Z [WikiCompiler][room=room-li7w80mv] version=3655 generation=f8c66c9e-8265-4323-af80-910574574a25 topics=6
+2026-11-06T04:54:05.813226414Z [KnowledgeCompiler][room=room-li7w80mv] version=3659 mode=incremental dirty=4 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=229ms
+2026-11-06T04:54:05.926854517Z [WikiCompiler][room=room-li7w80mv] version=3659 generation=d4de4425-19fe-4cfe-a0d0-97abaf056209 topics=6
+2026-11-06T04:54:20.608059389Z ROOM_INTEGRITY_REPORT {
+2026-11-06T04:54:20.608090233Z   roomKey: 'room-li7w80mv',
+2026-11-06T04:54:20.608192244Z   errors: [],
+2026-11-06T04:54:20.608193146Z   warnings: [],
+2026-11-06T04:54:20.708240995Z ROOM_INTEGRITY_REPORT {
+2026-11-06T04:54:20.708292123Z   roomKey: 'room-li7w80mv',
+2026-11-06T04:54:20.708394929Z   errors: [],
+2026-11-06T04:54:20.708395958Z   warnings: [],
+2026-11-06T04:54:29.185208594Z [KnowledgeCompiler][room=room-li7w80mv] version=3663 mode=incremental dirty=4 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=303ms
+2026-11-06T04:54:29.321607227Z [WikiCompiler][room=room-li7w80mv] version=3663 generation=2d9b661f-7efc-40ba-a10e-a333f3040cb9 topics=6
+2026-11-06T04:54:37.021748581Z ROOM_INTEGRITY_REPORT {
+2026-11-06T04:54:37.021776556Z   roomKey: 'room-li7w80mv',
+2026-11-06T04:54:37.021899285Z   errors: [],
+2026-11-06T04:54:37.021900260Z   warnings: [],
+2026-11-06T04:54:37.118093536Z ROOM_INTEGRITY_REPORT {
+2026-11-06T04:54:37.118121229Z   roomKey: 'room-li7w80mv',
+2026-11-06T04:54:37.118290576Z   errors: [],
+2026-11-06T04:54:37.118292136Z   warnings: [],
+2026-11-06T04:54:44.423310968Z [KnowledgeCompiler][room=room-li7w80mv] version=3665 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=277ms
+2026-11-06T04:54:44.738867486Z [KnowledgeCompiler][room=room-li7w80mv] version=3666 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=258ms
+2026-11-06T04:54:45.049655810Z [KnowledgeCompiler][room=room-li7w80mv] version=3667 mode=incremental dirty=2 changedFiles=0 unchangedFiles=6 deletedFiles=0 duration=249ms
+2026-11-06T04:54:45.362674259Z [KnowledgeCompiler][room=room-li7w80mv] version=3668 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=256ms
+2026-11-06T04:54:45.679518749Z [KnowledgeCompiler][room=room-li7w80mv] version=3670 mode=incremental dirty=4 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=247ms
+2026-11-06T04:54:45.816450747Z [WikiCompiler][room=room-li7w80mv] version=3670 generation=39638f95-e4cc-4c3a-bc04-eef958c70924 topics=6
+2026-11-06T04:54:46.094503523Z [KnowledgeCompiler][room=room-li7w80mv] version=3671 mode=incremental dirty=2 changedFiles=0 unchangedFiles=6 deletedFiles=0 duration=277ms
+2026-11-06T04:54:46.396192412Z [KnowledgeCompiler][room=room-li7w80mv] version=3672 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=244ms
+2026-11-06T04:54:46.680273903Z [KnowledgeCompiler][room=room-li7w80mv] version=3673 mode=incremental dirty=2 changedFiles=0 unchangedFiles=6 deletedFiles=0 duration=232ms
+2026-11-06T04:54:46.804687212Z [WikiCompiler][room=room-li7w80mv] version=3673 generation=5ba73a3e-d4f9-4430-a047-a462aff6e0cf topics=6
+2026-11-06T04:54:57.212720064Z ROOM_INTEGRITY_REPORT {
+2026-11-06T04:54:57.212750777Z   roomKey: 'room-li7w80mv',
+2026-11-06T04:54:57.212890404Z   errors: [],
+2026-11-06T04:54:57.212891340Z   warnings: [],
+2026-11-06T04:54:57.316441593Z ROOM_INTEGRITY_REPORT {
+2026-11-06T04:54:57.316475074Z   roomKey: 'room-li7w80mv',
+2026-11-06T04:54:57.316594116Z   errors: [],
+2026-11-06T04:54:57.316595022Z   warnings: [],
+2026-11-06T04:55:02.800161478Z [KnowledgeCompiler][room=room-li7w80mv] version=3675 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=256ms
+2026-11-06T04:55:02.919387436Z [WikiCompiler][room=room-li7w80mv] version=3675 generation=05372a71-96e5-434f-800a-a25161a2247b topics=6
+2026-11-06T04:55:06.500532504Z [KnowledgeCompiler][room=room-li7w80mv] version=3679 mode=incremental dirty=4 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=375ms
+2026-11-06T04:55:06.617029043Z [WikiCompiler][room=room-li7w80mv] version=3679 generation=58369c51-5c07-47ad-8d67-3036a9ee3a30 topics=6
+2026-11-06T04:55:15.132073836Z [KnowledgeCompiler][room=room-li7w80mv] version=3680 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=243ms
+2026-11-06T04:55:15.251858332Z [WikiCompiler][room=room-li7w80mv] version=3680 generation=1c28f407-e021-4fdb-8d02-693764fd9dd8 topics=6
+2026-11-06T04:55:23.081374264Z [KnowledgeCompiler][room=room-li7w80mv] version=3681 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=230ms
+2026-11-06T04:55:23.187904719Z [WikiCompiler][room=room-li7w80mv] version=3681 generation=0508e146-2b77-41ca-8b95-4549fec92820 topics=6
+2026-11-06T04:55:33.683726058Z [KnowledgeCompiler][room=room-li7w80mv] version=3682 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=221ms
+2026-11-06T04:55:33.794139257Z [WikiCompiler][room=room-li7w80mv] version=3682 generation=96985d27-bcee-4d59-8ffa-88891d43956c topics=6
+2026-11-06T04:55:45.140169429Z [KnowledgeCompiler][room=room-li7w80mv] version=3683 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=240ms
+2026-11-06T04:55:45.247386075Z [WikiCompiler][room=room-li7w80mv] version=3683 generation=b071207b-1f93-45dd-a755-64caa56653bd topics=6
+2026-11-06T04:55:51.477601585Z [KnowledgeCompiler][room=room-li7w80mv] version=3684 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=263ms
+2026-11-06T04:55:51.585380698Z [WikiCompiler][room=room-li7w80mv] version=3684 generation=9763b637-729d-4219-b096-e5f07238af6e topics=6
+2026-11-06T04:55:53.818619954Z [KnowledgeCompiler][room=room-li7w80mv] version=3685 mode=incremental dirty=2 changedFiles=0 unchangedFiles=6 deletedFiles=0 duration=199ms
+2026-11-06T04:55:53.928203782Z [WikiCompiler][room=room-li7w80mv] version=3685 generation=0bcb0075-ca8e-4148-b284-32b38a167672 topics=6
+2026-11-06T04:55:58.905694104Z [KnowledgeCompiler][room=room-li7w80mv] version=3686 mode=incremental dirty=2 changedFiles=0 unchangedFiles=6 deletedFiles=0 duration=334ms
+2026-11-06T04:55:59.042175500Z [WikiCompiler][room=room-li7w80mv] version=3686 generation=22d94beb-7b81-4bfc-82a1-0529a4c05200 topics=6
+2026-11-06T04:56:04.572346941Z [KnowledgeCompiler][room=room-li7w80mv] version=3687 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=256ms
+2026-11-06T04:56:04.697231501Z [WikiCompiler][room=room-li7w80mv] version=3687 generation=0f72ab83-9ea7-44f5-945f-58521100835e topics=6
+2026-11-06T04:56:09.003664387Z [KnowledgeCompiler][room=room-li7w80mv] version=3688 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=359ms
+2026-11-06T04:56:09.127850936Z [WikiCompiler][room=room-li7w80mv] version=3688 generation=30843f80-22ed-4daa-8630-9bcfb3a74761 topics=6
+2026-11-06T04:56:18.047165373Z [KnowledgeCompiler][room=room-li7w80mv] version=3689 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=272ms
+2026-11-06T04:56:18.176769395Z [WikiCompiler][room=room-li7w80mv] version=3689 generation=0d44d3be-6331-4f35-9e48-11197636159d topics=6
+2026-11-06T04:56:33.071323577Z [KnowledgeCompiler][room=room-li7w80mv] version=3690 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=256ms
+2026-11-06T04:56:33.188909030Z [WikiCompiler][room=room-li7w80mv] version=3690 generation=bfb1d711-5d2f-4474-bb36-9ad35897334e topics=6
+2026-11-06T04:56:42.725624404Z ROOM_INTEGRITY_REPORT {
+2026-11-06T04:56:42.725648221Z   roomKey: 'room-6rinhr3f',
+2026-11-06T04:56:42.725663612Z   errors: [],
+2026-11-06T04:56:42.725664545Z   warnings: [],
+2026-11-06T04:56:42.865163293Z ROOM_INTEGRITY_REPORT {
+2026-11-06T04:56:42.865185907Z   roomKey: 'room-6rinhr3f',
+2026-11-06T04:56:42.865201330Z   errors: [],
+2026-11-06T04:56:42.865202248Z   warnings: [],
+2026-11-06T04:56:44.072346299Z [KnowledgeCompiler][room=room-li7w80mv] version=3691 mode=incremental dirty=2 changedFiles=0 unchangedFiles=6 deletedFiles=0 duration=251ms
+2026-11-06T04:56:44.215542242Z [WikiCompiler][room=room-li7w80mv] version=3691 generation=da347a7b-3571-41fc-83c9-2610695228f9 topics=6
+2026-11-06T04:56:57.203814939Z [KnowledgeCompiler][room=room-li7w80mv] version=3692 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=289ms
+2026-11-06T04:56:57.341966370Z [WikiCompiler][room=room-li7w80mv] version=3692 generation=6d75d3a7-eaaf-4f21-82eb-a60182eba3db topics=6
+2026-11-06T04:57:01.691367346Z [KnowledgeCompiler][room=room-li7w80mv] version=3693 mode=incremental dirty=2 changedFiles=0 unchangedFiles=6 deletedFiles=0 duration=308ms
+2026-11-06T04:57:01.862033580Z [WikiCompiler][room=room-li7w80mv] version=3693 generation=ab6177b7-234d-45bf-bbfc-3f533686e67a topics=6
+2026-11-06T04:57:05.113498712Z ROOM_INTEGRITY_REPORT {
+2026-11-06T04:57:05.113533138Z   roomKey: 'room-li7w80mv',
+2026-11-06T04:57:05.113654026Z   errors: [],
+2026-11-06T04:57:05.113655032Z   warnings: [],
+2026-11-06T04:57:05.205725089Z ROOM_INTEGRITY_REPORT {
+2026-11-06T04:57:05.205774932Z   roomKey: 'room-li7w80mv',
+2026-11-06T04:57:05.205954122Z   errors: [],
+2026-11-06T04:57:05.205955704Z   warnings: [],
+2026-11-06T04:57:14.077947944Z [KnowledgeCompiler][room=room-li7w80mv] version=3697 mode=incremental dirty=3 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=269ms
+2026-11-06T04:57:14.193206600Z [WikiCompiler][room=room-li7w80mv] version=3697 generation=53197a3d-7cce-4838-8cc5-07bd341796cd topics=6
+2026-11-06T04:57:18.194642426Z [KnowledgeCompiler][room=room-li7w80mv] version=3698 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=265ms
+2026-11-06T04:57:18.333978510Z [WikiCompiler][room=room-li7w80mv] version=3698 generation=21b79007-e2f1-4bbe-84fe-e1c8c2bde74d topics=6
+2026-11-06T04:57:23.246145531Z [api] {"ts":"2026-11-06T04:57:23.245Z","event":"map.replace.start","mapId":"room-o2337gnq","nodeCount":3355,"actorId":"shanbingshen"}
+2026-11-06T04:57:24.254538241Z [KnowledgeCompiler][room=room-li7w80mv] version=3702 mode=incremental dirty=4 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=231ms
+2026-11-06T04:57:24.524318243Z [WikiCompiler][room=room-li7w80mv] version=3702 generation=25bb9997-be6c-4e1f-867c-ffea8c70d267 topics=6
+2026-11-06T04:57:24.627765053Z [api] {"ts":"2026-11-06T04:57:24.627Z","event":"map.replace.done","mapId":"room-o2337gnq","version":1,"durationMs":1767}
+2026-11-06T04:57:24.629725284Z [api] slow {"ts":"2026-11-06T04:57:24.629Z","method":"POST","path":"/api/files/room-o2337gnq/replace","durationMs":1770}
+2026-11-06T04:57:27.137400149Z [KnowledgeCompiler][room=room-o2337gnq] version=1 mode=full dirty=0 changedFiles=10 unchangedFiles=0 deletedFiles=0 duration=506ms
+2026-11-06T04:57:27.280837476Z [WikiCompiler][room=room-o2337gnq] version=1 generation=d59e47f7-9b97-407e-b073-24ae60b45f59 topics=10
+2026-11-06T04:57:30.662510016Z [KnowledgeCompiler][room=room-li7w80mv] version=3703 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=240ms
+2026-11-06T04:57:30.768839055Z [WikiCompiler][room=room-li7w80mv] version=3703 generation=2a8c6893-4855-43ed-b2e6-28c28372b896 topics=6
+2026-11-06T04:57:33.333061574Z [KnowledgeCompiler][room=room-li7w80mv] version=3705 mode=incremental dirty=3 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=262ms
+2026-11-06T04:57:33.455719734Z [WikiCompiler][room=room-li7w80mv] version=3705 generation=b387bf65-0c2f-4c3f-9adc-fa8f0749b0f9 topics=6
+2026-11-06T04:57:38.972248019Z [KnowledgeCompiler][room=room-li7w80mv] version=3706 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=346ms
+2026-11-06T04:57:39.316168289Z [KnowledgeCompiler][room=room-li7w80mv] version=3707 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=260ms
+2026-11-06T04:57:39.476994148Z [WikiCompiler][room=room-li7w80mv] version=3707 generation=94ac9ea7-71c5-4f8e-b8ac-c62f8e40d2fb topics=6
+2026-11-06T04:57:47.021659649Z [KnowledgeCompiler][room=room-li7w80mv] version=3713 mode=incremental dirty=4 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=253ms
+2026-11-06T04:57:47.131520442Z [WikiCompiler][room=room-li7w80mv] version=3713 generation=de2513a7-3a5d-49cf-9850-67f48c732e8f topics=6
+2026-11-06T04:57:56.703091513Z [KnowledgeCompiler][room=room-li7w80mv] version=3714 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=413ms
+2026-11-06T04:57:56.864068867Z [KnowledgeCompiler][room=room-11rdjk0x] failed: ENOENT: no such file or directory, lstat '/app/knowledge/room-11rdjk0x/README.md' (failCount=2 cooldownMs=10000)
+2026-11-06T04:57:57.211082741Z [KnowledgeCompiler][room=room-li7w80mv] version=3715 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=313ms
+2026-11-06T04:57:57.333939256Z [WikiCompiler][room=room-li7w80mv] version=3715 generation=f902592d-0c1f-4952-b625-cd5a618e4ce9 topics=6
+2026-11-06T04:57:57.420484132Z [WikiCompiler] reconcile rooms=212
+2026-11-06T04:57:58.408779470Z [KnowledgeCompiler][room=room-li7w80mv] version=3715 mode=incremental dirty=54 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=251ms
+2026-11-06T04:57:59.361744145Z [KnowledgeCompiler][room=room-o2337gnq] version=1 mode=full dirty=0 changedFiles=10 unchangedFiles=0 deletedFiles=0 duration=743ms
+2026-11-06T04:58:00.836799093Z [KnowledgeCompiler][room=room-x6oywn1p] failed: ENOENT: no such file or directory, lstat '/app/knowledge/room-x6oywn1p/README.md' (failCount=2 cooldownMs=10000)
+2026-11-06T04:58:02.794370722Z [WikiCompiler] contract supplements paused: contract tree missing room=room-au05qkq6
+2026-11-06T04:58:04.114843296Z [KnowledgeCompiler][room=room-li7w80mv] version=3716 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=238ms
+2026-11-06T04:58:04.230656234Z [WikiCompiler][room=room-li7w80mv] version=3716 generation=4472e4dd-2831-497f-9132-f9d44fdc93a9 topics=6
+2026-11-06T04:58:05.614129552Z [KnowledgeCompiler][room=room-li7w80mv] version=3717 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=231ms
+2026-11-06T04:58:05.723355476Z [WikiCompiler][room=room-li7w80mv] version=3717 generation=87073972-b337-434d-996e-7d6fdcf5c554 topics=6
+2026-11-06T04:58:10.024232884Z [KnowledgeCompiler][room=room-li7w80mv] version=3719 mode=incremental dirty=3 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=261ms
+2026-11-06T04:58:10.290980889Z [KnowledgeCompiler][room=room-li7w80mv] version=3720 mode=incremental dirty=2 changedFiles=0 unchangedFiles=6 deletedFiles=0 duration=212ms
+2026-11-06T04:58:10.402813143Z [WikiCompiler][room=room-li7w80mv] version=3720 generation=8d227a33-8b7b-401c-8ff5-3b323ed258c5 topics=6
+2026-11-06T04:58:18.840065812Z [KnowledgeCompiler][room=room-li7w80mv] version=3723 mode=incremental dirty=3 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=311ms
+2026-11-06T04:58:18.952152989Z [WikiCompiler][room=room-li7w80mv] version=3723 generation=0849594f-8d13-415e-86be-ea461314b9de topics=6
+2026-11-06T04:58:23.791341713Z [KnowledgeCompiler][room=room-li7w80mv] version=3726 mode=incremental dirty=3 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=239ms
+2026-11-06T04:58:23.910500583Z [WikiCompiler][room=room-li7w80mv] version=3726 generation=3317fd6b-6910-4d2d-ba3c-50070e0e8dd7 topics=6
+2026-11-06T04:58:29.490413862Z [KnowledgeCompiler][room=room-li7w80mv] version=3729 mode=incremental dirty=4 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=328ms
+2026-11-06T04:58:29.617473548Z [WikiCompiler][room=room-li7w80mv] version=3729 generation=1498a324-3d9c-4477-9035-5e2523c43615 topics=6
+2026-11-06T04:58:34.099751288Z [KnowledgeCompiler][room=room-li7w80mv] version=3731 mode=incremental dirty=4 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=231ms
+2026-11-06T04:58:34.212947265Z [WikiCompiler][room=room-li7w80mv] version=3731 generation=4ce31861-fabb-48cd-954d-1c6d726ea57b topics=6
+2026-11-06T04:58:40.396840764Z [KnowledgeCompiler][room=room-li7w80mv] version=3734 mode=incremental dirty=3 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=230ms
+2026-11-06T04:58:40.511798604Z [WikiCompiler][room=room-li7w80mv] version=3734 generation=d7a2249a-601a-47ce-af24-eb8b70d6ad47 topics=6
+2026-11-06T04:58:54.991317029Z [KnowledgeCompiler][room=room-li7w80mv] version=3735 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=268ms
+2026-11-06T04:58:55.107986527Z [WikiCompiler][room=room-li7w80mv] version=3735 generation=38d30a02-33bc-4d5c-a668-81b7cc399049 topics=6
+2026-11-06T04:59:03.127311862Z [KnowledgeCompiler][room=room-li7w80mv] version=3737 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=245ms
+2026-11-06T04:59:03.249443992Z [WikiCompiler][room=room-li7w80mv] version=3737 generation=7a507fc1-30fd-4e45-bb75-ef42fcd99e5a topics=6
+2026-11-06T04:59:09.680615272Z [KnowledgeCompiler][room=room-li7w80mv] version=3741 mode=incremental dirty=5 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=227ms
+2026-11-06T04:59:09.817564327Z [WikiCompiler][room=room-li7w80mv] version=3741 generation=931257f9-d4f2-468c-a19e-80ec486f1606 topics=6
+2026-11-06T04:59:15.665783705Z [KnowledgeCompiler][room=room-li7w80mv] version=3746 mode=incremental dirty=6 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=241ms
+2026-11-06T04:59:15.947546737Z [KnowledgeCompiler][room=room-li7w80mv] version=3747 mode=incremental dirty=2 changedFiles=0 unchangedFiles=6 deletedFiles=0 duration=225ms
+2026-11-06T04:59:16.054399586Z [WikiCompiler][room=room-li7w80mv] version=3747 generation=110cf840-66a3-4511-88a5-8c70f46eef51 topics=6
+2026-11-06T04:59:30.534894800Z [KnowledgeCompiler][room=room-li7w80mv] version=3750 mode=incremental dirty=3 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=238ms
+2026-11-06T04:59:30.645642202Z [WikiCompiler][room=room-li7w80mv] version=3750 generation=36d7ba60-2504-411f-94a0-3d0d09d0b68d topics=6
+2026-11-06T04:59:34.871282153Z [KnowledgeCompiler][room=room-li7w80mv] version=3751 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=228ms
+2026-11-06T04:59:35.164715163Z [KnowledgeCompiler][room=room-li7w80mv] version=3752 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=239ms
+2026-11-06T04:59:35.280693087Z [WikiCompiler][room=room-li7w80mv] version=3752 generation=ec63225b-451f-466f-bd3e-b6573977e9b8 topics=6
+2026-11-06T04:59:39.337962824Z [KnowledgeCompiler][room=room-li7w80mv] version=3755 mode=incremental dirty=3 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=244ms
+2026-11-06T04:59:39.448071846Z [WikiCompiler][room=room-li7w80mv] version=3755 generation=496c52ce-e5d2-4b24-8753-5ea434704a0b topics=6
+2026-11-06T04:59:41.864591760Z [KnowledgeCompiler][room=room-li7w80mv] version=3756 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=263ms
+2026-11-06T04:59:41.988229970Z [WikiCompiler][room=room-li7w80mv] version=3756 generation=1a832177-48d8-4dbf-a620-f0252e7e6724 topics=6
+2026-11-06T05:00:12.845017110Z [KnowledgeCompiler][room=room-li7w80mv] version=3757 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=317ms
+2026-11-06T05:00:12.973371057Z [WikiCompiler][room=room-li7w80mv] version=3757 generation=ba811584-6667-4bbd-9cd8-f9df424f303b topics=6
+2026-11-06T05:00:16.493960687Z [KnowledgeCompiler][room=room-li7w80mv] version=3758 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=300ms
+2026-11-06T05:00:16.627859546Z [WikiCompiler][room=room-li7w80mv] version=3758 generation=eec71c66-cc93-48e9-8674-caccba0a7390 topics=6
+2026-11-06T05:00:45.113456631Z [KnowledgeCompiler][room=room-li7w80mv] version=3760 mode=incremental dirty=4 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=251ms
+2026-11-06T05:00:45.236545181Z [WikiCompiler][room=room-li7w80mv] version=3760 generation=e701d297-28ac-4d40-a8ca-3a5406856687 topics=6
+2026-11-06T05:00:52.125974180Z [KnowledgeCompiler][room=room-li7w80mv] version=3767 mode=incremental dirty=4 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=266ms
+2026-11-06T05:00:52.247779972Z [WikiCompiler][room=room-li7w80mv] version=3767 generation=89ea73b2-8307-47d9-a0ba-ddf87a17b423 topics=6
+2026-11-06T05:00:56.322503718Z [KnowledgeCompiler][room=room-li7w80mv] version=3768 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=321ms
+2026-11-06T05:00:56.455414934Z [WikiCompiler][room=room-li7w80mv] version=3768 generation=7d0457e6-c3d7-4aa9-8209-f01e31bf03e6 topics=6
+2026-11-06T05:01:00.137458431Z [KnowledgeCompiler][room=room-li7w80mv] version=3771 mode=incremental dirty=3 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=328ms
+2026-11-06T05:01:00.268274851Z [WikiCompiler][room=room-li7w80mv] version=3771 generation=c0a1b267-ba88-43bc-8d14-27966fe41552 topics=6
+2026-11-06T05:01:05.810002791Z [KnowledgeCompiler][room=room-li7w80mv] version=3776 mode=incremental dirty=5 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=242ms
+2026-11-06T05:01:05.923001075Z [WikiCompiler][room=room-li7w80mv] version=3776 generation=642ca8ab-b721-4b83-8ecf-10bfcac958f7 topics=6
+2026-11-06T05:01:09.123856683Z [KnowledgeCompiler][room=room-li7w80mv] version=3777 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=377ms
+2026-11-06T05:01:09.264792438Z [WikiCompiler][room=room-li7w80mv] version=3777 generation=5427f0f0-2e47-423a-bf60-e939dc9c55e7 topics=6
+2026-11-06T05:01:34.323725014Z [KnowledgeCompiler][room=room-li7w80mv] version=3778 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=285ms
+2026-11-06T05:01:34.449346869Z [WikiCompiler][room=room-li7w80mv] version=3778 generation=288e1dd9-cde3-4fc4-9469-443708d6b573 topics=6
+2026-11-06T05:01:39.039668064Z [KnowledgeCompiler][room=room-li7w80mv] version=3779 mode=incremental dirty=2 changedFiles=0 unchangedFiles=6 deletedFiles=0 duration=325ms
+2026-11-06T05:01:39.149286492Z [WikiCompiler][room=room-li7w80mv] version=3779 generation=c6fa610b-78e6-4176-b1e4-1802458afeaa topics=6
+2026-11-06T05:02:27.431545055Z [KnowledgeCompiler][room=room-li7w80mv] version=3780 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=261ms
+2026-11-06T05:02:27.547390148Z [WikiCompiler][room=room-li7w80mv] version=3780 generation=c6b0c6a2-2be7-4fff-a4e4-2576d6fbccf1 topics=6
+2026-11-06T05:02:31.100187671Z [KnowledgeCompiler][room=room-li7w80mv] version=3781 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=262ms
+2026-11-06T05:02:31.221108843Z [WikiCompiler][room=room-li7w80mv] version=3781 generation=63833adb-d149-4b2a-8b85-a5d710aa22f1 topics=6
+2026-11-06T05:02:35.740691332Z [KnowledgeCompiler][room=room-li7w80mv] version=3784 mode=incremental dirty=4 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=244ms
+2026-11-06T05:02:35.855551206Z [WikiCompiler][room=room-li7w80mv] version=3784 generation=5682dfaa-96e4-4fb3-8a7f-93656e0d63cb topics=6
+2026-11-06T05:02:40.192001966Z [KnowledgeCompiler][room=room-li7w80mv] version=3785 mode=incremental dirty=3 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=250ms
+2026-11-06T05:02:40.301098726Z [WikiCompiler][room=room-li7w80mv] version=3785 generation=a31f52c2-90a0-483d-a975-8cdd80036865 topics=6
+2026-11-06T05:02:43.350137168Z [KnowledgeCompiler][room=room-li7w80mv] version=3786 mode=incremental dirty=3 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=237ms
+2026-11-06T05:02:43.456520611Z [WikiCompiler][room=room-li7w80mv] version=3786 generation=775f6ed4-be94-4d6f-823f-4d3fc67db3c2 topics=6
+2026-11-06T05:02:47.456793714Z [KnowledgeCompiler][room=room-li7w80mv] version=3787 mode=incremental dirty=3 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=275ms
+2026-11-06T05:02:47.579063143Z [WikiCompiler][room=room-li7w80mv] version=3787 generation=17402165-141d-4239-8c1c-7f876aa1234a topics=6
+2026-11-06T05:02:56.554116733Z [KnowledgeCompiler][room=room-11rdjk0x] failed: ENOENT: no such file or directory, lstat '/app/knowledge/room-11rdjk0x/README.md' (failCount=3 cooldownMs=20000)
+2026-11-06T05:02:57.333624845Z [WikiCompiler] reconcile rooms=212
+2026-11-06T05:02:57.975822064Z [KnowledgeCompiler][room=room-li7w80mv] version=3787 mode=incremental dirty=30 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=312ms
+2026-11-06T05:02:59.674153515Z [KnowledgeCompiler][room=room-x6oywn1p] failed: ENOENT: no such file or directory, lstat '/app/knowledge/room-x6oywn1p/README.md' (failCount=3 cooldownMs=20000)
+2026-11-06T05:03:02.162418607Z [WikiCompiler] contract supplements paused: contract tree missing room=room-au05qkq6
+2026-11-06T05:04:31.521354345Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:04:31.521380716Z   roomKey: 'room-o2337gnq',
+2026-11-06T05:04:31.521422742Z   errors: [],
+2026-11-06T05:04:31.521423693Z   warnings: [],
+2026-11-06T05:04:31.576687683Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:04:31.576715543Z   roomKey: 'room-o2337gnq',
+2026-11-06T05:04:31.576768159Z   errors: [],
+2026-11-06T05:04:31.576769354Z   warnings: [],
+2026-11-06T05:05:33.317483788Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:05:33.317512502Z   roomKey: 'room-mflie9je',
+2026-11-06T05:05:33.317631124Z   errors: [],
+2026-11-06T05:05:33.317632030Z   warnings: [],
+2026-11-06T05:05:33.389414406Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:05:33.389461397Z   roomKey: 'room-mflie9je',
+2026-11-06T05:05:33.389559514Z   errors: [],
+2026-11-06T05:05:33.389560480Z   warnings: [],
+2026-11-06T05:07:56.511003400Z [KnowledgeCompiler][room=room-11rdjk0x] failed: ENOENT: no such file or directory, lstat '/app/knowledge/room-11rdjk0x/README.md' (failCount=4 cooldownMs=40000)
+2026-11-06T05:07:57.283662088Z [WikiCompiler] reconcile rooms=212
+2026-11-06T05:07:58.191388908Z [KnowledgeCompiler][room=room-o2337gnq] version=1 mode=full dirty=0 changedFiles=0 unchangedFiles=10 deletedFiles=0 duration=424ms
+2026-11-06T05:07:59.558526811Z [KnowledgeCompiler][room=room-x6oywn1p] failed: ENOENT: no such file or directory, lstat '/app/knowledge/room-x6oywn1p/README.md' (failCount=4 cooldownMs=40000)
+2026-11-06T05:08:01.990675274Z [WikiCompiler] contract supplements paused: contract tree missing room=room-au05qkq6
+2026-11-06T05:08:05.267442881Z [KnowledgeCompiler][room=room-o2337gnq] version=1 mode=full dirty=0 changedFiles=0 unchangedFiles=10 deletedFiles=0 duration=417ms
+2026-11-06T05:12:56.503682049Z [KnowledgeCompiler][room=room-11rdjk0x] failed: ENOENT: no such file or directory, lstat '/app/knowledge/room-11rdjk0x/README.md' (failCount=5 cooldownMs=80000)
+2026-11-06T05:12:57.267693303Z [WikiCompiler] reconcile rooms=212
+2026-11-06T05:12:59.016124219Z [KnowledgeCompiler][room=room-x6oywn1p] failed: ENOENT: no such file or directory, lstat '/app/knowledge/room-x6oywn1p/README.md' (failCount=5 cooldownMs=80000)
+2026-11-06T05:13:01.775115609Z [WikiCompiler] contract supplements paused: contract tree missing room=room-au05qkq6
+2026-11-06T05:17:56.493312293Z [KnowledgeCompiler][room=room-11rdjk0x] failed: ENOENT: no such file or directory, lstat '/app/knowledge/room-11rdjk0x/README.md' (failCount=6 cooldownMs=160000)
+2026-11-06T05:17:57.201635205Z [WikiCompiler] reconcile rooms=212
+2026-11-06T05:17:58.908404534Z [KnowledgeCompiler][room=room-x6oywn1p] failed: ENOENT: no such file or directory, lstat '/app/knowledge/room-x6oywn1p/README.md' (failCount=6 cooldownMs=160000)
+2026-11-06T05:18:01.723032686Z [WikiCompiler] contract supplements paused: contract tree missing room=room-au05qkq6
+2026-11-06T05:22:56.466372424Z [KnowledgeCompiler][room=room-11rdjk0x] failed: ENOENT: no such file or directory, lstat '/app/knowledge/room-11rdjk0x/README.md' (failCount=7 cooldownMs=300000)
+2026-11-06T05:22:57.226455460Z [WikiCompiler] reconcile rooms=212
+2026-11-06T05:22:58.929952851Z [KnowledgeCompiler][room=room-x6oywn1p] failed: ENOENT: no such file or directory, lstat '/app/knowledge/room-x6oywn1p/README.md' (failCount=7 cooldownMs=300000)
+2026-11-06T05:23:01.664685580Z [WikiCompiler] contract supplements paused: contract tree missing room=room-au05qkq6
+2026-11-06T05:25:37.999148085Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:25:37.999186373Z   roomKey: 'room-ejoa2q0j',
+2026-11-06T05:25:37.999370192Z   errors: [],
+2026-11-06T05:25:37.999371680Z   warnings: [],
+2026-11-06T05:25:38.062677304Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:25:38.062703830Z   roomKey: 'room-ejoa2q0j',
+2026-11-06T05:25:38.062821240Z   errors: [],
+2026-11-06T05:25:38.062822246Z   warnings: [],
+2026-11-06T05:25:56.258493971Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:25:56.258524767Z   roomKey: 'room-dk3fkzb5',
+2026-11-06T05:25:56.258583748Z   errors: [],
+2026-11-06T05:25:56.258584689Z   warnings: [],
+2026-11-06T05:25:56.271665414Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:25:56.271722742Z   roomKey: 'room-dk3fkzb5',
+2026-11-06T05:25:56.272074463Z   errors: [],
+2026-11-06T05:25:56.272079990Z   warnings: [],
+2026-11-06T05:27:56.940743271Z [WikiCompiler] reconcile rooms=212
+2026-11-06T05:28:01.051597539Z [WikiCompiler] contract supplements paused: contract tree missing room=room-au05qkq6
+2026-11-06T05:32:00.255363930Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:32:00.255401584Z   roomKey: 'room-o2337gnq',
+2026-11-06T05:32:00.255463620Z   errors: [],
+2026-11-06T05:32:00.255465621Z   warnings: [],
+2026-11-06T05:32:00.315519765Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:32:00.315545693Z   roomKey: 'room-o2337gnq',
+2026-11-06T05:32:00.315594673Z   errors: [],
+2026-11-06T05:32:00.315595949Z   warnings: [],
+2026-11-06T05:32:11.008517079Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:32:11.008551306Z   roomKey: 'room-mflie9je',
+2026-11-06T05:32:11.008688680Z   errors: [],
+2026-11-06T05:32:11.008690120Z   warnings: [],
+2026-11-06T05:32:11.091711108Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:32:11.091743040Z   roomKey: 'room-mflie9je',
+2026-11-06T05:32:11.091897783Z   errors: [],
+2026-11-06T05:32:11.091899394Z   warnings: [],
+2026-11-06T05:32:28.469235644Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:32:28.469266834Z   roomKey: 'room-o2337gnq',
+2026-11-06T05:32:28.469309086Z   errors: [],
+2026-11-06T05:32:28.469315591Z   warnings: [],
+2026-11-06T05:32:28.516339106Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:32:28.516392189Z   roomKey: 'room-o2337gnq',
+2026-11-06T05:32:28.516444769Z   errors: [],
+2026-11-06T05:32:28.516446282Z   warnings: [],
+2026-11-06T05:32:50.207297546Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:32:50.207327335Z   roomKey: 'room-o2337gnq',
+2026-11-06T05:32:50.207371619Z   errors: [],
+2026-11-06T05:32:50.207372537Z   warnings: [],
+2026-11-06T05:32:50.320561309Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:32:50.320598415Z   roomKey: 'room-o2337gnq',
+2026-11-06T05:32:50.320659725Z   errors: [],
+2026-11-06T05:32:50.320661307Z   warnings: [],
+2026-11-06T05:32:56.575908147Z [KnowledgeCompiler][room=room-11rdjk0x] failed: ENOENT: no such file or directory, lstat '/app/knowledge/room-11rdjk0x/README.md' (failCount=8 cooldownMs=300000)
+2026-11-06T05:32:57.327737399Z [WikiCompiler] reconcile rooms=212
+2026-11-06T05:32:59.117717496Z [KnowledgeCompiler][room=room-x6oywn1p] failed: ENOENT: no such file or directory, lstat '/app/knowledge/room-x6oywn1p/README.md' (failCount=8 cooldownMs=300000)
+2026-11-06T05:33:00.002305021Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:33:00.002335420Z   roomKey: 'room-xgoibqb8',
+2026-11-06T05:33:00.002497026Z   errors: [],
+2026-11-06T05:33:00.002498427Z   warnings: [],
+2026-11-06T05:33:00.245630978Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:33:00.245661125Z   roomKey: 'room-xgoibqb8',
+2026-11-06T05:33:00.245789521Z   errors: [],
+2026-11-06T05:33:00.245791087Z   warnings: [],
+2026-11-06T05:33:02.008440693Z [WikiCompiler] contract supplements paused: contract tree missing room=room-au05qkq6
+2026-11-06T05:33:06.549121965Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:33:06.549147711Z   roomKey: 'room-yk3tz4aj',
+2026-11-06T05:33:06.549258770Z   errors: [],
+2026-11-06T05:33:06.549259790Z   warnings: [],
+2026-11-06T05:33:06.577878577Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:33:06.577904349Z   roomKey: 'room-yk3tz4aj',
+2026-11-06T05:33:06.578012679Z   errors: [],
+2026-11-06T05:33:06.578013566Z   warnings: [],
+2026-11-06T05:33:15.506386415Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:33:15.506413239Z   roomKey: 'room-mflie9je',
+2026-11-06T05:33:15.506514178Z   errors: [],
+2026-11-06T05:33:15.506515134Z   warnings: [],
+2026-11-06T05:33:15.570754633Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:33:15.570802011Z   roomKey: 'room-mflie9je',
+2026-11-06T05:33:15.570941829Z   errors: [],
+2026-11-06T05:33:15.570945299Z   warnings: [],
+2026-11-06T05:34:25.140814791Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:34:25.140880515Z   roomKey: 'room-60q6noy9',
+2026-11-06T05:34:25.141077649Z   errors: [],
+2026-11-06T05:34:25.141079330Z   warnings: [],
+2026-11-06T05:34:25.219850004Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:34:25.219876470Z   roomKey: 'room-60q6noy9',
+2026-11-06T05:34:25.219972726Z   errors: [],
+2026-11-06T05:34:25.219973696Z   warnings: [],
+2026-11-06T05:34:31.738094135Z [KnowledgeCompiler][room=room-60q6noy9] version=56 mode=incremental dirty=2 changedFiles=2 unchangedFiles=4 deletedFiles=0 duration=285ms
+2026-11-06T05:34:31.849191824Z [WikiCompiler][room=room-60q6noy9] version=56 generation=9eafbaaf-22f0-45cd-9732-0a67f6475b13 topics=6
+2026-11-06T05:34:36.615899580Z [KnowledgeCompiler][room=room-60q6noy9] version=59 mode=incremental dirty=3 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=237ms
+2026-11-06T05:34:36.714909256Z [WikiCompiler][room=room-60q6noy9] version=59 generation=ffa05dd2-45f5-4afb-9a8d-dd50744da824 topics=6
+2026-11-06T05:34:40.232540549Z [KnowledgeCompiler][room=room-60q6noy9] version=62 mode=incremental dirty=5 changedFiles=3 unchangedFiles=4 deletedFiles=0 duration=515ms
+2026-11-06T05:34:40.414183846Z [WikiCompiler][room=room-60q6noy9] version=62 generation=5de81f88-a520-4c17-966f-62cba79df808 topics=7
+2026-11-06T05:34:42.763310757Z [KnowledgeCompiler][room=room-60q6noy9] version=63 mode=incremental dirty=3 changedFiles=2 unchangedFiles=4 deletedFiles=1 duration=281ms
+2026-11-06T05:34:42.863018493Z [WikiCompiler][room=room-60q6noy9] version=63 generation=1d1fece0-6c69-4b6c-b877-30a0728c88e4 topics=6
+2026-11-06T05:34:45.778746989Z [KnowledgeCompiler][room=room-60q6noy9] version=64 mode=incremental dirty=3 changedFiles=2 unchangedFiles=4 deletedFiles=0 duration=284ms
+2026-11-06T05:34:45.882116524Z [WikiCompiler][room=room-60q6noy9] version=64 generation=af1c5735-6944-464c-8f6c-48dd9b073182 topics=6
+2026-11-06T05:34:48.180702935Z [KnowledgeCompiler][room=room-60q6noy9] version=65 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=226ms
+2026-11-06T05:34:48.298856770Z [WikiCompiler][room=room-60q6noy9] version=65 generation=d79f6238-8790-45cc-b160-dd1e07c532c4 topics=6
+2026-11-06T05:34:53.912715842Z [KnowledgeCompiler][room=room-60q6noy9] version=66 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=231ms
+2026-11-06T05:34:53.999728645Z [WikiCompiler][room=room-60q6noy9] version=66 generation=8ae6e01d-899a-4634-85a0-2cc005f08be0 topics=6
+2026-11-06T05:34:55.152460077Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:34:55.152490854Z   roomKey: 'room-yk3tz4aj',
+2026-11-06T05:34:55.152595523Z   errors: [],
+2026-11-06T05:34:55.152596466Z   warnings: [],
+2026-11-06T05:34:55.183497727Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:34:55.183521335Z   roomKey: 'room-yk3tz4aj',
+2026-11-06T05:34:55.183631900Z   errors: [],
+2026-11-06T05:34:55.183632852Z   warnings: [],
+2026-11-06T05:35:01.022152617Z [KnowledgeCompiler][room=room-60q6noy9] version=68 mode=incremental dirty=3 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=280ms
+2026-11-06T05:35:01.121277902Z [WikiCompiler][room=room-60q6noy9] version=68 generation=7f4bdc14-4298-4113-a03d-eb237383e421 topics=6
+2026-11-06T05:35:04.072007084Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:35:04.072034859Z   roomKey: 'room-mflie9je',
+2026-11-06T05:35:04.072133134Z   errors: [],
+2026-11-06T05:35:04.072134151Z   warnings: [],
+2026-11-06T05:35:04.181174873Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:35:04.181218321Z   roomKey: 'room-mflie9je',
+2026-11-06T05:35:04.181381784Z   errors: [],
+2026-11-06T05:35:04.181383373Z   warnings: [],
+2026-11-06T05:35:05.327430968Z [KnowledgeCompiler][room=room-60q6noy9] version=69 mode=incremental dirty=2 changedFiles=0 unchangedFiles=6 deletedFiles=0 duration=230ms
+2026-11-06T05:35:05.420477413Z [WikiCompiler][room=room-60q6noy9] version=69 generation=70fc9485-a6f8-4569-b7e4-33b1230cfaea topics=6
+2026-11-06T05:35:08.080626932Z [KnowledgeCompiler][room=room-60q6noy9] version=71 mode=incremental dirty=3 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=230ms
+2026-11-06T05:35:08.174686288Z [WikiCompiler][room=room-60q6noy9] version=71 generation=a5199e30-fb9f-4d7b-8c99-1ffa7e3cb756 topics=6
+2026-11-06T05:35:12.723526301Z [KnowledgeCompiler][room=room-60q6noy9] version=73 mode=incremental dirty=4 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=265ms
+2026-11-06T05:35:12.835173528Z [WikiCompiler][room=room-60q6noy9] version=73 generation=8a3192a7-0a97-405b-aac4-8f9ab0550dc7 topics=6
+2026-11-06T05:35:16.854543999Z [KnowledgeCompiler][room=room-60q6noy9] version=74 mode=incremental dirty=3 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=226ms
+2026-11-06T05:35:16.949397569Z [WikiCompiler][room=room-60q6noy9] version=74 generation=912255f4-a7b4-43f1-8023-548cf2d2a089 topics=6
+2026-11-06T05:35:20.664433049Z [KnowledgeCompiler][room=room-60q6noy9] version=75 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=305ms
+2026-11-06T05:35:20.981102246Z [KnowledgeCompiler][room=room-60q6noy9] version=76 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=272ms
+2026-11-06T05:35:21.098800025Z [WikiCompiler][room=room-60q6noy9] version=76 generation=5d6e964a-5330-4a95-b291-a8682ebd7c16 topics=6
+2026-11-06T05:35:21.503661426Z [KnowledgeCompiler][room=room-mflie9je] version=328 mode=incremental dirty=2 changedFiles=1 unchangedFiles=9 deletedFiles=0 duration=404ms
+2026-11-06T05:35:21.679558716Z [WikiCompiler][room=room-mflie9je] version=328 generation=99958873-f95b-4ddf-8c0d-2a0606fe21aa topics=10
+2026-11-06T05:35:24.935980552Z [KnowledgeCompiler][room=room-60q6noy9] version=77 mode=incremental dirty=2 changedFiles=0 unchangedFiles=6 deletedFiles=0 duration=175ms
+2026-11-06T05:35:25.027881071Z [WikiCompiler][room=room-60q6noy9] version=77 generation=aab89615-d568-45c1-aeec-588ba83a6eb5 topics=6
+2026-11-06T05:35:28.477892032Z [KnowledgeCompiler][room=room-60q6noy9] version=78 mode=incremental dirty=2 changedFiles=0 unchangedFiles=6 deletedFiles=0 duration=218ms
+2026-11-06T05:35:28.579886881Z [WikiCompiler][room=room-60q6noy9] version=78 generation=2e2fc4fc-e68e-41f0-9598-58e9b053ef9b topics=6
+2026-11-06T05:35:28.849148524Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:35:28.849169325Z   roomKey: 'room-xgoibqb8',
+2026-11-06T05:35:28.849263922Z   errors: [],
+2026-11-06T05:35:28.849264887Z   warnings: [],
+2026-11-06T05:35:28.982864044Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:35:28.982888478Z   roomKey: 'room-xgoibqb8',
+2026-11-06T05:35:28.982990291Z   errors: [],
+2026-11-06T05:35:28.982991195Z   warnings: [],
+2026-11-06T05:35:31.094282356Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:35:31.094309373Z   roomKey: 'room-mflie9je',
+2026-11-06T05:35:31.094405749Z   errors: [],
+2026-11-06T05:35:31.094406674Z   warnings: [],
+2026-11-06T05:35:31.176798424Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:35:31.176843467Z   roomKey: 'room-mflie9je',
+2026-11-06T05:35:31.177000678Z   errors: [],
+2026-11-06T05:35:31.177002197Z   warnings: [],
+2026-11-06T05:35:42.035109036Z [KnowledgeCompiler][room=room-60q6noy9] version=79 mode=incremental dirty=3 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=252ms
+2026-11-06T05:35:42.286561517Z [KnowledgeCompiler][room=room-60q6noy9] version=80 mode=incremental dirty=3 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=209ms
+2026-11-06T05:35:42.371213161Z [WikiCompiler][room=room-60q6noy9] version=80 generation=02a0deb7-82b3-4184-bf17-b60b0c0ddcd8 topics=6
+2026-11-06T05:35:46.816718629Z [KnowledgeCompiler][room=room-60q6noy9] version=81 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=214ms
+2026-11-06T05:35:46.904720832Z [WikiCompiler][room=room-60q6noy9] version=81 generation=116789f6-b7cb-48ef-96df-2e906939a2f6 topics=6
+2026-11-06T05:35:47.113021460Z [KnowledgeCompiler][room=room-60q6noy9] version=82 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=207ms
+2026-11-06T05:35:47.201654094Z [WikiCompiler][room=room-60q6noy9] version=82 generation=5bf7c47d-aa6d-45ff-9557-3d6c8eb6a7f5 topics=6
+2026-11-06T05:35:52.899788657Z [KnowledgeCompiler][room=room-60q6noy9] version=85 mode=incremental dirty=3 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=233ms
+2026-11-06T05:35:53.003426786Z [WikiCompiler][room=room-60q6noy9] version=85 generation=21e7b8e5-99e3-4e83-bb58-ea0e8632363f topics=6
+2026-11-06T05:35:57.141823213Z [KnowledgeCompiler][room=room-60q6noy9] version=87 mode=incremental dirty=3 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=219ms
+2026-11-06T05:35:57.233359738Z [WikiCompiler][room=room-60q6noy9] version=87 generation=391f0e69-65a6-4248-a8c2-fc10c9964365 topics=6
+2026-11-06T05:36:04.441441536Z [KnowledgeCompiler][room=room-60q6noy9] version=89 mode=incremental dirty=3 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=247ms
+2026-11-06T05:36:04.712046196Z [KnowledgeCompiler][room=room-60q6noy9] version=90 mode=incremental dirty=3 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=224ms
+2026-11-06T05:36:04.806093057Z [WikiCompiler][room=room-60q6noy9] version=90 generation=8b2611dc-cf1b-4baf-ab7f-e2265758eeb4 topics=6
+2026-11-06T05:36:09.622850906Z [KnowledgeCompiler][room=room-60q6noy9] version=91 mode=incremental dirty=3 changedFiles=2 unchangedFiles=3 deletedFiles=1 duration=232ms
+2026-11-06T05:36:09.711290100Z [WikiCompiler][room=room-60q6noy9] version=91 generation=60216bcc-b616-4f86-a2b2-96ce9a5de13b topics=5
+2026-11-06T05:36:13.914946537Z [KnowledgeCompiler][room=room-60q6noy9] version=93 mode=incremental dirty=4 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=234ms
+2026-11-06T05:36:14.010539110Z [WikiCompiler][room=room-60q6noy9] version=93 generation=da455e29-b114-42cc-9f19-a7255709c31a topics=5
+2026-11-06T05:36:14.228503008Z [KnowledgeCompiler][room=room-60q6noy9] version=94 mode=incremental dirty=3 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=217ms
+2026-11-06T05:36:14.320698207Z [WikiCompiler][room=room-60q6noy9] version=94 generation=6cf242db-acf4-4a9b-b569-8ef6db53469c topics=5
+2026-11-06T05:36:17.913198837Z [KnowledgeCompiler][room=room-60q6noy9] version=95 mode=incremental dirty=2 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=219ms
+2026-11-06T05:36:18.014484724Z [WikiCompiler][room=room-60q6noy9] version=95 generation=11fbebfb-2706-4049-b9ef-56d65d1038b1 topics=5
+2026-11-06T05:36:22.076316923Z [KnowledgeCompiler][room=room-60q6noy9] version=97 mode=incremental dirty=2 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=219ms
+2026-11-06T05:36:22.161916956Z [WikiCompiler][room=room-60q6noy9] version=97 generation=42b3adc5-c6f4-445f-8a5b-4cc2a46642db topics=5
+2026-11-06T05:36:35.594241370Z [KnowledgeCompiler][room=room-60q6noy9] version=106 mode=incremental dirty=4 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=254ms
+2026-11-06T05:36:35.866901419Z [KnowledgeCompiler][room=room-60q6noy9] version=107 mode=incremental dirty=3 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=233ms
+2026-11-06T05:36:35.986546843Z [WikiCompiler][room=room-60q6noy9] version=107 generation=f16c483d-7ec0-447f-9d53-ddf3bd9317bb topics=5
+2026-11-06T05:36:36.168499140Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:36:36.168521048Z   roomKey: 'room-dsa2iq0y',
+2026-11-06T05:36:36.168630305Z   errors: [],
+2026-11-06T05:36:36.168631258Z   warnings: [],
+2026-11-06T05:36:36.207413824Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:36:36.207440863Z   roomKey: 'room-dsa2iq0y',
+2026-11-06T05:36:36.207591947Z   errors: [],
+2026-11-06T05:36:36.207592856Z   warnings: [],
+2026-11-06T05:36:39.422832934Z [KnowledgeCompiler][room=room-60q6noy9] version=108 mode=incremental dirty=3 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=264ms
+2026-11-06T05:36:39.695955214Z [KnowledgeCompiler][room=room-60q6noy9] version=109 mode=incremental dirty=2 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=230ms
+2026-11-06T05:36:39.785918532Z [WikiCompiler][room=room-60q6noy9] version=109 generation=ad155933-29e9-4a97-b751-e5e889480251 topics=5
+2026-11-06T05:36:41.397114686Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:36:41.397145185Z   roomKey: 'room-5cn5b287',
+2026-11-06T05:36:41.397286683Z   errors: [],
+2026-11-06T05:36:41.397288216Z   warnings: [],
+2026-11-06T05:36:41.465987937Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:36:41.466011338Z   roomKey: 'room-5cn5b287',
+2026-11-06T05:36:41.466119574Z   errors: [],
+2026-11-06T05:36:41.466120467Z   warnings: [],
+2026-11-06T05:36:47.296961566Z [KnowledgeCompiler][room=room-60q6noy9] version=114 mode=incremental dirty=3 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=224ms
+2026-11-06T05:36:47.385833424Z [WikiCompiler][room=room-60q6noy9] version=114 generation=810dafa0-43e0-4a55-b0cf-d48678710453 topics=5
+2026-11-06T05:36:50.270910174Z [KnowledgeCompiler][room=room-60q6noy9] version=115 mode=incremental dirty=163 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=345ms
+2026-11-06T05:36:50.427832253Z [WikiCompiler][room=room-60q6noy9] version=115 generation=a6219969-2ff7-40ba-b536-466f9dff640c topics=5
+2026-11-06T05:36:53.229474705Z [KnowledgeCompiler][room=room-60q6noy9] version=117 mode=incremental dirty=452 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=292ms
+2026-11-06T05:36:53.332548137Z [WikiCompiler][room=room-60q6noy9] version=117 generation=a36d94fb-d611-46c5-9573-6dfb9d8b7363 topics=5
+2026-11-06T05:37:11.671895980Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:37:11.671932781Z   roomKey: 'room-1txy2mj9',
+2026-11-06T05:37:11.672055549Z   errors: [],
+2026-11-06T05:37:11.672056502Z   warnings: [],
+2026-11-06T05:37:11.762719477Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:37:11.762757734Z   roomKey: 'room-1txy2mj9',
+2026-11-06T05:37:11.762873193Z   errors: [],
+2026-11-06T05:37:11.762874448Z   warnings: [],
+2026-11-06T05:37:27.673468802Z [KnowledgeCompiler][room=room-60q6noy9] version=118 mode=incremental dirty=2 changedFiles=0 unchangedFiles=5 deletedFiles=0 duration=310ms
+2026-11-06T05:37:27.779711114Z [WikiCompiler][room=room-60q6noy9] version=118 generation=b79584b1-13f2-4fbb-a11b-78f406e8a4e9 topics=5
+2026-11-06T05:37:29.438735057Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:37:29.438769621Z   roomKey: 'room-60q6noy9',
+2026-11-06T05:37:29.438969575Z   errors: [],
+2026-11-06T05:37:29.438985360Z   warnings: [],
+2026-11-06T05:37:29.584522349Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:37:29.584559187Z   roomKey: 'room-60q6noy9',
+2026-11-06T05:37:29.584670002Z   errors: [],
+2026-11-06T05:37:29.584670958Z   warnings: [],
+2026-11-06T05:37:39.196248974Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:37:39.196279139Z   roomKey: 'room-dsa2iq0y',
+2026-11-06T05:37:39.196398278Z   errors: [],
+2026-11-06T05:37:39.196399249Z   warnings: [],
+2026-11-06T05:37:39.645660058Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:37:39.645699685Z   roomKey: 'room-dsa2iq0y',
+2026-11-06T05:37:39.645820163Z   errors: [],
+2026-11-06T05:37:39.645821244Z   warnings: [],
+2026-11-06T05:37:54.066365207Z [KnowledgeCompiler][room=room-60q6noy9] version=119 mode=incremental dirty=3 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=302ms
+2026-11-06T05:37:54.174445496Z [WikiCompiler][room=room-60q6noy9] version=119 generation=9e861843-f019-49dc-b88a-79dc2bc9eab0 topics=5
+2026-11-06T05:37:56.906511023Z [KnowledgeCompiler][room=room-60q6noy9] version=119 mode=incremental dirty=625 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=453ms
+2026-11-06T05:37:57.205703473Z [WikiCompiler] reconcile rooms=211
+2026-11-06T05:37:58.311096146Z [KnowledgeCompiler][room=room-mflie9je] version=328 mode=incremental dirty=2 changedFiles=1 unchangedFiles=9 deletedFiles=0 duration=399ms
+2026-11-06T05:37:59.854459394Z [KnowledgeCompiler][room=room-60q6noy9] version=120 mode=incremental dirty=3 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=256ms
+2026-11-06T05:37:59.953804521Z [WikiCompiler][room=room-60q6noy9] version=120 generation=948bff1b-7f7c-478a-988f-53991d1f4be6 topics=5
+2026-11-06T05:38:02.162798369Z [WikiCompiler] contract supplements paused: contract tree missing room=room-au05qkq6
+2026-11-06T05:38:04.807957313Z [KnowledgeCompiler][room=room-60q6noy9] version=122 mode=incremental dirty=2 changedFiles=0 unchangedFiles=5 deletedFiles=0 duration=247ms
+2026-11-06T05:38:04.915308690Z [WikiCompiler][room=room-60q6noy9] version=122 generation=801af05f-e0c9-4474-a81b-f61fe384049e topics=5
+2026-11-06T05:38:12.379465914Z [KnowledgeCompiler][room=room-60q6noy9] version=125 mode=incremental dirty=4 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=279ms
+2026-11-06T05:38:12.515812491Z [WikiCompiler][room=room-60q6noy9] version=125 generation=0971f8fb-5aa1-4868-858f-64e2f764f026 topics=5
+2026-11-06T05:38:13.817302122Z [KnowledgeCompiler][room=room-5cn5b287] version=728 mode=incremental dirty=2 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=256ms
+2026-11-06T05:38:13.918687531Z [WikiCompiler][room=room-5cn5b287] version=728 generation=d421487b-3ded-4bb5-b4ab-8d0280c408e6 topics=8
+2026-11-06T05:38:16.536765513Z [KnowledgeCompiler][room=room-60q6noy9] version=127 mode=incremental dirty=3 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=260ms
+2026-11-06T05:38:16.646214572Z [WikiCompiler][room=room-60q6noy9] version=127 generation=55b8582f-9e12-4ba6-a602-f84dace14e4f topics=5
+2026-11-06T05:38:22.469590207Z [KnowledgeCompiler][room=room-60q6noy9] version=128 mode=incremental dirty=3 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=362ms
+2026-11-06T05:38:22.577179059Z [WikiCompiler][room=room-60q6noy9] version=128 generation=1a7ca114-d126-4973-8c4f-8358c40f7187 topics=5
+2026-11-06T05:38:27.772211354Z [KnowledgeCompiler][room=room-5cn5b287] version=729 mode=incremental dirty=2 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=281ms
+2026-11-06T05:38:27.870044945Z [WikiCompiler][room=room-5cn5b287] version=729 generation=565bef26-0732-4680-86be-6a7e8fd756dc topics=8
+2026-11-06T05:38:30.077405251Z [KnowledgeCompiler][room=room-60q6noy9] version=132 mode=incremental dirty=4 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=270ms
+2026-11-06T05:38:30.178738419Z [WikiCompiler][room=room-60q6noy9] version=132 generation=375cb6a4-5c07-41d8-b63f-6e0fd266efd7 topics=5
+2026-11-06T05:38:44.659990451Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:38:44.660024588Z   roomKey: 'room-6xn4ue0m',
+2026-11-06T05:38:44.660123379Z   errors: [],
+2026-11-06T05:38:44.660124317Z   warnings: [],
+2026-11-06T05:38:44.855231085Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:38:44.855277032Z   roomKey: 'room-6xn4ue0m',
+2026-11-06T05:38:44.855375652Z   errors: [],
+2026-11-06T05:38:44.855376603Z   warnings: [],
+2026-11-06T05:40:52.063051435Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:40:52.063085672Z   roomKey: 'room-li7w80mv',
+2026-11-06T05:40:52.063188898Z   errors: [],
+2026-11-06T05:40:52.063189876Z   warnings: [],
+2026-11-06T05:40:52.256604507Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:40:52.256640894Z   roomKey: 'room-li7w80mv',
+2026-11-06T05:40:52.256742486Z   errors: [],
+2026-11-06T05:40:52.256743457Z   warnings: [],
+2026-11-06T05:41:01.097547593Z [KnowledgeCompiler][room=room-li7w80mv] version=3788 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=267ms
+2026-11-06T05:41:01.213101396Z [WikiCompiler][room=room-li7w80mv] version=3788 generation=30aa74bb-db45-4abd-b308-773dc4e0dd69 topics=6
+2026-11-06T05:41:05.073551114Z [KnowledgeCompiler][room=room-li7w80mv] version=3789 mode=incremental dirty=2 changedFiles=0 unchangedFiles=6 deletedFiles=0 duration=248ms
+2026-11-06T05:41:05.194562592Z [WikiCompiler][room=room-li7w80mv] version=3789 generation=6964efa3-7391-46ff-ad7e-9195a30f87ce topics=6
+2026-11-06T05:41:07.884387895Z [KnowledgeCompiler][room=room-li7w80mv] version=3790 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=322ms
+2026-11-06T05:41:08.021942311Z [WikiCompiler][room=room-li7w80mv] version=3790 generation=fa113897-dc3f-4450-ad96-d2d2bfd60ab2 topics=6
+2026-11-06T05:41:16.503550261Z [KnowledgeCompiler][room=room-mflie9je] version=329 mode=incremental dirty=2 changedFiles=1 unchangedFiles=9 deletedFiles=0 duration=344ms
+2026-11-06T05:41:16.686596400Z [WikiCompiler][room=room-mflie9je] version=329 generation=c2111146-69f1-4baf-a5ac-a7ef30f338d4 topics=10
+2026-11-06T05:41:27.842681142Z [KnowledgeCompiler][room=room-li7w80mv] version=3791 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=256ms
+2026-11-06T05:41:27.961559724Z [WikiCompiler][room=room-li7w80mv] version=3791 generation=a01e5f95-0e9d-4241-9e0e-cd513af439c8 topics=6
+2026-11-06T05:41:31.419611744Z [KnowledgeCompiler][room=room-li7w80mv] version=3792 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=231ms
+2026-11-06T05:41:31.556576236Z [WikiCompiler][room=room-li7w80mv] version=3792 generation=932d85fc-c916-4e30-adf4-8da8b8579e66 topics=6
+2026-11-06T05:41:35.115011353Z [KnowledgeCompiler][room=room-li7w80mv] version=3793 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=266ms
+2026-11-06T05:41:35.246433950Z [WikiCompiler][room=room-li7w80mv] version=3793 generation=fb06a539-2efb-4df0-83cb-46830e0f0879 topics=6
+2026-11-06T05:41:50.817847294Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:41:50.817886040Z   roomKey: 'room-efdgvi6h',
+2026-11-06T05:41:50.818051468Z   errors: [],
+2026-11-06T05:41:50.818056815Z   warnings: [],
+2026-11-06T05:41:50.863815442Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:41:50.863852518Z   roomKey: 'room-efdgvi6h',
+2026-11-06T05:41:50.863969111Z   errors: [],
+2026-11-06T05:41:50.863970089Z   warnings: [],
+2026-11-06T05:41:58.454455282Z [KnowledgeCompiler][room=room-li7w80mv] version=3795 mode=incremental dirty=3 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=263ms
+2026-11-06T05:41:58.772594972Z [KnowledgeCompiler][room=room-li7w80mv] version=3796 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=257ms
+2026-11-06T05:41:58.885135110Z [WikiCompiler][room=room-li7w80mv] version=3796 generation=5960fcac-e9b0-4b51-8bff-46a8b4ed6aa1 topics=6
+2026-11-06T05:42:01.816409685Z [KnowledgeCompiler][room=room-li7w80mv] version=3798 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=284ms
+2026-11-06T05:42:01.933602590Z [WikiCompiler][room=room-li7w80mv] version=3798 generation=e7184306-2f49-4ae2-91c4-b1d3ca3e3e8f topics=6
+2026-11-06T05:42:05.477743040Z [KnowledgeCompiler][room=room-li7w80mv] version=3799 mode=incremental dirty=3 changedFiles=3 unchangedFiles=4 deletedFiles=0 duration=265ms
+2026-11-06T05:42:05.593602737Z [WikiCompiler][room=room-li7w80mv] version=3799 generation=9f1007d9-86ea-401c-97a6-cdcbfd75cdba topics=7
+2026-11-06T05:42:12.685523563Z [KnowledgeCompiler][room=room-li7w80mv] version=3802 mode=incremental dirty=5 changedFiles=2 unchangedFiles=4 deletedFiles=1 duration=278ms
+2026-11-06T05:42:12.879825686Z [WikiCompiler][room=room-li7w80mv] version=3802 generation=2c478600-8f0b-49b2-b0b8-58bfe37a9524 topics=6
+2026-11-06T05:42:20.934404277Z [KnowledgeCompiler][room=room-li7w80mv] version=3803 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=249ms
+2026-11-06T05:42:21.054590340Z [WikiCompiler][room=room-li7w80mv] version=3803 generation=f942fb92-3648-4c61-9315-b1c46a2bdf88 topics=6
+2026-11-06T05:42:35.400568005Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:42:35.400607347Z   roomKey: 'room-li7w80mv',
+2026-11-06T05:42:35.400841407Z   errors: [],
+2026-11-06T05:42:35.400842961Z   warnings: [],
+2026-11-06T05:42:35.557121565Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:42:35.557146237Z   roomKey: 'room-li7w80mv',
+2026-11-06T05:42:35.557341120Z   errors: [],
+2026-11-06T05:42:35.557342697Z   warnings: [],
+2026-11-06T05:42:56.437159191Z [KnowledgeCompiler][room=room-11rdjk0x] failed: ENOENT: no such file or directory, lstat '/app/knowledge/room-11rdjk0x/README.md' (failCount=9 cooldownMs=300000)
+2026-11-06T05:42:56.994067642Z [KnowledgeCompiler][room=room-5cn5b287] version=729 mode=incremental dirty=2 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=251ms
+2026-11-06T05:42:57.236100902Z [WikiCompiler] reconcile rooms=211
+2026-11-06T05:42:57.245620500Z [KnowledgeCompiler][room=room-60q6noy9] version=132 mode=incremental dirty=12 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=229ms
+2026-11-06T05:42:58.350105394Z [KnowledgeCompiler][room=room-li7w80mv] version=3803 mode=incremental dirty=8 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=257ms
+2026-11-06T05:42:58.832080293Z [KnowledgeCompiler][room=room-mflie9je] version=329 mode=incremental dirty=2 changedFiles=1 unchangedFiles=9 deletedFiles=0 duration=407ms
+2026-11-06T05:43:00.108629981Z [KnowledgeCompiler][room=room-x6oywn1p] failed: ENOENT: no such file or directory, lstat '/app/knowledge/room-x6oywn1p/README.md' (failCount=9 cooldownMs=300000)
+2026-11-06T05:43:00.330078108Z [KnowledgeCompiler][room=room-60q6noy9] version=133 mode=incremental dirty=2 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=757ms
+2026-11-06T05:43:00.423646325Z [WikiCompiler][room=room-60q6noy9] version=133 generation=cc9becfe-32b9-4003-8bff-146d3acad1b0 topics=5
+2026-11-06T05:43:02.247114659Z [WikiCompiler] contract supplements paused: contract tree missing room=room-au05qkq6
+2026-11-06T05:43:03.923096669Z [KnowledgeCompiler][room=room-60q6noy9] version=134 mode=incremental dirty=2 changedFiles=0 unchangedFiles=5 deletedFiles=0 duration=330ms
+2026-11-06T05:43:04.017223367Z [WikiCompiler][room=room-60q6noy9] version=134 generation=abeb9e68-454f-4df7-8a8f-01d1887050af topics=5
+2026-11-06T05:43:13.452461438Z [KnowledgeCompiler][room=room-60q6noy9] version=135 mode=incremental dirty=2 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=362ms
+2026-11-06T05:43:13.548059843Z [WikiCompiler][room=room-60q6noy9] version=135 generation=b034f196-f8e8-413c-bfc1-8f336be87228 topics=5
+2026-11-06T05:43:19.703181016Z [KnowledgeCompiler][room=room-60q6noy9] version=136 mode=incremental dirty=2 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=429ms
+2026-11-06T05:43:19.796563435Z [WikiCompiler][room=room-60q6noy9] version=136 generation=744fa425-52fe-4cd1-8ec2-599caa3887a6 topics=5
+2026-11-06T05:43:30.259076822Z [KnowledgeCompiler][room=room-60q6noy9] version=139 mode=incremental dirty=3 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=415ms
+2026-11-06T05:43:30.363328813Z [WikiCompiler][room=room-60q6noy9] version=139 generation=4d77bdb8-bcd1-4d64-a761-0e0195bf443d topics=5
+2026-11-06T05:44:49.979958859Z [KnowledgeCompiler][room=room-5cn5b287] version=730 mode=incremental dirty=2 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=261ms
+2026-11-06T05:44:50.062518432Z [WikiCompiler][room=room-5cn5b287] version=730 generation=1bd66502-657c-43f0-ae85-582437b97158 topics=8
+2026-11-06T05:45:02.463838689Z [KnowledgeCompiler][room=room-60q6noy9] version=140 mode=incremental dirty=2 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=419ms
+2026-11-06T05:45:02.556664597Z [WikiCompiler][room=room-60q6noy9] version=140 generation=5e3cfa53-905a-4629-a8c9-1ea05d9c19b4 topics=5
+2026-11-06T05:45:09.215754204Z [KnowledgeCompiler][room=room-60q6noy9] version=144 mode=incremental dirty=4 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=342ms
+2026-11-06T05:45:09.306142966Z [WikiCompiler][room=room-60q6noy9] version=144 generation=bf481514-55aa-4e67-b943-0e44595dfbc8 topics=5
+2026-11-06T05:45:15.650493835Z [KnowledgeCompiler][room=room-60q6noy9] version=147 mode=incremental dirty=3 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=350ms
+2026-11-06T05:45:15.739551141Z [WikiCompiler][room=room-60q6noy9] version=147 generation=8c313e9a-2a98-487a-916c-64bb2b7c8b1c topics=5
+2026-11-06T05:45:17.121701424Z [KnowledgeCompiler][room=room-5cn5b287] version=731 mode=incremental dirty=2 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=246ms
+2026-11-06T05:45:17.202995330Z [WikiCompiler][room=room-5cn5b287] version=731 generation=8429b2e1-87ca-472c-a497-378cc2913bb8 topics=8
+2026-11-06T05:45:23.885412887Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:45:23.885437205Z   roomKey: 'room-60q6noy9',
+2026-11-06T05:45:23.885565795Z   errors: [],
+2026-11-06T05:45:23.885567279Z   warnings: [],
+2026-11-06T05:45:24.032460461Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:45:24.032528100Z   roomKey: 'room-60q6noy9',
+2026-11-06T05:45:24.032620038Z   errors: [],
+2026-11-06T05:45:24.032620945Z   warnings: [],
+2026-11-06T05:45:35.373083212Z [KnowledgeCompiler][room=room-60q6noy9] version=148 mode=incremental dirty=2 changedFiles=2 unchangedFiles=4 deletedFiles=0 duration=239ms
+2026-11-06T05:45:35.473423234Z [WikiCompiler][room=room-60q6noy9] version=148 generation=5c6194db-573c-4246-b030-fec607dce65e topics=6
+2026-11-06T05:45:44.559981352Z [KnowledgeCompiler][room=room-60q6noy9] version=167 mode=incremental dirty=9 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=235ms
+2026-11-06T05:45:44.665232882Z [WikiCompiler][room=room-60q6noy9] version=167 generation=ecbd078b-e935-4cda-8373-0733f5d306a7 topics=6
+2026-11-06T05:45:47.467490773Z [KnowledgeCompiler][room=room-5cn5b287] version=732 mode=incremental dirty=2 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=217ms
+2026-11-06T05:45:47.549673258Z [WikiCompiler][room=room-5cn5b287] version=732 generation=2773e448-db60-4f32-b2e9-605010136c7e topics=8
+2026-11-06T05:46:25.929858418Z [KnowledgeCompiler][room=room-5cn5b287] version=733 mode=incremental dirty=2 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=260ms
+2026-11-06T05:46:26.014687213Z [WikiCompiler][room=room-5cn5b287] version=733 generation=130a1b5e-7c60-468f-9527-cc21a4acea56 topics=8
+2026-11-06T05:46:34.439229105Z [KnowledgeCompiler][room=room-60q6noy9] version=169 mode=incremental dirty=3 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=229ms
+2026-11-06T05:46:34.552236076Z [WikiCompiler][room=room-60q6noy9] version=169 generation=84ac66b7-d041-47fe-af5a-349f630417c1 topics=6
+2026-11-06T05:46:38.640178681Z [KnowledgeCompiler][room=room-60q6noy9] version=170 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=256ms
+2026-11-06T05:46:38.797584504Z [WikiCompiler][room=room-60q6noy9] version=170 generation=267846e5-2485-445f-a2c3-21b4ef5b7b90 topics=6
+2026-11-06T05:46:39.917580702Z [KnowledgeCompiler][room=room-5cn5b287] version=736 mode=incremental dirty=3 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=250ms
+2026-11-06T05:46:40.005422389Z [WikiCompiler][room=room-5cn5b287] version=736 generation=556f6865-a1c8-4f23-9108-f926d7928895 topics=8
+2026-11-06T05:46:41.379618664Z [KnowledgeCompiler][room=room-60q6noy9] version=171 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=222ms
+2026-11-06T05:46:41.480456050Z [WikiCompiler][room=room-60q6noy9] version=171 generation=32d520de-47de-4cee-b2f9-ae0d8cb235b4 topics=6
+2026-11-06T05:47:12.206178083Z [KnowledgeCompiler][room=room-5cn5b287] version=737 mode=incremental dirty=2 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=275ms
+2026-11-06T05:47:12.293702406Z [WikiCompiler][room=room-5cn5b287] version=737 generation=4b6b1629-0ad6-459b-9e3a-de9e18d87d44 topics=8
+2026-11-06T05:47:46.827146293Z [KnowledgeCompiler][room=room-5cn5b287] version=738 mode=incremental dirty=2 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=241ms
+2026-11-06T05:47:46.915144861Z [WikiCompiler][room=room-5cn5b287] version=738 generation=c88a9b4f-e455-4ecf-b7da-51fe1d1fda0f topics=8
+2026-11-06T05:47:56.639548542Z [KnowledgeCompiler][room=room-5cn5b287] version=738 mode=incremental dirty=7 changedFiles=2 unchangedFiles=6 deletedFiles=0 duration=283ms
+2026-11-06T05:47:57.065982229Z [WikiCompiler] reconcile rooms=211
+2026-11-06T05:47:57.066233732Z [KnowledgeCompiler][room=room-60q6noy9] version=171 mode=incremental dirty=18 changedFiles=3 unchangedFiles=3 deletedFiles=0 duration=399ms
+2026-11-06T05:48:01.314976826Z [WikiCompiler] contract supplements paused: contract tree missing room=room-au05qkq6
+2026-11-06T05:48:04.233847958Z [KnowledgeCompiler][room=room-5cn5b287] version=739 mode=incremental dirty=2 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=236ms
+2026-11-06T05:48:04.315469068Z [WikiCompiler][room=room-5cn5b287] version=739 generation=7a51b16c-093e-4e3c-b41c-14fadb92eb87 topics=8
+2026-11-06T05:48:13.725568716Z [KnowledgeCompiler][room=room-5cn5b287] version=740 mode=incremental dirty=2 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=225ms
+2026-11-06T05:48:13.806831257Z [WikiCompiler][room=room-5cn5b287] version=740 generation=671d37f7-c5bc-49ef-9a41-247f6ded8b82 topics=8
+2026-11-06T05:48:42.463364984Z [KnowledgeCompiler][room=room-5cn5b287] version=741 mode=incremental dirty=2 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=246ms
+2026-11-06T05:48:42.550556936Z [WikiCompiler][room=room-5cn5b287] version=741 generation=8abc6cd0-3183-4f13-8b6e-e914d333b1cf topics=8
+2026-11-06T05:49:08.419973623Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:49:08.419995250Z   roomKey: 'room-yk3tz4aj',
+2026-11-06T05:49:08.420107806Z   errors: [],
+2026-11-06T05:49:08.420108701Z   warnings: [],
+2026-11-06T05:49:08.444131118Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:49:08.444154498Z   roomKey: 'room-yk3tz4aj',
+2026-11-06T05:49:08.444249804Z   errors: [],
+2026-11-06T05:49:08.444250704Z   warnings: [],
+2026-11-06T05:49:11.437724138Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:49:11.437746543Z   roomKey: 'room-7g6rak6f',
+2026-11-06T05:49:11.437860627Z   errors: [],
+2026-11-06T05:49:11.437861605Z   warnings: [],
+2026-11-06T05:49:11.534056838Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:49:11.534083014Z   roomKey: 'room-7g6rak6f',
+2026-11-06T05:49:11.534247050Z   errors: [],
+2026-11-06T05:49:11.534248018Z   warnings: [],
+2026-11-06T05:49:29.717544824Z [KnowledgeCompiler][room=room-7g6rak6f] version=1478 mode=incremental dirty=2 changedFiles=1 unchangedFiles=9 deletedFiles=0 duration=575ms
+2026-11-06T05:49:30.026026611Z [WikiCompiler][room=room-7g6rak6f] version=1478 generation=d584ad62-6ebe-4de3-ab7d-465b26057ccd topics=10
+2026-11-06T05:49:47.152545065Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:49:47.152579672Z   roomKey: 'room-yk3tz4aj',
+2026-11-06T05:49:47.152681810Z   errors: [],
+2026-11-06T05:49:47.152682757Z   warnings: [],
+2026-11-06T05:49:47.178716567Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:49:47.178740109Z   roomKey: 'room-yk3tz4aj',
+2026-11-06T05:49:47.178841559Z   errors: [],
+2026-11-06T05:49:47.178842530Z   warnings: [],
+2026-11-06T05:49:59.657085520Z [KnowledgeCompiler][room=room-yk3tz4aj] version=4638 mode=incremental dirty=2 changedFiles=1 unchangedFiles=3 deletedFiles=0 duration=195ms
+2026-11-06T05:49:59.733149608Z [WikiCompiler][room=room-yk3tz4aj] version=4638 generation=9e9ac123-54bb-4eba-8a92-41cfefe244c7 topics=4
+2026-11-06T05:50:06.914775585Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:50:06.914798551Z   roomKey: 'room-piho042b',
+2026-11-06T05:50:06.914901347Z   errors: [],
+2026-11-06T05:50:06.914902258Z   warnings: [],
+2026-11-06T05:50:06.964048302Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:50:06.964071624Z   roomKey: 'room-piho042b',
+2026-11-06T05:50:06.964172335Z   errors: [],
+2026-11-06T05:50:06.964173270Z   warnings: [],
+2026-11-06T05:50:15.309925131Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:50:15.309986811Z   roomKey: 'room-yk3tz4aj',
+2026-11-06T05:50:15.310135693Z   errors: [],
+2026-11-06T05:50:15.310136568Z   warnings: [],
+2026-11-06T05:50:15.339343858Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:50:15.339367266Z   roomKey: 'room-yk3tz4aj',
+2026-11-06T05:50:15.339470592Z   errors: [],
+2026-11-06T05:50:15.339471513Z   warnings: [],
+2026-11-06T05:50:18.501022526Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:50:18.501046530Z   roomKey: 'room-mflie9je',
+2026-11-06T05:50:18.501165827Z   errors: [],
+2026-11-06T05:50:18.501166775Z   warnings: [],
+2026-11-06T05:50:18.563530332Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:50:18.563557475Z   roomKey: 'room-mflie9je',
+2026-11-06T05:50:18.563678753Z   errors: [],
+2026-11-06T05:50:18.563679756Z   warnings: [],
+2026-11-06T05:51:19.085959245Z [KnowledgeCompiler][room=room-5cn5b287] version=744 mode=incremental dirty=2 changedFiles=0 unchangedFiles=8 deletedFiles=0 duration=255ms
+2026-11-06T05:51:19.171526972Z [WikiCompiler][room=room-5cn5b287] version=744 generation=04cf3723-5e1f-46e2-8a8b-223dc8545ca4 topics=8
+2026-11-06T05:52:49.405948009Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:52:49.405971945Z   roomKey: 'room-gwnriw77',
+2026-11-06T05:52:49.406096360Z   errors: [],
+2026-11-06T05:52:49.406097288Z   warnings: [],
+2026-11-06T05:52:49.459416339Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:52:49.459449863Z   roomKey: 'room-gwnriw77',
+2026-11-06T05:52:49.459548751Z   errors: [],
+2026-11-06T05:52:49.459549720Z   warnings: [],
+2026-11-06T05:52:56.388843958Z [KnowledgeCompiler][room=room-11rdjk0x] failed: ENOENT: no such file or directory, lstat '/app/knowledge/room-11rdjk0x/README.md' (failCount=10 cooldownMs=300000)
+2026-11-06T05:52:56.938814544Z [KnowledgeCompiler][room=room-5cn5b287] version=744 mode=incremental dirty=5 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=240ms
+2026-11-06T05:52:57.227742508Z [WikiCompiler] reconcile rooms=211
+2026-11-06T05:52:57.638108834Z [KnowledgeCompiler][room=room-7g6rak6f] version=1478 mode=incremental dirty=2 changedFiles=1 unchangedFiles=9 deletedFiles=0 duration=539ms
+2026-11-06T05:52:59.674129236Z [KnowledgeCompiler][room=room-x6oywn1p] failed: ENOENT: no such file or directory, lstat '/app/knowledge/room-x6oywn1p/README.md' (failCount=10 cooldownMs=300000)
+2026-11-06T05:52:59.975684863Z [KnowledgeCompiler][room=room-yk3tz4aj] version=4638 mode=incremental dirty=2 changedFiles=1 unchangedFiles=3 deletedFiles=0 duration=186ms
+2026-11-06T05:53:01.852859061Z [WikiCompiler] contract supplements paused: contract tree missing room=room-au05qkq6
+2026-11-06T05:53:17.639329847Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:53:17.639352988Z   roomKey: 'room-gwnriw77',
+2026-11-06T05:53:17.639448360Z   errors: [],
+2026-11-06T05:53:17.639449290Z   warnings: [],
+2026-11-06T05:53:17.707538192Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:53:17.707556492Z   roomKey: 'room-gwnriw77',
+2026-11-06T05:53:17.707653991Z   errors: [],
+2026-11-06T05:53:17.707654918Z   warnings: [],
+2026-11-06T05:53:34.542773279Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:53:34.542792586Z   roomKey: 'room-gwnriw77',
+2026-11-06T05:53:34.542898810Z   errors: [],
+2026-11-06T05:53:34.542899745Z   warnings: [],
+2026-11-06T05:53:34.588254037Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:53:34.588278150Z   roomKey: 'room-gwnriw77',
+2026-11-06T05:53:34.588374079Z   errors: [],
+2026-11-06T05:53:34.588375127Z   warnings: [],
+2026-11-06T05:54:06.636793230Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:54:06.636822968Z   roomKey: 'room-60q6noy9',
+2026-11-06T05:54:06.636910394Z   errors: [],
+2026-11-06T05:54:06.636911312Z   warnings: [],
+2026-11-06T05:54:06.674209321Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:54:06.674232918Z   roomKey: 'room-60q6noy9',
+2026-11-06T05:54:06.674331158Z   errors: [],
+2026-11-06T05:54:06.674332088Z   warnings: [],
+2026-11-06T05:55:42.223998056Z [KnowledgeCompiler][room=room-60q6noy9] version=172 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=508ms
+2026-11-06T05:55:42.326832550Z [WikiCompiler][room=room-60q6noy9] version=172 generation=a497e4ca-f0e8-4a49-a8d6-de7811bee466 topics=6
+2026-11-06T05:56:03.185234881Z [KnowledgeCompiler][room=room-60q6noy9] version=173 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=468ms
+2026-11-06T05:56:03.280545378Z [WikiCompiler][room=room-60q6noy9] version=173 generation=fbd17c75-b187-4da1-be68-9091be962940 topics=6
+2026-11-06T05:57:44.928188975Z {"ts":"2026-11-06T05:57:44.927Z","event":"operation.commit","mapId":"room-5cn5b287","operationId":"0017a675-6802-41c9-95ad-fbf22b324ed1","version":745,"actorId":"liunanye","code":"node.update","durationMs":128}
+2026-11-06T05:57:47.201687138Z [KnowledgeCompiler][room=room-5cn5b287] version=745 mode=incremental dirty=2 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=268ms
+2026-11-06T05:57:47.288789785Z [WikiCompiler][room=room-5cn5b287] version=745 generation=562f2a65-3032-4564-a059-745a6041e3d0 topics=8
+2026-11-06T05:57:53.979138785Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:57:53.979162116Z   roomKey: 'room-7g6rak6f',
+2026-11-06T05:57:53.979264276Z   errors: [],
+2026-11-06T05:57:53.979265265Z   warnings: [],
+2026-11-06T05:57:54.085529302Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:57:54.085554811Z   roomKey: 'room-7g6rak6f',
+2026-11-06T05:57:54.085662381Z   errors: [],
+2026-11-06T05:57:54.085663297Z   warnings: [],
+2026-11-06T05:57:56.539028679Z [KnowledgeCompiler][room=room-5cn5b287] version=745 mode=incremental dirty=2 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=231ms
+2026-11-06T05:57:56.945171837Z [KnowledgeCompiler][room=room-60q6noy9] version=173 mode=incremental dirty=3 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=385ms
+2026-11-06T05:57:57.012515316Z [WikiCompiler] reconcile rooms=211
+2026-11-06T05:58:01.184396734Z [WikiCompiler] contract supplements paused: contract tree missing room=room-au05qkq6
+2026-11-06T05:58:37.824174701Z [KnowledgeCompiler][room=room-1q77piad] version=825 mode=incremental dirty=2 changedFiles=0 unchangedFiles=7 deletedFiles=0 duration=224ms
+2026-11-06T05:58:37.902246199Z [WikiCompiler][room=room-1q77piad] version=825 generation=1347df9a-502c-45a9-992a-0579feb66679 topics=7
+2026-11-06T05:58:45.015410050Z [KnowledgeCompiler][room=room-1q77piad] version=826 mode=incremental dirty=2 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=209ms
+2026-11-06T05:58:45.090476022Z [WikiCompiler][room=room-1q77piad] version=826 generation=a0e18cd0-c37e-4068-845d-0011f1a0ddca topics=7
+2026-11-06T05:58:56.050477654Z [KnowledgeCompiler][room=room-1q77piad] version=829 mode=incremental dirty=401 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=263ms
+2026-11-06T05:58:56.142972803Z [WikiCompiler][room=room-1q77piad] version=829 generation=05d136ff-583c-4101-8c99-c45775116f17 topics=7
+2026-11-06T05:59:02.739734871Z [KnowledgeCompiler][room=room-1q77piad] version=830 mode=full dirty=0 changedFiles=0 unchangedFiles=7 deletedFiles=0 duration=389ms
+2026-11-06T05:59:02.831288546Z [WikiCompiler][room=room-1q77piad] version=830 generation=5b2d05ff-1881-424e-97f9-cc69d2094ac0 topics=7
+2026-11-06T05:59:43.396466723Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:59:43.396493971Z   roomKey: 'room-2ya2bfow',
+2026-11-06T05:59:43.396587770Z   errors: [],
+2026-11-06T05:59:43.396588683Z   warnings: [],
+2026-11-06T05:59:43.427197216Z ROOM_INTEGRITY_REPORT {
+2026-11-06T05:59:43.427219499Z   roomKey: 'room-2ya2bfow',
+2026-11-06T05:59:43.427317304Z   errors: [],
+2026-11-06T05:59:43.427318229Z   warnings: [],
+2026-11-06T05:59:58.728619867Z [KnowledgeCompiler][room=room-1q77piad] version=832 mode=incremental dirty=3 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=244ms
+2026-11-06T05:59:58.814143817Z [WikiCompiler][room=room-1q77piad] version=832 generation=c298dc17-cc2a-42c8-8e9f-ec7d3438838c topics=7
+2026-11-06T06:00:02.940702931Z [KnowledgeCompiler][room=room-1q77piad] version=833 mode=incremental dirty=2 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=272ms
+2026-11-06T06:00:03.026719947Z [WikiCompiler][room=room-1q77piad] version=833 generation=3abea555-93a2-4867-90b5-2e13ca26f1b9 topics=7
+2026-11-06T06:00:09.606710563Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:00:09.606734452Z   roomKey: 'room-xgoibqb8',
+2026-11-06T06:00:09.606835319Z   errors: [],
+2026-11-06T06:00:09.606836335Z   warnings: [],
+2026-11-06T06:00:09.750343477Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:00:09.750366455Z   roomKey: 'room-xgoibqb8',
+2026-11-06T06:00:09.750479284Z   errors: [],
+2026-11-06T06:00:09.750484051Z   warnings: [],
+2026-11-06T06:00:15.103649189Z [KnowledgeCompiler][room=room-1q77piad] version=835 mode=incremental dirty=4 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=273ms
+2026-11-06T06:00:15.195550947Z [WikiCompiler][room=room-1q77piad] version=835 generation=3910b8a0-9d3f-45a0-ab4a-1e020dcaf4d8 topics=7
+2026-11-06T06:00:26.690377983Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:00:26.690413220Z   roomKey: 'room-xgoibqb8',
+2026-11-06T06:00:26.690541061Z   errors: [],
+2026-11-06T06:00:26.690542048Z   warnings: [],
+2026-11-06T06:00:26.824853590Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:00:26.824882006Z   roomKey: 'room-xgoibqb8',
+2026-11-06T06:00:26.825062165Z   errors: [],
+2026-11-06T06:00:26.825063614Z   warnings: [],
+2026-11-06T06:00:28.567064746Z [KnowledgeCompiler][room=room-1q77piad] version=836 mode=incremental dirty=43 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=267ms
+2026-11-06T06:00:28.661446525Z [WikiCompiler][room=room-1q77piad] version=836 generation=e688319f-5ac3-433c-a688-3946fa77e60f topics=7
+2026-11-06T06:00:35.534443914Z [KnowledgeCompiler][room=room-1q77piad] version=837 mode=incremental dirty=2 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=243ms
+2026-11-06T06:00:35.621481372Z [WikiCompiler][room=room-1q77piad] version=837 generation=a38e1d04-2700-4e62-98cd-ee6e586fb308 topics=7
+2026-11-06T06:00:41.013205364Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:00:41.013258073Z   roomKey: 'room-m0olw01r',
+2026-11-06T06:00:41.013351768Z   errors: [],
+2026-11-06T06:00:41.013352723Z   warnings: [],
+2026-11-06T06:00:41.086259162Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:00:41.086291235Z   roomKey: 'room-m0olw01r',
+2026-11-06T06:00:41.086392543Z   errors: [],
+2026-11-06T06:00:41.086393434Z   warnings: [],
+2026-11-06T06:01:16.392161952Z [KnowledgeCompiler][room=room-1q77piad] version=838 mode=incremental dirty=2 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=246ms
+2026-11-06T06:01:16.479046685Z [WikiCompiler][room=room-1q77piad] version=838 generation=642e13b8-440c-4d64-8ccc-0cef8f6d4a9b topics=7
+2026-11-06T06:01:28.649430482Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:01:28.649455089Z   roomKey: 'room-45tx8f90',
+2026-11-06T06:01:28.649558603Z   errors: [],
+2026-11-06T06:01:28.649559571Z   warnings: [],
+2026-11-06T06:01:28.716943508Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:01:28.716969016Z   roomKey: 'room-45tx8f90',
+2026-11-06T06:01:28.717071426Z   errors: [],
+2026-11-06T06:01:28.717072394Z   warnings: [],
+2026-11-06T06:01:38.605702940Z [KnowledgeCompiler][room=room-7suwuo8b] version=13 mode=incremental dirty=7 changedFiles=6 unchangedFiles=0 deletedFiles=0 duration=231ms
+2026-11-06T06:01:38.674448751Z [WikiCompiler][room=room-7suwuo8b] version=13 generation=fdc0f917-0467-4d52-aa93-eee5954279f7 topics=6
+2026-11-06T06:01:45.833087819Z [KnowledgeCompiler][room=room-1q77piad] version=839 mode=incremental dirty=2 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=244ms
+2026-11-06T06:01:45.915955735Z [WikiCompiler][room=room-1q77piad] version=839 generation=3c88a465-cb65-4fef-82c9-e4500541c3aa topics=7
+2026-11-06T06:01:46.833965929Z [KnowledgeCompiler][room=room-7suwuo8b] version=21 mode=incremental dirty=5 changedFiles=2 unchangedFiles=4 deletedFiles=0 duration=195ms
+2026-11-06T06:01:46.885414698Z [WikiCompiler][room=room-7suwuo8b] version=21 generation=e7e1aa26-4570-4910-a3a6-ab49d4249194 topics=6
+2026-11-06T06:01:50.917166055Z [KnowledgeCompiler][room=room-7suwuo8b] version=22 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=181ms
+2026-11-06T06:01:50.970678740Z [WikiCompiler][room=room-7suwuo8b] version=22 generation=27147b24-3d1d-4231-a2eb-603e3bc90cf3 topics=6
+2026-11-06T06:01:56.796539507Z [KnowledgeCompiler][room=room-7suwuo8b] version=23 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=180ms
+2026-11-06T06:01:56.848851580Z [WikiCompiler][room=room-7suwuo8b] version=23 generation=9c802b8e-99c0-4c70-87a1-dd7e592b530d topics=6
+2026-11-06T06:02:07.608462712Z [KnowledgeCompiler][room=room-7suwuo8b] version=24 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=188ms
+2026-11-06T06:02:07.665863576Z [WikiCompiler][room=room-7suwuo8b] version=24 generation=9a5bd4cd-e6b6-4820-80b9-8593ab863e5b topics=6
+2026-11-06T06:02:17.471419045Z [KnowledgeCompiler][room=room-7suwuo8b] version=25 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=178ms
+2026-11-06T06:02:17.524551226Z [WikiCompiler][room=room-7suwuo8b] version=25 generation=1f86173b-9ba9-4b7e-af09-4f6a6cd80bc1 topics=6
+2026-11-06T06:02:38.748733506Z [KnowledgeCompiler][room=room-7suwuo8b] version=29 mode=incremental dirty=3 changedFiles=2 unchangedFiles=4 deletedFiles=0 duration=238ms
+2026-11-06T06:02:38.841314139Z [WikiCompiler][room=room-7suwuo8b] version=29 generation=d89ba3c8-e1e3-4cf5-a87c-82070b4e51d8 topics=6
+2026-11-06T06:02:40.632336128Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:02:40.632499009Z   roomKey: 'room-dsa2iq0y',
+2026-11-06T06:02:40.632630769Z   errors: [],
+2026-11-06T06:02:40.632631806Z   warnings: [],
+2026-11-06T06:02:40.664880263Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:02:40.664903599Z   roomKey: 'room-dsa2iq0y',
+2026-11-06T06:02:40.665025354Z   errors: [],
+2026-11-06T06:02:40.665026305Z   warnings: [],
+2026-11-06T06:02:42.145086629Z [KnowledgeCompiler][room=room-7suwuo8b] version=31 mode=incremental dirty=3 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=203ms
+2026-11-06T06:02:42.198692451Z [WikiCompiler][room=room-7suwuo8b] version=31 generation=33087c41-3a46-4e3d-98ed-8b8cc9e9fd8e topics=6
+2026-11-06T06:02:46.868175289Z [KnowledgeCompiler][room=room-7suwuo8b] version=32 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=179ms
+2026-11-06T06:02:46.923887595Z [WikiCompiler][room=room-7suwuo8b] version=32 generation=78886947-2162-4800-8486-f0ca13779c96 topics=6
+2026-11-06T06:02:56.354843731Z [KnowledgeCompiler][room=room-11rdjk0x] failed: ENOENT: no such file or directory, lstat '/app/knowledge/room-11rdjk0x/README.md' (failCount=11 cooldownMs=300000)
+2026-11-06T06:02:56.710857504Z [KnowledgeCompiler][room=room-1q77piad] version=839 mode=full dirty=409 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=301ms
+2026-11-06T06:02:57.133049339Z [WikiCompiler] reconcile rooms=211
+2026-11-06T06:02:57.400916621Z [KnowledgeCompiler][room=room-7suwuo8b] version=32 mode=incremental dirty=12 changedFiles=6 unchangedFiles=0 deletedFiles=0 duration=244ms
+2026-11-06T06:02:59.421473247Z [KnowledgeCompiler][room=room-x6oywn1p] failed: ENOENT: no such file or directory, lstat '/app/knowledge/room-x6oywn1p/README.md' (failCount=11 cooldownMs=300000)
+2026-11-06T06:03:01.699351834Z [WikiCompiler] contract supplements paused: contract tree missing room=room-au05qkq6
+2026-11-06T06:03:06.211679488Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:03:06.211701992Z   roomKey: 'room-yk3tz4aj',
+2026-11-06T06:03:06.211800581Z   errors: [],
+2026-11-06T06:03:06.211801534Z   warnings: [],
+2026-11-06T06:03:06.238199781Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:03:06.238232682Z   roomKey: 'room-yk3tz4aj',
+2026-11-06T06:03:06.238352906Z   errors: [],
+2026-11-06T06:03:06.238353882Z   warnings: [],
+2026-11-06T06:03:08.755708867Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:03:08.755761054Z   roomKey: 'room-dsa2iq0y',
+2026-11-06T06:03:08.756199903Z   errors: [],
+2026-11-06T06:03:08.756203816Z   warnings: [],
+2026-11-06T06:03:08.844451590Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:03:08.844522796Z   roomKey: 'room-dsa2iq0y',
+2026-11-06T06:03:08.844826812Z   errors: [],
+2026-11-06T06:03:08.844827779Z   warnings: [],
+2026-11-06T06:03:14.361355704Z [KnowledgeCompiler][room=room-7suwuo8b] version=35 mode=incremental dirty=3 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=205ms
+2026-11-06T06:03:14.420351305Z [WikiCompiler][room=room-7suwuo8b] version=35 generation=8e3cd8b2-1ced-4cb0-b9d5-9cc01751bd3e topics=6
+2026-11-06T06:03:14.963278605Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:03:14.963302141Z   roomKey: 'room-dsa2iq0y',
+2026-11-06T06:03:14.963406246Z   errors: [],
+2026-11-06T06:03:14.963407202Z   warnings: [],
+2026-11-06T06:03:15.064958534Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:03:15.064983141Z   roomKey: 'room-dsa2iq0y',
+2026-11-06T06:03:15.065088132Z   errors: [],
+2026-11-06T06:03:15.065089128Z   warnings: [],
+2026-11-06T06:03:18.533085280Z [KnowledgeCompiler][room=room-7suwuo8b] version=37 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=181ms
+2026-11-06T06:03:18.583495732Z [WikiCompiler][room=room-7suwuo8b] version=37 generation=76b02fe6-e44a-4a4a-97f3-92ae4dda05fa topics=6
+2026-11-06T06:03:25.279368624Z [KnowledgeCompiler][room=room-5cn5b287] version=746 mode=incremental dirty=2 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=284ms
+2026-11-06T06:03:25.364379298Z [WikiCompiler][room=room-5cn5b287] version=746 generation=3e5a20f7-4e30-4e5a-8a14-f4e91e1e96b0 topics=8
+2026-11-06T06:03:26.847723103Z [KnowledgeCompiler][room=room-7suwuo8b] version=38 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=195ms
+2026-11-06T06:03:26.902428362Z [WikiCompiler][room=room-7suwuo8b] version=38 generation=c2a47894-2aa8-44a1-9c92-b0656ef4d2fa topics=6
+2026-11-06T06:03:30.620308399Z [KnowledgeCompiler][room=room-7suwuo8b] version=39 mode=incremental dirty=2 changedFiles=0 unchangedFiles=6 deletedFiles=0 duration=161ms
+2026-11-06T06:03:30.669536247Z [WikiCompiler][room=room-7suwuo8b] version=39 generation=d38a2f43-3673-4c94-aa81-598fef04a2af topics=6
+2026-11-06T06:03:31.596641657Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:03:31.596708286Z   roomKey: 'room-5cn5b287',
+2026-11-06T06:03:31.596941810Z   errors: [],
+2026-11-06T06:03:31.596943463Z   warnings: [],
+2026-11-06T06:03:31.665723870Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:03:31.665754280Z   roomKey: 'room-5cn5b287',
+2026-11-06T06:03:31.665942241Z   errors: [],
+2026-11-06T06:03:31.665943763Z   warnings: [],
+2026-11-06T06:03:40.738558181Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:03:40.738582132Z   roomKey: 'room-oze25aq9',
+2026-11-06T06:03:40.738683328Z   errors: [],
+2026-11-06T06:03:40.738684262Z   warnings: [],
+2026-11-06T06:03:40.774379876Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:03:40.774404403Z   roomKey: 'room-oze25aq9',
+2026-11-06T06:03:40.774498078Z   errors: [],
+2026-11-06T06:03:40.774499034Z   warnings: [],
+2026-11-06T06:03:43.443723010Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:03:43.443746656Z   roomKey: 'room-dsa2iq0y',
+2026-11-06T06:03:43.443851886Z   errors: [],
+2026-11-06T06:03:43.443852889Z   warnings: [],
+2026-11-06T06:03:43.531083459Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:03:43.531107927Z   roomKey: 'room-dsa2iq0y',
+2026-11-06T06:03:43.531214373Z   errors: [],
+2026-11-06T06:03:43.531215322Z   warnings: [],
+2026-11-06T06:03:45.650848740Z [KnowledgeCompiler][room=room-7suwuo8b] version=40 mode=incremental dirty=2 changedFiles=2 unchangedFiles=4 deletedFiles=0 duration=189ms
+2026-11-06T06:03:45.704374229Z [WikiCompiler][room=room-7suwuo8b] version=40 generation=3b78a8f5-feb6-45f1-81d9-6533ed828fff topics=6
+2026-11-06T06:04:10.407687436Z [KnowledgeCompiler][room=room-7suwuo8b] version=41 mode=incremental dirty=3 changedFiles=1 unchangedFiles=4 deletedFiles=1 duration=179ms
+2026-11-06T06:04:10.462055091Z [WikiCompiler][room=room-7suwuo8b] version=41 generation=6aacb293-3b18-4a57-832c-1fde6e4dfb31 topics=5
+2026-11-06T06:04:25.794250449Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:04:25.794278449Z   roomKey: 'room-61cqj7t9',
+2026-11-06T06:04:25.794383920Z   errors: [],
+2026-11-06T06:04:25.794384873Z   warnings: [],
+2026-11-06T06:04:25.875253036Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:04:25.875273857Z   roomKey: 'room-61cqj7t9',
+2026-11-06T06:04:25.875372544Z   errors: [],
+2026-11-06T06:04:25.875373486Z   warnings: [],
+2026-11-06T06:04:57.616550946Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:04:57.616575633Z   roomKey: 'room-61cqj7t9',
+2026-11-06T06:04:57.616686867Z   errors: [],
+2026-11-06T06:04:57.616687834Z   warnings: [],
+2026-11-06T06:04:57.704995016Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:04:57.705016448Z   roomKey: 'room-61cqj7t9',
+2026-11-06T06:04:57.705112434Z   errors: [],
+2026-11-06T06:04:57.705113378Z   warnings: [],
+2026-11-06T06:05:18.929385759Z [KnowledgeCompiler][room=room-61cqj7t9] version=419 mode=incremental dirty=8 changedFiles=0 unchangedFiles=3 deletedFiles=0 duration=197ms
+2026-11-06T06:05:18.980256367Z [WikiCompiler][room=room-61cqj7t9] version=419 generation=c4281806-f004-46ee-a8b0-c5cbff6206cb topics=3
+2026-11-06T06:05:22.057369326Z [KnowledgeCompiler][room=room-61cqj7t9] version=421 mode=incremental dirty=3 changedFiles=0 unchangedFiles=3 deletedFiles=0 duration=173ms
+2026-11-06T06:05:22.111574596Z [WikiCompiler][room=room-61cqj7t9] version=421 generation=0106c4e2-e354-48f3-9df6-420ebc406a50 topics=3
+2026-11-06T06:05:25.793329527Z [KnowledgeCompiler][room=room-61cqj7t9] version=423 mode=incremental dirty=3 changedFiles=0 unchangedFiles=3 deletedFiles=0 duration=174ms
+2026-11-06T06:05:25.844538514Z [WikiCompiler][room=room-61cqj7t9] version=423 generation=86b2d855-c680-4c8a-ac9d-437f0fc2435f topics=3
+2026-11-06T06:05:36.171964681Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:05:36.171993566Z   roomKey: 'room-5cn5b287',
+2026-11-06T06:05:36.172083556Z   errors: [],
+2026-11-06T06:05:36.172084568Z   warnings: [],
+2026-11-06T06:05:36.269532154Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:05:36.269555625Z   roomKey: 'room-5cn5b287',
+2026-11-06T06:05:36.269656280Z   errors: [],
+2026-11-06T06:05:36.269657217Z   warnings: [],
+2026-11-06T06:05:39.117682349Z [KnowledgeCompiler][room=room-61cqj7t9] version=424 mode=incremental dirty=2 changedFiles=0 unchangedFiles=3 deletedFiles=0 duration=152ms
+2026-11-06T06:05:39.163603914Z [WikiCompiler][room=room-61cqj7t9] version=424 generation=a10ec726-12bc-4251-a2f4-97c7d2e40709 topics=3
+2026-11-06T06:05:46.226291486Z [KnowledgeCompiler][room=room-61cqj7t9] version=426 mode=incremental dirty=3 changedFiles=0 unchangedFiles=3 deletedFiles=0 duration=168ms
+2026-11-06T06:05:46.277448982Z [WikiCompiler][room=room-61cqj7t9] version=426 generation=a7ef35b7-50ce-4962-bc9d-5772d0e1999c topics=3
+2026-11-06T06:06:22.856703571Z [KnowledgeCompiler][room=room-1q77piad] version=841 mode=incremental dirty=3 changedFiles=0 unchangedFiles=7 deletedFiles=0 duration=313ms
+2026-11-06T06:06:22.951169205Z [WikiCompiler][room=room-1q77piad] version=841 generation=2f0c84b7-fcec-4e88-9c23-a6d85c3ee94b topics=7
+2026-11-06T06:06:37.321307202Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:06:37.321329025Z   roomKey: 'room-1d4owhiy',
+2026-11-06T06:06:37.321424347Z   errors: [],
+2026-11-06T06:06:37.321425195Z   warnings: [],
+2026-11-06T06:06:37.414975327Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:06:37.415002186Z   roomKey: 'room-1d4owhiy',
+2026-11-06T06:06:37.415124426Z   errors: [],
+2026-11-06T06:06:37.415125413Z   warnings: [],
+2026-11-06T06:06:46.289423446Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:06:46.289449740Z   roomKey: 'room-2ya2bfow',
+2026-11-06T06:06:46.289548522Z   errors: [],
+2026-11-06T06:06:46.289549464Z   warnings: [],
+2026-11-06T06:06:46.332734154Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:06:46.332754183Z   roomKey: 'room-2ya2bfow',
+2026-11-06T06:06:46.332846830Z   errors: [],
+2026-11-06T06:06:46.332847779Z   warnings: [],
+2026-11-06T06:07:00.041981567Z {"ts":"2026-11-06T06:07:00.041Z","event":"operation.commit","mapId":"room-5cn5b287","operationId":"4d02f045-1495-4ebe-97b0-657a2e1dfc2a","version":747,"actorId":"liunanye","code":"node.update","durationMs":117}
+2026-11-06T06:07:02.318036712Z [KnowledgeCompiler][room=room-5cn5b287] version=747 mode=incremental dirty=2 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=274ms
+2026-11-06T06:07:02.403744990Z [WikiCompiler][room=room-5cn5b287] version=747 generation=7362c49e-a4aa-481c-9dd4-e6fc3ff92f88 topics=8
+2026-11-06T06:07:22.328956874Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:07:22.328986280Z   roomKey: 'room-4r3q5134',
+2026-11-06T06:07:22.329078864Z   errors: [],
+2026-11-06T06:07:22.329079793Z   warnings: [],
+2026-11-06T06:07:22.355721726Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:07:22.355745719Z   roomKey: 'room-4r3q5134',
+2026-11-06T06:07:22.355854293Z   errors: [],
+2026-11-06T06:07:22.355855872Z   warnings: [],
+2026-11-06T06:07:28.676819965Z [KnowledgeCompiler][room=room-61cqj7t9] version=427 mode=incremental dirty=2 changedFiles=0 unchangedFiles=3 deletedFiles=0 duration=159ms
+2026-11-06T06:07:28.725270150Z [WikiCompiler][room=room-61cqj7t9] version=427 generation=81c5494d-e06e-44c8-af97-a667259caf7c topics=3
+2026-11-06T06:07:31.326270913Z [KnowledgeCompiler][room=room-1d4owhiy] version=9644 mode=incremental dirty=2 changedFiles=2 unchangedFiles=3 deletedFiles=0 duration=355ms
+2026-11-06T06:07:31.519651199Z [WikiCompiler][room=room-1d4owhiy] version=9644 generation=2f2a7259-06c0-46c6-9857-369befffec87 topics=5
+2026-11-06T06:07:39.449407548Z [KnowledgeCompiler][room=room-1d4owhiy] version=9645 mode=incremental dirty=2 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=338ms
+2026-11-06T06:07:39.648426483Z [WikiCompiler][room=room-1d4owhiy] version=9645 generation=09fb35f4-a6f1-4dfe-b784-281e9c3ac1dd topics=5
+2026-11-06T06:07:42.548126689Z [KnowledgeCompiler][room=room-1d4owhiy] version=9647 mode=incremental dirty=2 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=321ms
+2026-11-06T06:07:42.758899538Z [WikiCompiler][room=room-1d4owhiy] version=9647 generation=c446eee2-d918-4165-9a3c-1451876e1e0e topics=5
+2026-11-06T06:07:48.930579417Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:07:48.930640196Z   roomKey: 'room-xgoibqb8',
+2026-11-06T06:07:48.931178484Z   errors: [],
+2026-11-06T06:07:48.931183822Z   warnings: [],
+2026-11-06T06:07:49.081191652Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:07:49.081212990Z   roomKey: 'room-xgoibqb8',
+2026-11-06T06:07:49.081311770Z   errors: [],
+2026-11-06T06:07:49.081312758Z   warnings: [],
+2026-11-06T06:07:56.373998930Z [KnowledgeCompiler][room=room-1d4owhiy] version=9647 mode=incremental dirty=2 changedFiles=2 unchangedFiles=3 deletedFiles=0 duration=376ms
+2026-11-06T06:07:56.589338419Z [KnowledgeCompiler][room=room-1q77piad] version=841 mode=incremental dirty=3 changedFiles=0 unchangedFiles=7 deletedFiles=0 duration=202ms
+2026-11-06T06:07:56.956295676Z [WikiCompiler] reconcile rooms=210
+2026-11-06T06:07:57.118907491Z [KnowledgeCompiler][room=room-5cn5b287] version=747 mode=incremental dirty=4 changedFiles=2 unchangedFiles=6 deletedFiles=0 duration=302ms
+2026-11-06T06:07:57.350458282Z [KnowledgeCompiler][room=room-61cqj7t9] version=427 mode=incremental dirty=15 changedFiles=0 unchangedFiles=3 deletedFiles=0 duration=190ms
+2026-11-06T06:07:57.863097682Z [KnowledgeCompiler][room=room-7suwuo8b] version=41 mode=incremental dirty=7 changedFiles=3 unchangedFiles=2 deletedFiles=1 duration=299ms
+2026-11-06T06:08:01.090365213Z [WikiCompiler] contract supplements paused: contract tree missing room=room-au05qkq6
+2026-11-06T06:08:02.326442974Z [KnowledgeCompiler][room=room-1d4owhiy] version=9649 mode=incremental dirty=2 changedFiles=0 unchangedFiles=5 deletedFiles=0 duration=391ms
+2026-11-06T06:08:02.526209253Z [WikiCompiler][room=room-1d4owhiy] version=9649 generation=8dcf25f4-c021-4e9a-a8a2-e8ab098e83ee topics=5
+2026-11-06T06:08:06.238791899Z [KnowledgeCompiler][room=room-1d4owhiy] version=9650 mode=incremental dirty=2 changedFiles=0 unchangedFiles=5 deletedFiles=0 duration=314ms
+2026-11-06T06:08:06.432238219Z [WikiCompiler][room=room-1d4owhiy] version=9650 generation=10100d69-4d07-4939-80aa-81cdbbe5adb4 topics=5
+2026-11-06T06:08:10.547628782Z [KnowledgeCompiler][room=room-61cqj7t9] version=428 mode=incremental dirty=2 changedFiles=0 unchangedFiles=3 deletedFiles=0 duration=157ms
+2026-11-06T06:08:10.597128962Z [WikiCompiler][room=room-61cqj7t9] version=428 generation=c07e00bc-1ab0-45f9-a15e-8cd450bf7216 topics=3
+2026-11-06T06:08:19.691144326Z [KnowledgeCompiler][room=room-61cqj7t9] version=429 mode=incremental dirty=2 changedFiles=0 unchangedFiles=3 deletedFiles=0 duration=171ms
+2026-11-06T06:08:19.744003374Z [WikiCompiler][room=room-61cqj7t9] version=429 generation=cd52afd4-be07-4e17-b9a9-7ad815b97f5d topics=3
+2026-11-06T06:08:26.124881572Z [KnowledgeCompiler][room=room-1d4owhiy] version=9651 mode=incremental dirty=2 changedFiles=0 unchangedFiles=5 deletedFiles=0 duration=386ms
+2026-11-06T06:08:26.335089497Z [WikiCompiler][room=room-1d4owhiy] version=9651 generation=1097e963-ad43-49f5-886d-493a87101501 topics=5
+2026-11-06T06:08:49.252853341Z {"ts":"2026-11-06T06:08:49.252Z","event":"operation.commit","mapId":"room-cwiluvby","operationId":"b6f2e3c4-8d95-4e2a-9b12-4c7d9e6f8a01","version":479,"actorId":"huangweilong","code":"node.batch","durationMs":35}
+2026-11-06T06:08:51.493409573Z [KnowledgeCompiler][room=room-cwiluvby] version=479 mode=incremental dirty=11 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=235ms
+2026-11-06T06:08:51.556315688Z [WikiCompiler][room=room-cwiluvby] version=479 generation=7ceaa2b6-9d1a-4499-bfe9-29bdea843c67 topics=8
+2026-11-06T06:09:05.565355955Z {"ts":"2026-11-06T06:09:05.565Z","event":"operation.commit","mapId":"room-cwiluvby","operationId":"c7a3f4b5-9e06-4f3b-8c23-5d8e0f1a2b34","version":480,"actorId":"huangweilong","code":"node.batch","durationMs":18}
+2026-11-06T06:09:07.582039920Z [KnowledgeCompiler][room=room-61cqj7t9] version=430 mode=incremental dirty=2 changedFiles=0 unchangedFiles=3 deletedFiles=0 duration=167ms
+2026-11-06T06:09:07.635674064Z [WikiCompiler][room=room-61cqj7t9] version=430 generation=c58985fc-4548-455f-afeb-af4cfc17a933 topics=3
+2026-11-06T06:09:07.845085518Z [KnowledgeCompiler][room=room-cwiluvby] version=480 mode=incremental dirty=5 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=208ms
+2026-11-06T06:09:07.905138065Z [WikiCompiler][room=room-cwiluvby] version=480 generation=535719de-c965-4d47-a1fe-916a4624f689 topics=8
+2026-11-06T06:09:20.519474529Z {"ts":"2026-11-06T06:09:20.519Z","event":"operation.commit","mapId":"room-cwiluvby","operationId":"4df2f6cd-060a-4f30-ad8a-3befdda9d596","version":481,"actorId":"huangweilong","code":"node.update","durationMs":45}
+2026-11-06T06:09:22.756954977Z [KnowledgeCompiler][room=room-cwiluvby] version=481 mode=incremental dirty=2 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=235ms
+2026-11-06T06:09:22.840397667Z [WikiCompiler][room=room-cwiluvby] version=481 generation=46923fc4-0b9e-4605-a1c6-2939d7e7a5f3 topics=8
+2026-11-06T06:09:26.962841649Z [KnowledgeCompiler][room=room-61cqj7t9] version=431 mode=incremental dirty=2 changedFiles=0 unchangedFiles=3 deletedFiles=0 duration=171ms
+2026-11-06T06:09:27.010876383Z [WikiCompiler][room=room-61cqj7t9] version=431 generation=b7bfd0ff-da44-4bba-afaf-71a0dc13265a topics=3
+2026-11-06T06:10:00.489164856Z [KnowledgeCompiler][room=room-61cqj7t9] version=432 mode=incremental dirty=2 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=201ms
+2026-11-06T06:10:00.544849412Z [WikiCompiler][room=room-61cqj7t9] version=432 generation=31a71716-f1a1-46cf-adf9-b276aefd2df5 topics=3
+2026-11-06T06:10:29.538080223Z [KnowledgeCompiler][room=room-61cqj7t9] version=433 mode=incremental dirty=3 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=180ms
+2026-11-06T06:10:29.584756633Z [WikiCompiler][room=room-61cqj7t9] version=433 generation=048d424d-4b65-415a-9ed1-118c01c3a500 topics=3
+2026-11-06T06:10:45.899043438Z [KnowledgeCompiler][room=room-1d4owhiy] version=9652 mode=incremental dirty=2 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=366ms
+2026-11-06T06:10:46.074628031Z [WikiCompiler][room=room-1d4owhiy] version=9652 generation=81caf984-78e6-4d75-a7dc-b115eb1e9472 topics=5
+2026-11-06T06:10:46.226586745Z [KnowledgeCompiler][room=room-61cqj7t9] version=434 mode=incremental dirty=2 changedFiles=0 unchangedFiles=3 deletedFiles=0 duration=151ms
+2026-11-06T06:10:46.386670312Z [KnowledgeCompiler][room=room-61cqj7t9] version=435 mode=incremental dirty=2 changedFiles=0 unchangedFiles=3 deletedFiles=0 duration=140ms
+2026-11-06T06:10:46.432368589Z [WikiCompiler][room=room-61cqj7t9] version=435 generation=08c42f4c-b74c-4694-b976-8caea01ec38a topics=3
+2026-11-06T06:11:02.262789910Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:11:02.262812902Z   roomKey: 'room-67iyfyuv',
+2026-11-06T06:11:02.262917200Z   errors: [],
+2026-11-06T06:11:02.262918229Z   warnings: [],
+2026-11-06T06:11:02.301921417Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:11:02.301949281Z   roomKey: 'room-67iyfyuv',
+2026-11-06T06:11:02.302051484Z   errors: [],
+2026-11-06T06:11:02.302055019Z   warnings: [],
+2026-11-06T06:11:09.141569068Z [KnowledgeCompiler][room=room-61cqj7t9] version=436 mode=incremental dirty=2 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=169ms
+2026-11-06T06:11:09.195370676Z [WikiCompiler][room=room-61cqj7t9] version=436 generation=f19d32d4-d266-4225-95a2-e3038569c701 topics=3
+2026-11-06T06:11:11.961599905Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:11:11.961647907Z   roomKey: 'room-su987o10',
+2026-11-06T06:11:11.961782256Z   errors: [],
+2026-11-06T06:11:11.961783141Z   warnings: [],
+2026-11-06T06:11:11.984865575Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:11:11.984887511Z   roomKey: 'room-su987o10',
+2026-11-06T06:11:11.984988877Z   errors: [],
+2026-11-06T06:11:11.984989845Z   warnings: [],
+2026-11-06T06:11:19.043452236Z [KnowledgeCompiler][room=room-61cqj7t9] version=437 mode=incremental dirty=2 changedFiles=0 unchangedFiles=3 deletedFiles=0 duration=154ms
+2026-11-06T06:11:19.090112095Z [WikiCompiler][room=room-61cqj7t9] version=437 generation=99e70a6d-67c5-4f44-b657-e49a96645d9e topics=3
+2026-11-06T06:11:28.137448961Z [KnowledgeCompiler][room=room-61cqj7t9] version=438 mode=incremental dirty=2 changedFiles=0 unchangedFiles=3 deletedFiles=0 duration=159ms
+2026-11-06T06:11:28.193634262Z [WikiCompiler][room=room-61cqj7t9] version=438 generation=af17eced-2177-4498-8516-2f907062f2ea topics=3
+2026-11-06T06:11:50.286704522Z [KnowledgeCompiler][room=room-61cqj7t9] version=439 mode=incremental dirty=2 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=166ms
+2026-11-06T06:11:50.330496686Z [WikiCompiler][room=room-61cqj7t9] version=439 generation=f5264e0b-2a6e-4339-b453-d370de61b98c topics=3
+2026-11-06T06:11:56.882764930Z [KnowledgeCompiler][room=room-61cqj7t9] version=441 mode=incremental dirty=3 changedFiles=0 unchangedFiles=3 deletedFiles=0 duration=165ms
+2026-11-06T06:11:56.934841811Z [WikiCompiler][room=room-61cqj7t9] version=441 generation=75334e72-0b85-4e61-bde4-ed4ac1c5f664 topics=3
+2026-11-06T06:12:42.217468577Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:12:42.217498941Z   roomKey: 'room-61cqj7t9',
+2026-11-06T06:12:42.217615161Z   errors: [],
+2026-11-06T06:12:42.217616174Z   warnings: [],
+2026-11-06T06:12:42.297221176Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:12:42.297246686Z   roomKey: 'room-61cqj7t9',
+2026-11-06T06:12:42.297348123Z   errors: [],
+2026-11-06T06:12:42.297349096Z   warnings: [],
+2026-11-06T06:12:56.332184188Z [KnowledgeCompiler][room=room-11rdjk0x] failed: ENOENT: no such file or directory, lstat '/app/knowledge/room-11rdjk0x/README.md' (failCount=12 cooldownMs=300000)
+2026-11-06T06:12:56.661742519Z [KnowledgeCompiler][room=room-1d4owhiy] version=9652 mode=incremental dirty=3 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=311ms
+2026-11-06T06:12:57.114828258Z [KnowledgeCompiler][room=room-61cqj7t9] version=441 mode=incremental dirty=14 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=162ms
+2026-11-06T06:12:57.139228120Z [WikiCompiler] reconcile rooms=210
+2026-11-06T06:12:57.743780438Z [KnowledgeCompiler][room=room-cwiluvby] version=481 mode=incremental dirty=13 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=276ms
+2026-11-06T06:12:59.509487234Z [KnowledgeCompiler][room=room-x6oywn1p] failed: ENOENT: no such file or directory, lstat '/app/knowledge/room-x6oywn1p/README.md' (failCount=12 cooldownMs=300000)
+2026-11-06T06:13:01.523316440Z [WikiCompiler] contract supplements paused: contract tree missing room=room-au05qkq6
+2026-11-06T06:13:03.692428283Z [KnowledgeCompiler][room=room-61cqj7t9] version=442 mode=incremental dirty=2 changedFiles=0 unchangedFiles=3 deletedFiles=0 duration=155ms
+2026-11-06T06:13:03.742586806Z [WikiCompiler][room=room-61cqj7t9] version=442 generation=d9bfac47-35ff-4f39-adae-74c2da3297b7 topics=3
+2026-11-06T06:13:10.616752243Z [KnowledgeCompiler][room=room-61cqj7t9] version=444 mode=incremental dirty=3 changedFiles=0 unchangedFiles=3 deletedFiles=0 duration=155ms
+2026-11-06T06:13:10.665722776Z [WikiCompiler][room=room-61cqj7t9] version=444 generation=47b7458b-dc18-4ee1-aa9b-1c37728fa66d topics=3
+2026-11-06T06:13:14.199861412Z [KnowledgeCompiler][room=room-61cqj7t9] version=445 mode=incremental dirty=2 changedFiles=0 unchangedFiles=3 deletedFiles=0 duration=167ms
+2026-11-06T06:13:14.248335803Z [WikiCompiler][room=room-61cqj7t9] version=445 generation=4293e51b-32f4-4dde-bd43-9183721ff327 topics=3
+2026-11-06T06:13:17.254304440Z [KnowledgeCompiler][room=room-61cqj7t9] version=446 mode=incremental dirty=2 changedFiles=0 unchangedFiles=3 deletedFiles=0 duration=166ms
+2026-11-06T06:13:17.422249157Z [KnowledgeCompiler][room=room-61cqj7t9] version=447 mode=incremental dirty=2 changedFiles=0 unchangedFiles=3 deletedFiles=0 duration=152ms
+2026-11-06T06:13:17.470622294Z [WikiCompiler][room=room-61cqj7t9] version=447 generation=d274853e-e392-468a-ae30-ac8b36c7a27c topics=3
+2026-11-06T06:13:21.871034945Z [KnowledgeCompiler][room=room-61cqj7t9] version=448 mode=incremental dirty=2 changedFiles=0 unchangedFiles=3 deletedFiles=0 duration=157ms
+2026-11-06T06:13:21.918906117Z [WikiCompiler][room=room-61cqj7t9] version=448 generation=5b882067-fe7f-47d0-83fc-c1ace7d725e8 topics=3
+2026-11-06T06:13:51.204606308Z [KnowledgeCompiler][room=room-61cqj7t9] version=449 mode=incremental dirty=2 changedFiles=0 unchangedFiles=3 deletedFiles=0 duration=177ms
+2026-11-06T06:13:51.256942181Z [WikiCompiler][room=room-61cqj7t9] version=449 generation=bf436b4e-ba32-4d95-9c8b-875a381cd4b3 topics=3
+2026-11-06T06:13:53.488718548Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:13:53.488745949Z   roomKey: 'room-1q77piad',
+2026-11-06T06:13:53.488854395Z   errors: [],
+2026-11-06T06:13:53.488855249Z   warnings: [],
+2026-11-06T06:13:53.618200763Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:13:53.618221776Z   roomKey: 'room-1q77piad',
+2026-11-06T06:13:53.618348107Z   errors: [],
+2026-11-06T06:13:53.618349064Z   warnings: [],
+2026-11-06T06:14:04.523565552Z [KnowledgeCompiler][room=room-1q77piad] version=842 mode=incremental dirty=2 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=270ms
+2026-11-06T06:14:04.613723931Z [WikiCompiler][room=room-1q77piad] version=842 generation=98f837f3-af4d-470f-a796-5861a64a759f topics=7
+2026-11-06T06:14:17.943970340Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:14:17.943992433Z   roomKey: 'room-dsa2iq0y',
+2026-11-06T06:14:17.944098707Z   errors: [],
+2026-11-06T06:14:17.944099600Z   warnings: [],
+2026-11-06T06:14:18.027942132Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:14:18.027971227Z   roomKey: 'room-dsa2iq0y',
+2026-11-06T06:14:18.028186341Z   errors: [],
+2026-11-06T06:14:18.028188276Z   warnings: [],
+2026-11-06T06:14:22.611625826Z [KnowledgeCompiler][room=room-61cqj7t9] version=451 mode=incremental dirty=2 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=186ms
+2026-11-06T06:14:22.660168249Z [WikiCompiler][room=room-61cqj7t9] version=451 generation=8fdfc7bc-0357-4bd3-9fab-202374605de8 topics=3
+2026-11-06T06:14:33.070520864Z {"ts":"2026-11-06T06:14:33.070Z","event":"operation.commit","mapId":"room-5cn5b287","operationId":"c31d502c-1029-439e-a7ed-52566b2bf88e","version":748,"actorId":"tianchengliang","code":"node.batch","durationMs":141}
+2026-11-06T06:14:33.311513696Z [KnowledgeCompiler][room=room-1q77piad] version=843 mode=incremental dirty=2 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=275ms
+2026-11-06T06:14:33.399750811Z [WikiCompiler][room=room-1q77piad] version=843 generation=a8526176-ef21-4292-ae86-c757634fa2ed topics=7
+2026-11-06T06:14:35.357143988Z [KnowledgeCompiler][room=room-5cn5b287] version=748 mode=incremental dirty=39 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=278ms
+2026-11-06T06:14:35.447796234Z [WikiCompiler][room=room-5cn5b287] version=748 generation=974a44f1-52ea-47b1-a6d0-b4cbbed360c8 topics=8
+2026-11-06T06:14:40.562623808Z [KnowledgeCompiler][room=room-61cqj7t9] version=452 mode=incremental dirty=5 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=182ms
+2026-11-06T06:14:40.612447641Z [WikiCompiler][room=room-61cqj7t9] version=452 generation=a606b55c-0bfe-4d0d-bc10-cab478d16782 topics=3
+2026-11-06T06:14:49.979728718Z [KnowledgeCompiler][room=room-1q77piad] version=844 mode=incremental dirty=2 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=257ms
+2026-11-06T06:14:50.067007702Z [WikiCompiler][room=room-1q77piad] version=844 generation=de3122e8-124d-4f93-afad-37d1f0a09a05 topics=7
+2026-11-06T06:14:55.413417036Z [KnowledgeCompiler][room=room-61cqj7t9] version=453 mode=incremental dirty=2 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=173ms
+2026-11-06T06:14:55.461694627Z [WikiCompiler][room=room-61cqj7t9] version=453 generation=d59a783b-f96f-4767-a165-7d0903486808 topics=3
+2026-11-06T06:14:58.087953066Z [KnowledgeCompiler][room=room-61cqj7t9] version=454 mode=incremental dirty=2 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=197ms
+2026-11-06T06:14:58.148571414Z [WikiCompiler][room=room-61cqj7t9] version=454 generation=2d422022-888f-4f7d-9ca7-b30eb282171a topics=3
+2026-11-06T06:15:00.880156288Z [KnowledgeCompiler][room=room-1q77piad] version=846 mode=incremental dirty=2 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=238ms
+2026-11-06T06:15:00.961024040Z [WikiCompiler][room=room-1q77piad] version=846 generation=9c594f43-9b19-4235-9b1b-29b6d326a47d topics=7
+2026-11-06T06:15:03.590582418Z [KnowledgeCompiler][room=room-1q77piad] version=848 mode=incremental dirty=2 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=217ms
+2026-11-06T06:15:03.674033925Z [WikiCompiler][room=room-1q77piad] version=848 generation=9871a8e9-1c4c-49e8-a715-319624d27968 topics=7
+2026-11-06T06:15:04.545067245Z [KnowledgeCompiler][room=room-61cqj7t9] version=455 mode=incremental dirty=2 changedFiles=0 unchangedFiles=3 deletedFiles=0 duration=185ms
+2026-11-06T06:15:04.597611249Z [WikiCompiler][room=room-61cqj7t9] version=455 generation=86ddbc9c-acc5-4e01-bdc2-19cf7e84deb8 topics=3
+2026-11-06T06:15:08.064216837Z [KnowledgeCompiler][room=room-61cqj7t9] version=456 mode=incremental dirty=2 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=171ms
+2026-11-06T06:15:08.119371074Z [WikiCompiler][room=room-61cqj7t9] version=456 generation=83cdb168-205f-44e3-909a-bb20aa982bd1 topics=3
+2026-11-06T06:15:27.638288594Z [KnowledgeCompiler][room=room-61cqj7t9] version=457 mode=incremental dirty=2 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=159ms
+2026-11-06T06:15:27.690009189Z [WikiCompiler][room=room-61cqj7t9] version=457 generation=6d142038-7918-4492-aa66-188cd22ba76d topics=3
+2026-11-06T06:15:48.820360954Z [KnowledgeCompiler][room=room-1q77piad] version=850 mode=incremental dirty=2 changedFiles=0 unchangedFiles=7 deletedFiles=0 duration=216ms
+2026-11-06T06:15:48.914912904Z [WikiCompiler][room=room-1q77piad] version=850 generation=61499711-70de-4573-bbfa-8da201daeca6 topics=7
+2026-11-06T06:15:54.139143091Z {"ts":"2026-11-06T06:15:54.138Z","event":"operation.commit","mapId":"room-5cn5b287","operationId":"717e5853-9c14-4319-8263-f541909fb532","version":749,"actorId":"tianchengliang","code":"node.update","durationMs":112}
+2026-11-06T06:15:56.419765502Z [KnowledgeCompiler][room=room-5cn5b287] version=749 mode=incremental dirty=2 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=278ms
+2026-11-06T06:15:56.500784451Z [WikiCompiler][room=room-5cn5b287] version=749 generation=021dcf8d-9077-4c37-a272-6a4d8cdb26ae topics=8
+2026-11-06T06:15:57.508241616Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:15:57.508265644Z   roomKey: 'room-qajvo1m3',
+2026-11-06T06:15:57.508377360Z   errors: [],
+2026-11-06T06:15:57.508378341Z   warnings: [],
+2026-11-06T06:15:57.643696715Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:15:57.643716969Z   roomKey: 'room-qajvo1m3',
+2026-11-06T06:15:57.643825159Z   errors: [],
+2026-11-06T06:15:57.643826022Z   warnings: [],
+2026-11-06T06:16:02.161741742Z [KnowledgeCompiler][room=room-1q77piad] version=851 mode=incremental dirty=2 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=303ms
+2026-11-06T06:16:02.299259789Z [WikiCompiler][room=room-1q77piad] version=851 generation=44e6bb85-bb06-465d-a94a-0058f844cb73 topics=7
+2026-11-06T06:16:02.685106658Z [KnowledgeCompiler][room=room-61cqj7t9] version=460 mode=incremental dirty=3 changedFiles=0 unchangedFiles=3 deletedFiles=0 duration=169ms
+2026-11-06T06:16:02.742061024Z [WikiCompiler][room=room-61cqj7t9] version=460 generation=9ac43a40-fa66-459b-b00a-7d0e3265ead9 topics=3
+2026-11-06T06:16:26.319426006Z [KnowledgeCompiler][room=room-61cqj7t9] version=461 mode=incremental dirty=2 changedFiles=0 unchangedFiles=3 deletedFiles=0 duration=155ms
+2026-11-06T06:16:26.367972331Z [WikiCompiler][room=room-61cqj7t9] version=461 generation=d0178cdd-3c4c-4042-a534-f56a09659ae6 topics=3
+2026-11-06T06:16:28.767523993Z [KnowledgeCompiler][room=room-61cqj7t9] version=462 mode=incremental dirty=2 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=171ms
+2026-11-06T06:16:28.817491800Z [WikiCompiler][room=room-61cqj7t9] version=462 generation=b45c76f7-5711-4121-b34d-7542c117cb71 topics=3
+2026-11-06T06:16:29.256513363Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:16:29.256551335Z   roomKey: 'room-1q77piad',
+2026-11-06T06:16:29.256691987Z   errors: [],
+2026-11-06T06:16:29.256692945Z   warnings: [],
+2026-11-06T06:16:29.356360132Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:16:29.356427386Z   roomKey: 'room-1q77piad',
+2026-11-06T06:16:29.356807017Z   errors: [],
+2026-11-06T06:16:29.356807934Z   warnings: [],
+2026-11-06T06:16:33.316126872Z [KnowledgeCompiler][room=room-61cqj7t9] version=463 mode=incremental dirty=2 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=212ms
+2026-11-06T06:16:33.372728790Z [WikiCompiler][room=room-61cqj7t9] version=463 generation=76e382c8-472f-4ac2-a917-a5548f3f4e66 topics=3
+2026-11-06T06:16:33.495101647Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:16:33.495125111Z   roomKey: 'room-60q6noy9',
+2026-11-06T06:16:33.495239563Z   errors: [],
+2026-11-06T06:16:33.495241070Z   warnings: [],
+2026-11-06T06:16:33.708610623Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:16:33.708645362Z   roomKey: 'room-60q6noy9',
+2026-11-06T06:16:33.708742738Z   errors: [],
+2026-11-06T06:16:33.708743654Z   warnings: [],
+2026-11-06T06:16:39.764340250Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:16:39.764364871Z   roomKey: 'room-yf3hvn8t',
+2026-11-06T06:16:39.764468444Z   errors: [],
+2026-11-06T06:16:39.764469352Z   warnings: [],
+2026-11-06T06:16:39.845577172Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:16:39.845602693Z   roomKey: 'room-yf3hvn8t',
+2026-11-06T06:16:39.845696216Z   errors: [],
+2026-11-06T06:16:39.845697104Z   warnings: [],
+2026-11-06T06:16:48.569246207Z [KnowledgeCompiler][room=room-dsa2iq0y] version=98 mode=incremental dirty=2 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=234ms
+2026-11-06T06:16:48.742863485Z [WikiCompiler][room=room-dsa2iq0y] version=98 generation=ad4361ff-fa78-443e-8293-a15dd3359686 topics=7
+2026-11-06T06:16:54.389261181Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:16:54.389282713Z   roomKey: 'room-5cn5b287',
+2026-11-06T06:16:54.389468120Z   errors: [],
+2026-11-06T06:16:54.389469100Z   warnings: [],
+2026-11-06T06:16:54.491473562Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:16:54.491495092Z   roomKey: 'room-5cn5b287',
+2026-11-06T06:16:54.491595673Z   errors: [],
+2026-11-06T06:16:54.491596629Z   warnings: [],
+2026-11-06T06:16:55.087797683Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:16:55.087824841Z   roomKey: 'room-qajvo1m3',
+2026-11-06T06:16:55.087925120Z   errors: [],
+2026-11-06T06:16:55.087926049Z   warnings: [],
+2026-11-06T06:16:55.218421320Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:16:55.218441157Z   roomKey: 'room-qajvo1m3',
+2026-11-06T06:16:55.218536174Z   errors: [],
+2026-11-06T06:16:55.218537138Z   warnings: [],
+2026-11-06T06:17:02.185069098Z [KnowledgeCompiler][room=room-dsa2iq0y] version=99 mode=incremental dirty=2 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=274ms
+2026-11-06T06:17:02.335897582Z [WikiCompiler][room=room-dsa2iq0y] version=99 generation=4ba755ad-e116-454f-9883-8ec077d6c409 topics=7
+2026-11-06T06:17:06.935793858Z [KnowledgeCompiler][room=room-1q77piad] version=853 mode=incremental dirty=22 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=231ms
+2026-11-06T06:17:07.025697499Z [WikiCompiler][room=room-1q77piad] version=853 generation=3c3c370a-8340-4788-be33-ea261520cada topics=7
+2026-11-06T06:17:07.717758163Z [KnowledgeCompiler][room=room-dsa2iq0y] version=101 mode=incremental dirty=2 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=210ms
+2026-11-06T06:17:07.806843671Z [WikiCompiler][room=room-dsa2iq0y] version=101 generation=bd2d55bc-da21-4d13-9f17-a1636768b2d2 topics=7
+2026-11-06T06:17:11.382003975Z [KnowledgeCompiler][room=room-1q77piad] version=854 mode=incremental dirty=3 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=242ms
+2026-11-06T06:17:11.465108254Z [WikiCompiler][room=room-1q77piad] version=854 generation=ea302e86-d491-4515-9763-6184f0ceaa0b topics=7
+2026-11-06T06:17:26.168773510Z [KnowledgeCompiler][room=room-61cqj7t9] version=468 mode=incremental dirty=7 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=171ms
+2026-11-06T06:17:26.216616306Z [WikiCompiler][room=room-61cqj7t9] version=468 generation=7558b72c-dd61-43cc-9ad8-cd500baed3cd topics=3
+2026-11-06T06:17:31.584256492Z [KnowledgeCompiler][room=room-1q77piad] version=855 mode=incremental dirty=3 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=224ms
+2026-11-06T06:17:31.664184677Z [WikiCompiler][room=room-1q77piad] version=855 generation=a08745be-8681-43c5-a8e1-10183d1773be topics=7
+2026-11-06T06:17:32.720237422Z [KnowledgeCompiler][room=room-61cqj7t9] version=469 mode=incremental dirty=12 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=186ms
+2026-11-06T06:17:32.770769876Z [WikiCompiler][room=room-61cqj7t9] version=469 generation=6a31dbd8-3fac-40d8-a0a4-c2de1fa6bd2c topics=3
+2026-11-06T06:17:36.197735037Z [KnowledgeCompiler][room=room-1q77piad] version=856 mode=incremental dirty=3 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=240ms
+2026-11-06T06:17:36.284435176Z [WikiCompiler][room=room-1q77piad] version=856 generation=3d612913-82a4-431b-943a-a6c0dd31f26f topics=7
+2026-11-06T06:17:38.770027898Z [KnowledgeCompiler][room=room-61cqj7t9] version=470 mode=incremental dirty=2 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=172ms
+2026-11-06T06:17:38.857920440Z [WikiCompiler][room=room-61cqj7t9] version=470 generation=ee1788ab-97ce-446c-af83-196272c41f8a topics=3
+2026-11-06T06:17:39.173333508Z [KnowledgeCompiler][room=room-1q77piad] version=857 mode=incremental dirty=2 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=315ms
+2026-11-06T06:17:39.255235655Z [WikiCompiler][room=room-1q77piad] version=857 generation=6af0295e-ead3-4b6c-a9a3-71f1b6577201 topics=7
+2026-11-06T06:17:48.717969846Z [KnowledgeCompiler][room=room-1q77piad] version=858 mode=incremental dirty=2 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=227ms
+2026-11-06T06:17:48.799092194Z [WikiCompiler][room=room-1q77piad] version=858 generation=cf1f1b69-8f6c-4966-9920-69f7d59def4b topics=7
+2026-11-06T06:17:52.628617362Z [KnowledgeCompiler][room=room-61cqj7t9] version=471 mode=incremental dirty=4 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=177ms
+2026-11-06T06:17:52.691771868Z [WikiCompiler][room=room-61cqj7t9] version=471 generation=93f9ddfc-11de-4d9c-bb57-4998934cc82c topics=3
+2026-11-06T06:17:55.844398180Z [KnowledgeCompiler][room=room-1q77piad] version=859 mode=incremental dirty=2 changedFiles=0 unchangedFiles=7 deletedFiles=0 duration=221ms
+2026-11-06T06:17:55.935809540Z [WikiCompiler][room=room-1q77piad] version=859 generation=c5f96f5e-ad22-41d1-997b-abc208a0df2d topics=7
+2026-11-06T06:17:56.254745678Z [KnowledgeCompiler][room=room-1q77piad] version=859 mode=incremental dirty=31 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=231ms
+2026-11-06T06:17:56.794917655Z [KnowledgeCompiler][room=room-5cn5b287] version=749 mode=incremental dirty=40 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=303ms
+2026-11-06T06:17:56.900616028Z [WikiCompiler] reconcile rooms=210
+2026-11-06T06:17:57.007487954Z [KnowledgeCompiler][room=room-61cqj7t9] version=471 mode=incremental dirty=41 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=174ms
+2026-11-06T06:17:57.743754536Z [KnowledgeCompiler][room=room-dsa2iq0y] version=101 mode=incremental dirty=2 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=295ms
+2026-11-06T06:17:57.963731909Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:17:57.963769746Z   roomKey: 'room-qajvo1m3',
+2026-11-06T06:17:57.963917315Z   errors: [],
+2026-11-06T06:17:57.963918859Z   warnings: [],
+2026-11-06T06:17:58.152279969Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:17:58.152308304Z   roomKey: 'room-qajvo1m3',
+2026-11-06T06:17:58.152411942Z   errors: [],
+2026-11-06T06:17:58.152412893Z   warnings: [],
+2026-11-06T06:17:59.167694262Z [KnowledgeCompiler][room=room-61cqj7t9] version=472 mode=incremental dirty=12 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=264ms
+2026-11-06T06:17:59.220149515Z [WikiCompiler][room=room-61cqj7t9] version=472 generation=779c8ad2-bffa-4e6a-a15f-a15034765b8e topics=3
+2026-11-06T06:18:00.920343004Z [KnowledgeCompiler][room=room-1q77piad] version=860 mode=incremental dirty=2 changedFiles=0 unchangedFiles=7 deletedFiles=0 duration=227ms
+2026-11-06T06:18:01.009505822Z [WikiCompiler][room=room-1q77piad] version=860 generation=7c137581-62c5-497d-ad0f-5bbf93cf88c1 topics=7
+2026-11-06T06:18:01.571146382Z [WikiCompiler] contract supplements paused: contract tree missing room=room-au05qkq6
+2026-11-06T06:18:02.646026510Z [KnowledgeCompiler][room=room-61cqj7t9] version=473 mode=incremental dirty=2 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=185ms
+2026-11-06T06:18:02.702006037Z [WikiCompiler][room=room-61cqj7t9] version=473 generation=cf17330f-3ddf-4b45-962c-975608045ac0 topics=3
+2026-11-06T06:18:05.682465790Z [KnowledgeCompiler][room=room-qajvo1m3] version=713 mode=incremental dirty=2 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=186ms
+2026-11-06T06:18:05.742229266Z [WikiCompiler][room=room-qajvo1m3] version=713 generation=a0b115e2-cc8e-4b6b-acdf-5f31e9599d05 topics=5
+2026-11-06T06:18:06.523676598Z [KnowledgeCompiler][room=room-61cqj7t9] version=474 mode=incremental dirty=2 changedFiles=0 unchangedFiles=3 deletedFiles=0 duration=164ms
+2026-11-06T06:18:06.571210454Z [WikiCompiler][room=room-61cqj7t9] version=474 generation=efb6fed1-02ae-4ba9-b035-d9d756511cce topics=3
+2026-11-06T06:18:09.104128972Z [KnowledgeCompiler][room=room-qajvo1m3] version=714 mode=incremental dirty=2 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=195ms
+2026-11-06T06:18:09.164557975Z [WikiCompiler][room=room-qajvo1m3] version=714 generation=0536914a-f71f-4044-8550-136703089ecc topics=5
+2026-11-06T06:18:20.595515836Z [KnowledgeCompiler][room=room-1q77piad] version=861 mode=incremental dirty=2 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=234ms
+2026-11-06T06:18:20.678475815Z [WikiCompiler][room=room-1q77piad] version=861 generation=fb01f80a-8b68-46a5-9de2-b698552aad05 topics=7
+2026-11-06T06:18:28.790648014Z [KnowledgeCompiler][room=room-1q77piad] version=862 mode=incremental dirty=2 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=234ms
+2026-11-06T06:18:28.878186468Z [WikiCompiler][room=room-1q77piad] version=862 generation=8cb85564-cd54-4ddd-ab3f-d732ae0463c6 topics=7
+2026-11-06T06:18:30.437260738Z [KnowledgeCompiler][room=room-dsa2iq0y] version=102 mode=incremental dirty=2 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=226ms
+2026-11-06T06:18:30.530852354Z [WikiCompiler][room=room-dsa2iq0y] version=102 generation=54d6da9e-f2a4-4a65-bddb-48bd74482fa8 topics=7
+2026-11-06T06:18:33.414651825Z [KnowledgeCompiler][room=room-1q77piad] version=863 mode=incremental dirty=2 changedFiles=0 unchangedFiles=7 deletedFiles=0 duration=270ms
+2026-11-06T06:18:33.504358391Z [WikiCompiler][room=room-1q77piad] version=863 generation=f579415f-7114-43e2-ad1d-3d24d342d498 topics=7
+2026-11-06T06:18:37.110753603Z [KnowledgeCompiler][room=room-1q77piad] version=865 mode=incremental dirty=4 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=238ms
+2026-11-06T06:18:37.194608867Z [WikiCompiler][room=room-1q77piad] version=865 generation=bab21837-cbc3-4586-a8c7-da3a5674ef60 topics=7
+2026-11-06T06:18:39.005571754Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:18:39.005603167Z   roomKey: 'room-qajvo1m3',
+2026-11-06T06:18:39.005764301Z   errors: [],
+2026-11-06T06:18:39.005765933Z   warnings: [],
+2026-11-06T06:18:39.145576713Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:18:39.145608020Z   roomKey: 'room-qajvo1m3',
+2026-11-06T06:18:39.145709575Z   errors: [],
+2026-11-06T06:18:39.145710517Z   warnings: [],
+2026-11-06T06:18:41.320984409Z [KnowledgeCompiler][room=room-61cqj7t9] version=475 mode=incremental dirty=12 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=172ms
+2026-11-06T06:18:41.370550000Z [WikiCompiler][room=room-61cqj7t9] version=475 generation=484ae161-47ff-4e03-b0cb-6819be4b7322 topics=3
+2026-11-06T06:18:45.601932999Z [KnowledgeCompiler][room=room-dsa2iq0y] version=103 mode=incremental dirty=2 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=223ms
+2026-11-06T06:18:45.707989178Z [WikiCompiler][room=room-dsa2iq0y] version=103 generation=3b63892c-0a8e-4abf-9a5f-1a38456bea67 topics=7
+2026-11-06T06:18:47.142314486Z [KnowledgeCompiler][room=room-1q77piad] version=866 mode=incremental dirty=2 changedFiles=0 unchangedFiles=7 deletedFiles=0 duration=216ms
+2026-11-06T06:18:47.224166025Z [WikiCompiler][room=room-1q77piad] version=866 generation=212470a8-cd1e-42a1-906b-3267a7f26b7c topics=7
+2026-11-06T06:18:49.722327185Z [KnowledgeCompiler][room=room-1q77piad] version=867 mode=incremental dirty=2 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=242ms
+2026-11-06T06:18:49.809412029Z [WikiCompiler][room=room-1q77piad] version=867 generation=7737ab9a-f951-4acf-b4ef-930692d21c26 topics=7
+2026-11-06T06:18:49.985915070Z [KnowledgeCompiler][room=room-qajvo1m3] version=719 mode=incremental dirty=3 changedFiles=0 unchangedFiles=5 deletedFiles=0 duration=176ms
+2026-11-06T06:18:50.047807143Z [WikiCompiler][room=room-qajvo1m3] version=719 generation=83ec247d-df12-4aa0-9b61-f4eacefa03ae topics=5
+2026-11-06T06:18:50.204276044Z [KnowledgeCompiler][room=room-61cqj7t9] version=476 mode=incremental dirty=2 changedFiles=0 unchangedFiles=3 deletedFiles=0 duration=156ms
+2026-11-06T06:18:50.254815436Z [WikiCompiler][room=room-61cqj7t9] version=476 generation=f1b5c22b-7390-4e44-9645-e9d9993197eb topics=3
+2026-11-06T06:18:55.939363776Z [KnowledgeCompiler][room=room-qajvo1m3] version=721 mode=incremental dirty=2 changedFiles=0 unchangedFiles=5 deletedFiles=0 duration=201ms
+2026-11-06T06:18:55.998691256Z [WikiCompiler][room=room-qajvo1m3] version=721 generation=21ae61b7-e6c2-4467-aa49-757ab5fa0531 topics=5
+2026-11-06T06:19:18.991811681Z [KnowledgeCompiler][room=room-dsa2iq0y] version=105 mode=incremental dirty=3 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=234ms
+2026-11-06T06:19:19.084001422Z [WikiCompiler][room=room-dsa2iq0y] version=105 generation=c0fa49ce-3fd3-467a-b710-fb68c323a08f topics=7
+2026-11-06T06:19:24.548681978Z [KnowledgeCompiler][room=room-dsa2iq0y] version=106 mode=incremental dirty=2 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=223ms
+2026-11-06T06:19:24.660850787Z [WikiCompiler][room=room-dsa2iq0y] version=106 generation=dff28267-903d-4659-b6c1-87e61643448f topics=7
+2026-11-06T06:19:32.998907830Z [KnowledgeCompiler][room=room-dsa2iq0y] version=107 mode=incremental dirty=2 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=239ms
+2026-11-06T06:19:33.093775804Z [WikiCompiler][room=room-dsa2iq0y] version=107 generation=7afc8bdc-9362-4b60-8c9d-3ab14d22ad04 topics=7
+2026-11-06T06:19:37.592785470Z [KnowledgeCompiler][room=room-61cqj7t9] version=478 mode=incremental dirty=3 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=172ms
+2026-11-06T06:19:37.641262951Z [WikiCompiler][room=room-61cqj7t9] version=478 generation=954ca683-f835-4dbc-b4f6-0ce7fed70744 topics=3
+2026-11-06T06:20:09.754722144Z [KnowledgeCompiler][room=room-dsa2iq0y] version=109 mode=incremental dirty=2 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=248ms
+2026-11-06T06:20:09.847122638Z [WikiCompiler][room=room-dsa2iq0y] version=109 generation=0e08a66c-3135-4b58-8085-8e2f429ddd53 topics=7
+2026-11-06T06:20:15.387581819Z [KnowledgeCompiler][room=room-dsa2iq0y] version=111 mode=incremental dirty=2 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=228ms
+2026-11-06T06:20:15.476691051Z [WikiCompiler][room=room-dsa2iq0y] version=111 generation=102f7920-75c4-488d-9c2b-71339956aaee topics=7
+2026-11-06T06:20:42.243908132Z [KnowledgeCompiler][room=room-61cqj7t9] version=479 mode=incremental dirty=2 changedFiles=0 unchangedFiles=3 deletedFiles=0 duration=163ms
+2026-11-06T06:20:42.295423630Z [WikiCompiler][room=room-61cqj7t9] version=479 generation=cda1260a-2dd8-4af7-b423-dd28a80bb5fd topics=3
+2026-11-06T06:20:48.286128875Z [KnowledgeCompiler][room=room-61cqj7t9] version=480 mode=incremental dirty=2 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=180ms
+2026-11-06T06:20:48.339470226Z [WikiCompiler][room=room-61cqj7t9] version=480 generation=a7b377c5-1aec-4fb4-9052-8949c337773f topics=3
+2026-11-06T06:20:49.805338559Z [KnowledgeCompiler][room=room-dsa2iq0y] version=113 mode=incremental dirty=4 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=228ms
+2026-11-06T06:20:49.897187774Z [WikiCompiler][room=room-dsa2iq0y] version=113 generation=219ebaee-fe55-4eed-b619-6eab75bdf71b topics=7
+2026-11-06T06:20:54.123396499Z [KnowledgeCompiler][room=room-dsa2iq0y] version=115 mode=incremental dirty=15 changedFiles=0 unchangedFiles=7 deletedFiles=0 duration=213ms
+2026-11-06T06:20:54.214964895Z [WikiCompiler][room=room-dsa2iq0y] version=115 generation=ff45910a-e6b9-4dc0-bf2d-69a76ee0c56f topics=7
+2026-11-06T06:21:01.653149885Z [KnowledgeCompiler][room=room-dsa2iq0y] version=117 mode=incremental dirty=4 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=225ms
+2026-11-06T06:21:01.747975289Z [WikiCompiler][room=room-dsa2iq0y] version=117 generation=5a0a9106-de74-435f-a542-74162ad96ff7 topics=7
+2026-11-06T06:21:04.214821562Z [KnowledgeCompiler][room=room-dsa2iq0y] version=118 mode=incremental dirty=2 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=254ms
+2026-11-06T06:21:04.310938814Z [WikiCompiler][room=room-dsa2iq0y] version=118 generation=ac3b0fb2-b765-466f-a849-9132df87d5ae topics=7
+2026-11-06T06:21:20.500294077Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:21:20.500348247Z   roomKey: 'room-60q6noy9',
+2026-11-06T06:21:20.500608790Z   errors: [],
+2026-11-06T06:21:20.500609761Z   warnings: [],
+2026-11-06T06:21:20.696475950Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:21:20.696514182Z   roomKey: 'room-60q6noy9',
+2026-11-06T06:21:20.696752507Z   errors: [],
+2026-11-06T06:21:20.696754908Z   warnings: [],
+2026-11-06T06:21:31.318955625Z [KnowledgeCompiler][room=room-60q6noy9] version=174 mode=incremental dirty=2 changedFiles=0 unchangedFiles=6 deletedFiles=0 duration=265ms
+2026-11-06T06:21:31.426447958Z [WikiCompiler][room=room-60q6noy9] version=174 generation=1b0dc288-fe60-4ed4-b532-22d1d9c2941b topics=6
+2026-11-06T06:21:35.565764385Z [KnowledgeCompiler][room=room-60q6noy9] version=175 mode=incremental dirty=3 changedFiles=3 unchangedFiles=4 deletedFiles=0 duration=305ms
+2026-11-06T06:21:35.661203736Z [WikiCompiler][room=room-60q6noy9] version=175 generation=475e959a-f35b-4087-b4df-bcf768c5ac9a topics=7
+2026-11-06T06:21:39.438139713Z [KnowledgeCompiler][room=room-60q6noy9] version=176 mode=incremental dirty=3 changedFiles=2 unchangedFiles=4 deletedFiles=1 duration=274ms
+2026-11-06T06:21:39.538719895Z [WikiCompiler][room=room-60q6noy9] version=176 generation=e35ee86c-f30e-4912-a452-2cafb151695e topics=6
+2026-11-06T06:21:44.063498107Z [KnowledgeCompiler][room=room-60q6noy9] version=178 mode=incremental dirty=2 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=254ms
+2026-11-06T06:21:44.163415397Z [WikiCompiler][room=room-60q6noy9] version=178 generation=9f882495-4a1e-4329-b155-4fa8d149f125 topics=6
+2026-11-06T06:21:55.284368872Z [KnowledgeCompiler][room=room-60q6noy9] version=188 mode=incremental dirty=6 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=258ms
+2026-11-06T06:21:55.380083090Z [WikiCompiler][room=room-60q6noy9] version=188 generation=e4deccb2-edbc-4fe1-a334-bc0a6c4b00f8 topics=6
+2026-11-06T06:22:02.453556701Z [KnowledgeCompiler][room=room-1q77piad] version=868 mode=incremental dirty=3 changedFiles=3 unchangedFiles=5 deletedFiles=0 duration=297ms
+2026-11-06T06:22:02.580090706Z [WikiCompiler][room=room-1q77piad] version=868 generation=eed97da9-ebdc-4942-a45f-42f24d5eeb96 topics=8
+2026-11-06T06:22:02.886808295Z [KnowledgeCompiler][room=room-60q6noy9] version=189 mode=incremental dirty=2 changedFiles=0 unchangedFiles=6 deletedFiles=0 duration=305ms
+2026-11-06T06:22:02.989620441Z [WikiCompiler][room=room-60q6noy9] version=189 generation=97588a91-fd94-4d9c-91f8-cb44a8dfd204 topics=6
+2026-11-06T06:22:04.927731041Z [KnowledgeCompiler][room=room-1q77piad] version=869 mode=incremental dirty=3 changedFiles=2 unchangedFiles=5 deletedFiles=1 duration=309ms
+2026-11-06T06:22:05.019297350Z [WikiCompiler][room=room-1q77piad] version=869 generation=fa955b10-7ad9-471b-b2c6-81631d66298c topics=7
+2026-11-06T06:22:13.616781889Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:22:13.616823903Z   roomKey: 'room-qajvo1m3',
+2026-11-06T06:22:13.616953640Z   errors: [],
+2026-11-06T06:22:13.616955113Z   warnings: [],
+2026-11-06T06:22:13.776604477Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:22:13.776628227Z   roomKey: 'room-qajvo1m3',
+2026-11-06T06:22:13.776719242Z   errors: [],
+2026-11-06T06:22:13.776720091Z   warnings: [],
+2026-11-06T06:22:18.320955797Z [KnowledgeCompiler][room=room-61cqj7t9] version=481 mode=incremental dirty=4 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=170ms
+2026-11-06T06:22:18.370155648Z [WikiCompiler][room=room-61cqj7t9] version=481 generation=569ebc4f-9f48-417a-9da2-17023875cddc topics=3
+2026-11-06T06:22:43.752560510Z [KnowledgeCompiler][room=room-dsa2iq0y] version=120 mode=incremental dirty=3 changedFiles=0 unchangedFiles=7 deletedFiles=0 duration=233ms
+2026-11-06T06:22:43.846293281Z [WikiCompiler][room=room-dsa2iq0y] version=120 generation=797a1c8c-07ab-4939-b774-51f8e4991dab topics=7
+2026-11-06T06:22:55.485822916Z [KnowledgeCompiler][room=room-qajvo1m3] version=722 mode=incremental dirty=6 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=194ms
+2026-11-06T06:22:55.549405709Z [WikiCompiler][room=room-qajvo1m3] version=722 generation=191421f4-c561-4517-9574-8f18e8e2e346 topics=5
+2026-11-06T06:22:56.266007727Z [KnowledgeCompiler][room=room-11rdjk0x] failed: ENOENT: no such file or directory, lstat '/app/knowledge/room-11rdjk0x/README.md' (failCount=13 cooldownMs=300000)
+2026-11-06T06:22:56.552017368Z [KnowledgeCompiler][room=room-1q77piad] version=869 mode=incremental dirty=10 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=230ms
+2026-11-06T06:22:56.979354860Z [WikiCompiler] reconcile rooms=210
+2026-11-06T06:22:57.033477611Z [KnowledgeCompiler][room=room-60q6noy9] version=189 mode=incremental dirty=10 changedFiles=1 unchangedFiles=5 deletedFiles=0 duration=255ms
+2026-11-06T06:22:57.212284452Z [KnowledgeCompiler][room=room-61cqj7t9] version=481 mode=incremental dirty=38 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=178ms
+2026-11-06T06:22:57.995470940Z [KnowledgeCompiler][room=room-dsa2iq0y] version=120 mode=incremental dirty=20 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=282ms
+2026-11-06T06:22:58.357161848Z [KnowledgeCompiler][room=room-qajvo1m3] version=723 mode=incremental dirty=2 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=234ms
+2026-11-06T06:22:58.441440858Z [WikiCompiler][room=room-qajvo1m3] version=723 generation=bb18dc8e-3e1c-49d3-be74-bc3872a08af0 topics=5
+2026-11-06T06:22:58.954163221Z [KnowledgeCompiler][room=room-qajvo1m3] version=723 mode=incremental dirty=10 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=258ms
+2026-11-06T06:22:59.864984995Z [KnowledgeCompiler][room=room-x6oywn1p] failed: ENOENT: no such file or directory, lstat '/app/knowledge/room-x6oywn1p/README.md' (failCount=13 cooldownMs=300000)
+2026-11-06T06:23:01.728899906Z [WikiCompiler] contract supplements paused: contract tree missing room=room-au05qkq6
+2026-11-06T06:23:06.482732116Z [KnowledgeCompiler][room=room-dsa2iq0y] version=122 mode=incremental dirty=3 changedFiles=0 unchangedFiles=7 deletedFiles=0 duration=202ms
+2026-11-06T06:23:06.568897898Z [WikiCompiler][room=room-dsa2iq0y] version=122 generation=42e7ed21-892e-48c3-9796-8ba027a55471 topics=7
+2026-11-06T06:23:08.284842152Z [KnowledgeCompiler][room=room-qajvo1m3] version=724 mode=incremental dirty=2 changedFiles=0 unchangedFiles=5 deletedFiles=0 duration=180ms
+2026-11-06T06:23:08.349054011Z [WikiCompiler][room=room-qajvo1m3] version=724 generation=d5f1d65f-889a-4e60-917c-f7482ab56467 topics=5
+2026-11-06T06:23:10.416358028Z [KnowledgeCompiler][room=room-dsa2iq0y] version=124 mode=incremental dirty=3 changedFiles=0 unchangedFiles=7 deletedFiles=0 duration=212ms
+2026-11-06T06:23:10.512427037Z [WikiCompiler][room=room-dsa2iq0y] version=124 generation=57f8ea31-ed19-433f-9c92-c6d942a04754 topics=7
+2026-11-06T06:23:39.544340216Z [KnowledgeCompiler][room=room-61cqj7t9] version=482 mode=incremental dirty=2 changedFiles=0 unchangedFiles=3 deletedFiles=0 duration=171ms
+2026-11-06T06:23:39.595032155Z [WikiCompiler][room=room-61cqj7t9] version=482 generation=3ef7ec96-bd19-43f3-863c-675b99b3cb4f topics=3
+2026-11-06T06:23:39.836074456Z [KnowledgeCompiler][room=room-dsa2iq0y] version=125 mode=incremental dirty=3 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=240ms
+2026-11-06T06:23:39.931374108Z [WikiCompiler][room=room-dsa2iq0y] version=125 generation=b81fe9e9-31ec-47ed-8a9d-f90380f54061 topics=7
+2026-11-06T06:23:47.418066230Z [KnowledgeCompiler][room=room-dsa2iq0y] version=126 mode=incremental dirty=2 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=233ms
+2026-11-06T06:23:47.524022186Z [WikiCompiler][room=room-dsa2iq0y] version=126 generation=0e8d9744-946c-402f-8058-465aea3ecaa8 topics=7
+2026-11-06T06:24:15.567172864Z [KnowledgeCompiler][room=room-61cqj7t9] version=483 mode=incremental dirty=2 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=184ms
+2026-11-06T06:24:15.618762229Z [WikiCompiler][room=room-61cqj7t9] version=483 generation=bc725aae-0b02-42a4-9d39-1fc4cd439cfc topics=3
+2026-11-06T06:24:23.638251921Z [KnowledgeCompiler][room=room-61cqj7t9] version=484 mode=incremental dirty=2 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=234ms
+2026-11-06T06:24:23.695744188Z [WikiCompiler][room=room-61cqj7t9] version=484 generation=d77cefe0-50d1-4d9e-85a5-1882be052769 topics=3
+2026-11-06T06:24:24.373654497Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:24:24.373677639Z   roomKey: 'room-qajvo1m3',
+2026-11-06T06:24:24.373781306Z   errors: [],
+2026-11-06T06:24:24.373782279Z   warnings: [],
+2026-11-06T06:24:24.569084885Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:24:24.569130547Z   roomKey: 'room-qajvo1m3',
+2026-11-06T06:24:24.569306802Z   errors: [],
+2026-11-06T06:24:24.569308644Z   warnings: [],
+2026-11-06T06:24:32.352698152Z [KnowledgeCompiler][room=room-61cqj7t9] version=485 mode=incremental dirty=2 changedFiles=0 unchangedFiles=3 deletedFiles=0 duration=168ms
+2026-11-06T06:24:32.400948838Z [WikiCompiler][room=room-61cqj7t9] version=485 generation=b459cdee-346c-4e21-a887-58aba0d305e1 topics=3
+2026-11-06T06:24:57.304072706Z [KnowledgeCompiler][room=room-61cqj7t9] version=486 mode=incremental dirty=2 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=183ms
+2026-11-06T06:24:57.351870056Z [WikiCompiler][room=room-61cqj7t9] version=486 generation=782d0757-4105-40eb-b571-f72882074fec topics=3
+2026-11-06T06:25:00.429904233Z [KnowledgeCompiler][room=room-61cqj7t9] version=487 mode=incremental dirty=2 changedFiles=0 unchangedFiles=3 deletedFiles=0 duration=160ms
+2026-11-06T06:25:00.477340634Z [WikiCompiler][room=room-61cqj7t9] version=487 generation=8012b1e1-bf22-4ff6-bae8-3f6d1051089b topics=3
+2026-11-06T06:25:08.265303363Z [KnowledgeCompiler][room=room-61cqj7t9] version=488 mode=incremental dirty=2 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=182ms
+2026-11-06T06:25:08.320139375Z [WikiCompiler][room=room-61cqj7t9] version=488 generation=fa16a430-2ac6-4ae6-9530-bbdd354e0d2e topics=3
+2026-11-06T06:25:13.581436422Z [KnowledgeCompiler][room=room-61cqj7t9] version=489 mode=incremental dirty=2 changedFiles=0 unchangedFiles=3 deletedFiles=0 duration=201ms
+2026-11-06T06:25:13.640520201Z [WikiCompiler][room=room-61cqj7t9] version=489 generation=531615f3-34d3-4631-ba78-3a4620afbf3e topics=3
+2026-11-06T06:25:52.534476935Z [KnowledgeCompiler][room=room-61cqj7t9] version=490 mode=incremental dirty=2 changedFiles=0 unchangedFiles=3 deletedFiles=0 duration=167ms
+2026-11-06T06:25:52.590938582Z [WikiCompiler][room=room-61cqj7t9] version=490 generation=551fe549-7db2-4e8c-9099-5361541c77e8 topics=3
+2026-11-06T06:26:13.767764095Z [KnowledgeCompiler][room=room-61cqj7t9] version=491 mode=incremental dirty=2 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=182ms
+2026-11-06T06:26:13.820008824Z [WikiCompiler][room=room-61cqj7t9] version=491 generation=bd7b42d7-29fe-4795-aa88-b1aea78d7b03 topics=3
+2026-11-06T06:26:22.874832039Z [KnowledgeCompiler][room=room-61cqj7t9] version=492 mode=incremental dirty=2 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=258ms
+2026-11-06T06:26:22.932740243Z [WikiCompiler][room=room-61cqj7t9] version=492 generation=7ea81e3f-cd95-4220-9cf1-f478947c4fae topics=3
+2026-11-06T06:26:31.933869934Z [KnowledgeCompiler][room=room-61cqj7t9] version=493 mode=incremental dirty=2 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=169ms
+2026-11-06T06:26:31.984473756Z [WikiCompiler][room=room-61cqj7t9] version=493 generation=2d293299-bf52-4cfd-9b74-1cce1c15a46e topics=3
+2026-11-06T06:26:46.855429075Z [KnowledgeCompiler][room=room-61cqj7t9] version=494 mode=incremental dirty=2 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=177ms
+2026-11-06T06:26:46.902482004Z [WikiCompiler][room=room-61cqj7t9] version=494 generation=36c32284-e524-4d10-879e-66ef523d6854 topics=3
+2026-11-06T06:26:57.074918237Z [KnowledgeCompiler][room=room-61cqj7t9] version=495 mode=incremental dirty=2 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=175ms
+2026-11-06T06:26:57.125901726Z [WikiCompiler][room=room-61cqj7t9] version=495 generation=f4fca0d8-30b7-4d93-9380-f4ed31d068db topics=3
+2026-11-06T06:27:22.874422636Z [KnowledgeCompiler][room=room-5cn5b287] version=750 mode=incremental dirty=2 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=364ms
+2026-11-06T06:27:22.968879047Z [WikiCompiler][room=room-5cn5b287] version=750 generation=0db60c05-9647-4831-8d91-8d28d6f92f09 topics=8
+2026-11-06T06:27:30.013066402Z [KnowledgeCompiler][room=room-61cqj7t9] version=496 mode=incremental dirty=2 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=197ms
+2026-11-06T06:27:30.059099085Z [WikiCompiler][room=room-61cqj7t9] version=496 generation=cef55d78-6eb8-43a1-a833-e24d51f764b7 topics=3
+2026-11-06T06:27:33.191623843Z [KnowledgeCompiler][room=room-61cqj7t9] version=497 mode=incremental dirty=2 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=185ms
+2026-11-06T06:27:33.245231617Z [WikiCompiler][room=room-61cqj7t9] version=497 generation=3f39dc36-6dfd-419d-af15-480dddc592f2 topics=3
+2026-11-06T06:27:33.762896672Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:27:33.762934509Z   roomKey: 'room-1txy2mj9',
+2026-11-06T06:27:33.763139359Z   errors: [],
+2026-11-06T06:27:33.763140905Z   warnings: [],
+2026-11-06T06:27:33.814788551Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:27:33.814814641Z   roomKey: 'room-1txy2mj9',
+2026-11-06T06:27:33.814920818Z   errors: [],
+2026-11-06T06:27:33.814924541Z   warnings: [],
+2026-11-06T06:27:34.306597862Z [KnowledgeCompiler][room=room-5cn5b287] version=751 mode=incremental dirty=2 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=250ms
+2026-11-06T06:27:34.389630653Z [WikiCompiler][room=room-5cn5b287] version=751 generation=5fdf0cce-4454-43c0-9725-43b8fa1cade4 topics=8
+2026-11-06T06:27:39.401097765Z [KnowledgeCompiler][room=room-5cn5b287] version=753 mode=incremental dirty=3 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=238ms
+2026-11-06T06:27:39.494922151Z [WikiCompiler][room=room-5cn5b287] version=753 generation=9c8d65f4-0306-48cb-9c95-51c5b85171a5 topics=8
+2026-11-06T06:27:44.066747275Z [KnowledgeCompiler][room=room-61cqj7t9] version=498 mode=incremental dirty=2 changedFiles=0 unchangedFiles=3 deletedFiles=0 duration=143ms
+2026-11-06T06:27:44.116888742Z [WikiCompiler][room=room-61cqj7t9] version=498 generation=9e8e2266-280e-404e-a470-16bf78860744 topics=3
+2026-11-06T06:27:47.401642205Z [KnowledgeCompiler][room=room-61cqj7t9] version=499 mode=incremental dirty=2 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=161ms
+2026-11-06T06:27:47.454805757Z [WikiCompiler][room=room-61cqj7t9] version=499 generation=6c426ac5-f6ff-447b-ad15-cedcad5fa217 topics=3
+2026-11-06T06:27:54.085073602Z [KnowledgeCompiler][room=room-1q77piad] version=870 mode=incremental dirty=2 changedFiles=0 unchangedFiles=7 deletedFiles=0 duration=224ms
+2026-11-06T06:27:54.171758997Z [WikiCompiler][room=room-1q77piad] version=870 generation=58ef91ab-b7bf-447e-be43-896de0767c20 topics=7
+2026-11-06T06:27:56.191810369Z [KnowledgeCompiler][room=room-1q77piad] version=870 mode=incremental dirty=2 changedFiles=0 unchangedFiles=7 deletedFiles=0 duration=207ms
+2026-11-06T06:27:56.623765777Z [KnowledgeCompiler][room=room-5cn5b287] version=753 mode=incremental dirty=3 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=220ms
+2026-11-06T06:27:56.735589485Z [WikiCompiler] reconcile rooms=210
+2026-11-06T06:27:56.826848375Z [KnowledgeCompiler][room=room-61cqj7t9] version=499 mode=incremental dirty=15 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=167ms
+2026-11-06T06:27:57.572284179Z [KnowledgeCompiler][room=room-dsa2iq0y] version=126 mode=incremental dirty=5 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=292ms
+2026-11-06T06:27:58.512195176Z [KnowledgeCompiler][room=room-qajvo1m3] version=724 mode=incremental dirty=2 changedFiles=0 unchangedFiles=5 deletedFiles=0 duration=164ms
+2026-11-06T06:28:00.794919137Z [WikiCompiler] contract supplements paused: contract tree missing room=room-au05qkq6
+2026-11-06T06:28:08.106627184Z [KnowledgeCompiler][room=room-61cqj7t9] version=505 mode=incremental dirty=8 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=167ms
+2026-11-06T06:28:08.154003066Z [WikiCompiler][room=room-61cqj7t9] version=505 generation=a893e694-8a74-4203-925e-b66abeabd1ab topics=3
+2026-11-06T06:28:11.309629539Z [KnowledgeCompiler][room=room-1q77piad] version=872 mode=incremental dirty=2 changedFiles=0 unchangedFiles=7 deletedFiles=0 duration=208ms
+2026-11-06T06:28:11.389144310Z [WikiCompiler][room=room-1q77piad] version=872 generation=0dcfde42-8924-48d2-97b4-8a1013084340 topics=7
+2026-11-06T06:28:15.089458871Z [KnowledgeCompiler][room=room-61cqj7t9] version=506 mode=incremental dirty=4 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=227ms
+2026-11-06T06:28:15.139435239Z [WikiCompiler][room=room-61cqj7t9] version=506 generation=6d855d77-bd69-4498-a0c8-d381b4ab00b6 topics=3
+2026-11-06T06:28:19.728896561Z [KnowledgeCompiler][room=room-5cn5b287] version=754 mode=incremental dirty=2 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=266ms
+2026-11-06T06:28:19.811920549Z [WikiCompiler][room=room-5cn5b287] version=754 generation=306ea585-afc4-482c-86ec-82fa2d2a9b44 topics=8
+2026-11-06T06:28:23.462780317Z [KnowledgeCompiler][room=room-1q77piad] version=873 mode=incremental dirty=2 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=244ms
+2026-11-06T06:28:23.555718651Z [WikiCompiler][room=room-1q77piad] version=873 generation=7695d74e-aaae-4b03-8ed4-10b00113974e topics=7
+2026-11-06T06:28:28.022599024Z [KnowledgeCompiler][room=room-5cn5b287] version=756 mode=incremental dirty=3 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=251ms
+2026-11-06T06:28:28.106964953Z [WikiCompiler][room=room-5cn5b287] version=756 generation=831d8c94-d74f-48ea-b59e-beca83732250 topics=8
+2026-11-06T06:28:36.068584837Z [KnowledgeCompiler][room=room-61cqj7t9] version=509 mode=incremental dirty=5 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=165ms
+2026-11-06T06:28:36.121647659Z [WikiCompiler][room=room-61cqj7t9] version=509 generation=87177c8e-6690-4a29-86b2-fe0f3f776896 topics=3
+2026-11-06T06:28:37.227205408Z [KnowledgeCompiler][room=room-5cn5b287] version=759 mode=incremental dirty=3 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=253ms
+2026-11-06T06:28:37.314570091Z [WikiCompiler][room=room-5cn5b287] version=759 generation=eed8f397-b43e-48bc-b015-6d0b87513d21 topics=8
+2026-11-06T06:28:48.349701137Z [KnowledgeCompiler][room=room-5cn5b287] version=764 mode=incremental dirty=4 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=303ms
+2026-11-06T06:28:48.441794684Z [WikiCompiler][room=room-5cn5b287] version=764 generation=1afd2c94-ef5a-4f9c-a4ae-1d0aec9ffc33 topics=8
+2026-11-06T06:28:52.895540215Z [KnowledgeCompiler][room=room-61cqj7t9] version=510 mode=incremental dirty=2 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=241ms
+2026-11-06T06:28:52.965771530Z [WikiCompiler][room=room-61cqj7t9] version=510 generation=cd0ca805-9e2c-4ab1-88db-cf158b15f68e topics=3
+2026-11-06T06:29:04.838749731Z [KnowledgeCompiler][room=room-61cqj7t9] version=511 mode=incremental dirty=2 changedFiles=0 unchangedFiles=3 deletedFiles=0 duration=179ms
+2026-11-06T06:29:04.886071896Z [WikiCompiler][room=room-61cqj7t9] version=511 generation=abcd001d-0a89-4e08-a242-c7bb16e44052 topics=3
+2026-11-06T06:29:13.202328110Z [KnowledgeCompiler][room=room-5cn5b287] version=765 mode=incremental dirty=2 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=382ms
+2026-11-06T06:29:13.301991432Z [WikiCompiler][room=room-5cn5b287] version=765 generation=4cd882e5-80ae-4394-b260-e98a3b79edaa topics=8
+2026-11-06T06:29:15.431995221Z [KnowledgeCompiler][room=room-61cqj7t9] version=513 mode=incremental dirty=2 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=185ms
+2026-11-06T06:29:15.482950126Z [WikiCompiler][room=room-61cqj7t9] version=513 generation=7e9a32e9-ccd6-4a48-a6fe-38956f90b166 topics=3
+2026-11-06T06:29:21.797936920Z [KnowledgeCompiler][room=room-61cqj7t9] version=514 mode=incremental dirty=2 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=171ms
+2026-11-06T06:29:21.844587575Z [WikiCompiler][room=room-61cqj7t9] version=514 generation=4b1e1772-919c-483b-bac7-abd2ca2140ee topics=3
+2026-11-06T06:29:42.707649036Z [KnowledgeCompiler][room=room-61cqj7t9] version=515 mode=incremental dirty=2 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=188ms
+2026-11-06T06:29:42.766252267Z [WikiCompiler][room=room-61cqj7t9] version=515 generation=2dc98f6e-7508-40a8-9dd7-fa575979d797 topics=3
+2026-11-06T06:30:10.046103429Z [KnowledgeCompiler][room=room-61cqj7t9] version=517 mode=incremental dirty=2 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=177ms
+2026-11-06T06:30:10.096037494Z [WikiCompiler][room=room-61cqj7t9] version=517 generation=b28a3ed4-2743-4d45-ab56-dbcf8564c16b topics=3
+2026-11-06T06:30:11.333359043Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:30:11.333382722Z   roomKey: 'room-ue1u0a10',
+2026-11-06T06:30:11.333487166Z   errors: [],
+2026-11-06T06:30:11.333488026Z   warnings: [],
+2026-11-06T06:30:11.884387730Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:30:11.884421321Z   roomKey: 'room-ue1u0a10',
+2026-11-06T06:30:11.884532325Z   errors: [],
+2026-11-06T06:30:11.884533287Z   warnings: [],
+2026-11-06T06:30:14.335027425Z [KnowledgeCompiler][room=room-61cqj7t9] version=518 mode=incremental dirty=2 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=223ms
+2026-11-06T06:30:14.404605812Z [WikiCompiler][room=room-61cqj7t9] version=518 generation=017fcf26-a694-4f2a-bd99-fdbf8ae4d5f6 topics=3
+2026-11-06T06:30:15.563293499Z [KnowledgeCompiler][room=room-efdgvi6h] version=707 mode=incremental dirty=3 changedFiles=0 unchangedFiles=6 deletedFiles=0 duration=221ms
+2026-11-06T06:30:15.645507347Z [WikiCompiler][room=room-efdgvi6h] version=707 generation=7e5198fb-97a2-4da1-89a4-704341db675e topics=6
+2026-11-06T06:30:19.608657499Z [KnowledgeCompiler][room=room-ue1u0a10] version=134 mode=incremental dirty=2 changedFiles=0 unchangedFiles=4 deletedFiles=0 duration=174ms
+2026-11-06T06:30:19.659454022Z [WikiCompiler][room=room-ue1u0a10] version=134 generation=754e8ba0-fbd0-422c-a50f-08edbebc9d9d topics=4
+2026-11-06T06:31:03.717317481Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:31:03.717348220Z   roomKey: 'room-33vmbjkw',
+2026-11-06T06:31:03.717373067Z   errors: [],
+2026-11-06T06:31:03.717374406Z   warnings: [],
+2026-11-06T06:31:03.789244367Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:31:03.789268492Z   roomKey: 'room-33vmbjkw',
+2026-11-06T06:31:03.789304592Z   errors: [],
+2026-11-06T06:31:03.789306088Z   warnings: [],
+2026-11-06T06:31:10.921661590Z [KnowledgeCompiler][room=room-33vmbjkw] version=5 mode=incremental dirty=3 changedFiles=2 unchangedFiles=0 deletedFiles=0 duration=176ms
+2026-11-06T06:31:10.972097366Z [WikiCompiler][room=room-33vmbjkw] version=5 generation=283ef89a-f4d5-465d-9ccc-855314548def topics=2
+2026-11-06T06:31:14.020530466Z [KnowledgeCompiler][room=room-33vmbjkw] version=9 mode=incremental dirty=2 changedFiles=1 unchangedFiles=1 deletedFiles=0 duration=222ms
+2026-11-06T06:31:14.084219821Z [WikiCompiler][room=room-33vmbjkw] version=9 generation=9159a4f4-4814-4ccf-922b-0e197a46ee80 topics=2
+2026-11-06T06:31:37.169663295Z [KnowledgeCompiler][room=room-33vmbjkw] version=49 mode=incremental dirty=2 changedFiles=0 unchangedFiles=2 deletedFiles=0 duration=142ms
+2026-11-06T06:31:37.221000677Z [WikiCompiler][room=room-33vmbjkw] version=49 generation=e58f8ead-ff99-4910-a168-7a2104176ddc topics=2
+2026-11-06T06:31:50.070288312Z [KnowledgeCompiler][room=room-qajvo1m3] version=730 mode=incremental dirty=4 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=234ms
+2026-11-06T06:31:50.133166013Z [WikiCompiler][room=room-qajvo1m3] version=730 generation=57a7e1f3-7a4b-413e-ba8f-68cacaaeec47 topics=5
+2026-11-06T06:31:52.787848041Z [KnowledgeCompiler][room=room-qajvo1m3] version=732 mode=incremental dirty=4 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=220ms
+2026-11-06T06:31:52.853271989Z [WikiCompiler][room=room-qajvo1m3] version=732 generation=c079b8a7-99ba-47d2-8b51-6670234603d0 topics=5
+2026-11-06T06:32:27.586904740Z [KnowledgeCompiler][room=room-qajvo1m3] version=735 mode=incremental dirty=2 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=226ms
+2026-11-06T06:32:27.647517680Z [WikiCompiler][room=room-qajvo1m3] version=735 generation=9b182c24-5abb-4e45-b3f6-c80efb625722 topics=5
+2026-11-06T06:32:33.416254076Z [KnowledgeCompiler][room=room-qajvo1m3] version=738 mode=incremental dirty=2 changedFiles=0 unchangedFiles=5 deletedFiles=0 duration=239ms
+2026-11-06T06:32:33.484714254Z [WikiCompiler][room=room-qajvo1m3] version=738 generation=28bab7e4-048d-4850-bd7a-2c68c2bac181 topics=5
+2026-11-06T06:32:37.292710738Z [KnowledgeCompiler][room=room-qajvo1m3] version=742 mode=incremental dirty=2 changedFiles=0 unchangedFiles=5 deletedFiles=0 duration=220ms
+2026-11-06T06:32:37.353055942Z [WikiCompiler][room=room-qajvo1m3] version=742 generation=8069bc9c-32cb-4972-8aaf-a997e8f79ec9 topics=5
+2026-11-06T06:32:56.253238744Z [KnowledgeCompiler][room=room-11rdjk0x] failed: ENOENT: no such file or directory, lstat '/app/knowledge/room-11rdjk0x/README.md' (failCount=14 cooldownMs=300000)
+2026-11-06T06:32:56.524763170Z [KnowledgeCompiler][room=room-1q77piad] version=873 mode=incremental dirty=2 changedFiles=1 unchangedFiles=6 deletedFiles=0 duration=217ms
+2026-11-06T06:32:56.778726556Z [KnowledgeCompiler][room=room-33vmbjkw] version=49 mode=incremental dirty=3 changedFiles=2 unchangedFiles=0 deletedFiles=0 duration=144ms
+2026-11-06T06:32:56.967905637Z [WikiCompiler] reconcile rooms=210
+2026-11-06T06:32:57.157578400Z [KnowledgeCompiler][room=room-5cn5b287] version=765 mode=incremental dirty=8 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=283ms
+2026-11-06T06:32:57.427744053Z [KnowledgeCompiler][room=room-61cqj7t9] version=518 mode=incremental dirty=17 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=223ms
+2026-11-06T06:32:58.148321417Z [KnowledgeCompiler][room=room-efdgvi6h] version=707 mode=incremental dirty=3 changedFiles=0 unchangedFiles=6 deletedFiles=0 duration=198ms
+2026-11-06T06:32:59.083516579Z [KnowledgeCompiler][room=room-qajvo1m3] version=742 mode=incremental dirty=6 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=218ms
+2026-11-06T06:32:59.521817075Z [KnowledgeCompiler][room=room-ue1u0a10] version=134 mode=incremental dirty=2 changedFiles=0 unchangedFiles=4 deletedFiles=0 duration=183ms
+2026-11-06T06:33:00.210738326Z [KnowledgeCompiler][room=room-x6oywn1p] failed: ENOENT: no such file or directory, lstat '/app/knowledge/room-x6oywn1p/README.md' (failCount=14 cooldownMs=300000)
+2026-11-06T06:33:01.553667049Z [WikiCompiler] contract supplements paused: contract tree missing room=room-au05qkq6
+2026-11-06T06:33:39.148005666Z [KnowledgeCompiler][room=room-5cn5b287] version=766 mode=incremental dirty=2 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=366ms
+2026-11-06T06:33:39.234632722Z [WikiCompiler][room=room-5cn5b287] version=766 generation=cf59a0e7-9123-4599-8aeb-96d1c69949d5 topics=8
+2026-11-06T06:33:41.147973676Z [KnowledgeCompiler][room=room-61cqj7t9] version=519 mode=incremental dirty=2 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=177ms
+2026-11-06T06:33:41.209998659Z [WikiCompiler][room=room-61cqj7t9] version=519 generation=52d5b16a-2cd1-42c7-a464-60d53ef82b82 topics=3
+2026-11-06T06:33:58.776009236Z [KnowledgeCompiler][room=room-61cqj7t9] version=520 mode=incremental dirty=2 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=194ms
+2026-11-06T06:33:58.829324109Z [WikiCompiler][room=room-61cqj7t9] version=520 generation=f6630c74-6398-4679-a835-6b45b7381bdc topics=3
+2026-11-06T06:34:24.548072657Z [KnowledgeCompiler][room=room-61cqj7t9] version=521 mode=incremental dirty=2 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=177ms
+2026-11-06T06:34:24.598989547Z [WikiCompiler][room=room-61cqj7t9] version=521 generation=8b40b91f-916f-40a1-a8a0-4c32bf406896 topics=3
+2026-11-06T06:34:27.115577912Z [KnowledgeCompiler][room=room-61cqj7t9] version=522 mode=incremental dirty=2 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=175ms
+2026-11-06T06:34:27.165284098Z [WikiCompiler][room=room-61cqj7t9] version=522 generation=561896f1-170b-4028-b268-772373c6e25b topics=3
+2026-11-06T06:34:57.181954373Z [KnowledgeCompiler][room=room-61cqj7t9] version=523 mode=incremental dirty=2 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=191ms
+2026-11-06T06:34:57.235849462Z [WikiCompiler][room=room-61cqj7t9] version=523 generation=62521c8b-c062-4c21-b61c-a689303abcbd topics=3
+2026-11-06T06:35:04.001363171Z [KnowledgeCompiler][room=room-61cqj7t9] version=524 mode=incremental dirty=2 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=229ms
+2026-11-06T06:35:04.069517530Z [WikiCompiler][room=room-61cqj7t9] version=524 generation=78981fff-9b2e-48ff-b450-ae7e12bdc134 topics=3
+2026-11-06T06:35:13.269080869Z [KnowledgeCompiler][room=room-61cqj7t9] version=525 mode=incremental dirty=2 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=263ms
+2026-11-06T06:35:13.326519069Z [WikiCompiler][room=room-61cqj7t9] version=525 generation=43c6c386-7730-40e2-a04c-f08d9a0ffa28 topics=3
+2026-11-06T06:35:26.892129647Z [KnowledgeCompiler][room=room-61cqj7t9] version=527 mode=incremental dirty=3 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=166ms
+2026-11-06T06:35:26.942548510Z [WikiCompiler][room=room-61cqj7t9] version=527 generation=54a5e69b-6f2c-45c5-9b2f-3f4c9e20c580 topics=3
+2026-11-06T06:35:32.132759214Z [KnowledgeCompiler][room=room-61cqj7t9] version=529 mode=incremental dirty=2 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=175ms
+2026-11-06T06:35:32.187308788Z [WikiCompiler][room=room-61cqj7t9] version=529 generation=08f923b0-2ada-41b0-8782-d2ed5677df95 topics=3
+2026-11-06T06:35:35.772161952Z [KnowledgeCompiler][room=room-61cqj7t9] version=531 mode=incremental dirty=3 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=191ms
+2026-11-06T06:35:35.822457053Z [WikiCompiler][room=room-61cqj7t9] version=531 generation=2f417305-e1cd-4521-a3fe-4754815edeb9 topics=3
+2026-11-06T06:35:57.003315142Z [KnowledgeCompiler][room=room-61cqj7t9] version=532 mode=incremental dirty=2 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=173ms
+2026-11-06T06:35:57.053561941Z [WikiCompiler][room=room-61cqj7t9] version=532 generation=7787bc78-3b60-46e6-8562-e52c62d201f4 topics=3
+2026-11-06T06:36:00.265055840Z [KnowledgeCompiler][room=room-61cqj7t9] version=533 mode=incremental dirty=2 changedFiles=0 unchangedFiles=3 deletedFiles=0 duration=182ms
+2026-11-06T06:36:00.320611333Z {"ts":"2026-11-06T06:36:00.320Z","event":"operation.commit","mapId":"room-5cn5b287","operationId":"bcd5e920-8d90-4a3d-81db-9dca8ff710dc","version":767,"actorId":"tianchengliang","code":"node.batch","durationMs":43}
+2026-11-06T06:36:00.323272110Z [WikiCompiler][room=room-61cqj7t9] version=533 generation=b2a400f4-e9d6-4f8c-8edf-4491289130a2 topics=3
+2026-11-06T06:36:02.612203458Z [KnowledgeCompiler][room=room-5cn5b287] version=767 mode=incremental dirty=15 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=285ms
+2026-11-06T06:36:02.702575884Z [WikiCompiler][room=room-5cn5b287] version=767 generation=c69abea2-0018-4875-9fe4-9886f9175fc9 topics=8
+2026-11-06T06:36:09.822563609Z [KnowledgeCompiler][room=room-61cqj7t9] version=534 mode=incremental dirty=2 changedFiles=0 unchangedFiles=3 deletedFiles=0 duration=154ms
+2026-11-06T06:36:09.872205533Z [WikiCompiler][room=room-61cqj7t9] version=534 generation=5460c94f-8cee-4bac-b9d1-e0b339ec94c1 topics=3
+2026-11-06T06:36:13.449421301Z [KnowledgeCompiler][room=room-61cqj7t9] version=535 mode=incremental dirty=2 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=315ms
+2026-11-06T06:36:13.536644422Z [WikiCompiler][room=room-61cqj7t9] version=535 generation=e71addac-56a0-4d04-a6b2-c69e7738c0a2 topics=3
+2026-11-06T06:36:19.383169640Z [KnowledgeCompiler][room=room-61cqj7t9] version=536 mode=incremental dirty=2 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=181ms
+2026-11-06T06:36:19.437891718Z [WikiCompiler][room=room-61cqj7t9] version=536 generation=42d6b218-ea90-4ce3-912a-1706ef234579 topics=3
+2026-11-06T06:36:30.123874978Z [KnowledgeCompiler][room=room-61cqj7t9] version=537 mode=incremental dirty=2 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=194ms
+2026-11-06T06:36:30.179249179Z [WikiCompiler][room=room-61cqj7t9] version=537 generation=8894c7bd-cf35-4152-9d7a-110eb59b9fe1 topics=3
+2026-11-06T06:36:40.205740673Z [KnowledgeCompiler][room=room-61cqj7t9] version=538 mode=incremental dirty=2 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=174ms
+2026-11-06T06:36:40.259703291Z [WikiCompiler][room=room-61cqj7t9] version=538 generation=f34e1ca4-62e1-4de1-8f14-a484c674ec20 topics=3
+2026-11-06T06:36:50.410422849Z {"ts":"2026-11-06T06:36:50.410Z","event":"operation.commit","mapId":"room-5cn5b287","operationId":"b61561fc-44a2-4e41-8d47-d36deba1eae9","version":768,"actorId":"tianchengliang","code":"node.update","durationMs":128}
+2026-11-06T06:36:52.677665769Z [KnowledgeCompiler][room=room-5cn5b287] version=768 mode=incremental dirty=2 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=264ms
+2026-11-06T06:36:52.762693719Z [WikiCompiler][room=room-5cn5b287] version=768 generation=c48fa961-ed5b-421a-b4b1-f33631762870 topics=8
+2026-11-06T06:37:11.516107406Z [KnowledgeCompiler][room=room-61cqj7t9] version=539 mode=incremental dirty=2 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=172ms
+2026-11-06T06:37:11.570655320Z [WikiCompiler][room=room-61cqj7t9] version=539 generation=a610c0b3-7e54-49d3-91ec-7a4d8756226d topics=3
+2026-11-06T06:37:42.643082532Z [KnowledgeCompiler][room=room-61cqj7t9] version=540 mode=incremental dirty=2 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=194ms
+2026-11-06T06:37:42.694399989Z [WikiCompiler][room=room-61cqj7t9] version=540 generation=80dc8b2a-eaba-4a84-be1c-0675fbb73102 topics=3
+2026-11-06T06:37:49.425667766Z [KnowledgeCompiler][room=room-5cn5b287] version=770 mode=incremental dirty=2 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=331ms
+2026-11-06T06:37:49.525494722Z [WikiCompiler][room=room-5cn5b287] version=770 generation=78a37698-f62d-49ed-a1be-333e1646ac38 topics=8
+2026-11-06T06:37:53.803643791Z [KnowledgeCompiler][room=room-2ya2bfow] version=3489 mode=incremental dirty=2 changedFiles=0 unchangedFiles=8 deletedFiles=0 duration=286ms
+2026-11-06T06:37:53.909883005Z [WikiCompiler][room=room-2ya2bfow] version=3489 generation=3a860f22-e1cf-45a5-b0d6-e652265ba2c5 topics=8
+2026-11-06T06:37:56.338531636Z [KnowledgeCompiler][room=room-2ya2bfow] version=3489 mode=incremental dirty=2 changedFiles=0 unchangedFiles=8 deletedFiles=0 duration=255ms
+2026-11-06T06:37:56.776429257Z [KnowledgeCompiler][room=room-5cn5b287] version=770 mode=incremental dirty=19 changedFiles=2 unchangedFiles=6 deletedFiles=0 duration=295ms
+2026-11-06T06:37:56.843226855Z [WikiCompiler] reconcile rooms=210
+2026-11-06T06:37:56.983269881Z [KnowledgeCompiler][room=room-61cqj7t9] version=540 mode=incremental dirty=20 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=172ms
+2026-11-06T06:37:57.403955396Z [KnowledgeCompiler][room=room-7suwuo8b] version=43 mode=incremental dirty=3 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=225ms
+2026-11-06T06:37:58.615196648Z [KnowledgeCompiler][room=room-7suwuo8b] version=43 mode=incremental dirty=3 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=236ms
+2026-11-06T06:37:58.872026774Z [KnowledgeCompiler][room=room-7suwuo8b] version=44 mode=incremental dirty=2 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=234ms
+2026-11-06T06:37:58.960130200Z [WikiCompiler][room=room-7suwuo8b] version=44 generation=1055af72-8de9-48a9-b3b2-a5be30f2d343 topics=5
+2026-11-06T06:37:59.351731311Z [KnowledgeCompiler][room=room-5cn5b287] version=771 mode=incremental dirty=3 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=293ms
+2026-11-06T06:37:59.449731474Z [WikiCompiler][room=room-5cn5b287] version=771 generation=1d5ed7a6-454b-4ac5-9350-5902639e5d71 topics=8
+2026-11-06T06:38:01.760684881Z [WikiCompiler] contract supplements paused: contract tree missing room=room-au05qkq6
+2026-11-06T06:38:05.371388361Z [KnowledgeCompiler][room=room-7suwuo8b] version=45 mode=incremental dirty=2 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=175ms
+2026-11-06T06:38:05.419464805Z [WikiCompiler][room=room-7suwuo8b] version=45 generation=09aff018-f5e0-44f6-830f-1a4c7b640386 topics=5
+2026-11-06T06:38:09.307395449Z [KnowledgeCompiler][room=room-5cn5b287] version=772 mode=incremental dirty=2 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=278ms
+2026-11-06T06:38:09.404649685Z [WikiCompiler][room=room-5cn5b287] version=772 generation=d884d317-1629-43f9-90a9-7f08506eb1d1 topics=8
+2026-11-06T06:38:11.396876578Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:38:11.396911115Z   roomKey: 'room-qajvo1m3',
+2026-11-06T06:38:11.397011799Z   errors: [],
+2026-11-06T06:38:11.397012829Z   warnings: [],
+2026-11-06T06:38:11.617984749Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:38:11.618022461Z   roomKey: 'room-qajvo1m3',
+2026-11-06T06:38:11.618127154Z   errors: [],
+2026-11-06T06:38:11.618128105Z   warnings: [],
+2026-11-06T06:38:14.705541372Z [KnowledgeCompiler][room=room-5cn5b287] version=773 mode=incremental dirty=2 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=258ms
+2026-11-06T06:38:14.794440680Z [WikiCompiler][room=room-5cn5b287] version=773 generation=f788d54f-77e3-43ad-bd29-c3732f606e79 topics=8
+2026-11-06T06:38:18.952171983Z [KnowledgeCompiler][room=room-5cn5b287] version=774 mode=incremental dirty=2 changedFiles=0 unchangedFiles=8 deletedFiles=0 duration=301ms
+2026-11-06T06:38:19.044680141Z [WikiCompiler][room=room-5cn5b287] version=774 generation=8deadc38-b7ef-421c-a1de-c707494bb2b2 topics=8
+2026-11-06T06:38:19.576406343Z [KnowledgeCompiler][room=room-2ya2bfow] version=3490 mode=incremental dirty=2 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=319ms
+2026-11-06T06:38:19.674984066Z [WikiCompiler][room=room-2ya2bfow] version=3490 generation=cb1392c7-7610-460e-8227-7efff5b99900 topics=8
+2026-11-06T06:38:21.394061490Z [KnowledgeCompiler][room=room-61cqj7t9] version=549 mode=incremental dirty=12 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=197ms
+2026-11-06T06:38:21.442677692Z [WikiCompiler][room=room-61cqj7t9] version=549 generation=776ce0ed-70bf-482a-b920-7f0dc861a5c7 topics=3
+2026-11-06T06:38:23.699927879Z [KnowledgeCompiler][room=room-2ya2bfow] version=3491 mode=incremental dirty=2 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=345ms
+2026-11-06T06:38:23.816702461Z [WikiCompiler][room=room-2ya2bfow] version=3491 generation=bb117424-7196-4273-be2f-2cdd1b2023df topics=8
+2026-11-06T06:38:29.593659737Z [KnowledgeCompiler][room=room-7suwuo8b] version=51 mode=incremental dirty=3 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=194ms
+2026-11-06T06:38:29.646040436Z [WikiCompiler][room=room-7suwuo8b] version=51 generation=f77fc0cb-248e-481f-9128-0de08baaeb4d topics=5
+2026-11-06T06:38:33.550986311Z [KnowledgeCompiler][room=room-qajvo1m3] version=747 mode=incremental dirty=4 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=266ms
+2026-11-06T06:38:33.611757044Z [WikiCompiler][room=room-qajvo1m3] version=747 generation=715ac5a6-2291-43a9-ae0c-13c511d21a2a topics=5
+2026-11-06T06:38:36.118890744Z [KnowledgeCompiler][room=room-qajvo1m3] version=748 mode=incremental dirty=2 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=223ms
+2026-11-06T06:38:36.184110592Z [WikiCompiler][room=room-qajvo1m3] version=748 generation=7f951a8a-6cbf-45ee-a736-3daddca2c50d topics=5
+2026-11-06T06:38:39.931854840Z [KnowledgeCompiler][room=room-qajvo1m3] version=749 mode=incremental dirty=2 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=222ms
+2026-11-06T06:38:40.001157149Z [WikiCompiler][room=room-qajvo1m3] version=749 generation=67457666-f86d-41fe-8736-3b4258b4e53e topics=5
+2026-11-06T06:38:46.921425544Z [KnowledgeCompiler][room=room-61cqj7t9] version=550 mode=incremental dirty=2 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=163ms
+2026-11-06T06:38:46.972777259Z [WikiCompiler][room=room-61cqj7t9] version=550 generation=244f0602-7feb-411f-a30c-1b964eca65dd topics=3
+2026-11-06T06:38:47.184337495Z [KnowledgeCompiler][room=room-qajvo1m3] version=751 mode=incremental dirty=3 changedFiles=0 unchangedFiles=5 deletedFiles=0 duration=199ms
+2026-11-06T06:38:47.245468366Z [WikiCompiler][room=room-qajvo1m3] version=751 generation=8b48de9d-d159-4242-8c00-d8eba084e883 topics=5
+2026-11-06T06:38:49.617296711Z [KnowledgeCompiler][room=room-61cqj7t9] version=551 mode=incremental dirty=2 changedFiles=0 unchangedFiles=3 deletedFiles=0 duration=149ms
+2026-11-06T06:38:49.670305425Z [WikiCompiler][room=room-61cqj7t9] version=551 generation=81c86010-0045-4094-b135-d71a3dbe63a4 topics=3
+2026-11-06T06:38:50.155322307Z [KnowledgeCompiler][room=room-qajvo1m3] version=752 mode=incremental dirty=2 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=211ms
+2026-11-06T06:38:50.215653456Z [WikiCompiler][room=room-qajvo1m3] version=752 generation=84051525-489a-46cc-99f0-ce34057a12a0 topics=5
+2026-11-06T06:38:55.917097792Z [KnowledgeCompiler][room=room-61cqj7t9] version=553 mode=incremental dirty=3 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=186ms
+2026-11-06T06:38:55.996354621Z [WikiCompiler][room=room-61cqj7t9] version=553 generation=253a23bd-3c85-4d7e-bbe8-1be44b9dca72 topics=3
+2026-11-06T06:38:59.077099727Z [KnowledgeCompiler][room=room-qajvo1m3] version=753 mode=incremental dirty=2 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=225ms
+2026-11-06T06:38:59.141497787Z [WikiCompiler][room=room-qajvo1m3] version=753 generation=2f116cb5-f61a-45f9-a9ba-1e00c41b8587 topics=5
+2026-11-06T06:39:02.459228869Z [KnowledgeCompiler][room=room-qajvo1m3] version=754 mode=incremental dirty=2 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=232ms
+2026-11-06T06:39:02.521487516Z [WikiCompiler][room=room-qajvo1m3] version=754 generation=783768fd-0b84-4575-8cbb-74bf0531e7a5 topics=5
+2026-11-06T06:39:20.580830513Z [KnowledgeCompiler][room=room-qajvo1m3] version=755 mode=incremental dirty=2 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=208ms
+2026-11-06T06:39:20.643358265Z [WikiCompiler][room=room-qajvo1m3] version=755 generation=a3400477-ad35-4171-bc5a-a9c0cc5c6d92 topics=5
+2026-11-06T06:39:24.191144579Z [KnowledgeCompiler][room=room-qajvo1m3] version=756 mode=incremental dirty=2 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=243ms
+2026-11-06T06:39:24.269647674Z [WikiCompiler][room=room-qajvo1m3] version=756 generation=460ec7d7-0d21-4f10-a976-2cb0edebfe80 topics=5
+2026-11-06T06:39:26.931621637Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:39:26.931649547Z   roomKey: 'room-61cqj7t9',
+2026-11-06T06:39:26.931752744Z   errors: [],
+2026-11-06T06:39:26.931753614Z   warnings: [],
+2026-11-06T06:39:27.009622240Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:39:27.009652433Z   roomKey: 'room-61cqj7t9',
+2026-11-06T06:39:27.009741467Z   errors: [],
+2026-11-06T06:39:27.009745518Z   warnings: [],
+2026-11-06T06:39:32.969346346Z [KnowledgeCompiler][room=room-qajvo1m3] version=759 mode=incremental dirty=2 changedFiles=0 unchangedFiles=5 deletedFiles=0 duration=213ms
+2026-11-06T06:39:33.031149518Z [WikiCompiler][room=room-qajvo1m3] version=759 generation=8f73e1ed-762f-4ae8-92d7-bfb55dddaace topics=5
+2026-11-06T06:39:49.617338696Z [KnowledgeCompiler][room=room-7suwuo8b] version=54 mode=incremental dirty=3 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=196ms
+2026-11-06T06:39:49.671483159Z [WikiCompiler][room=room-7suwuo8b] version=54 generation=93532154-5df4-4017-8c8a-247fce8dabfd topics=5
+2026-11-06T06:40:25.873841107Z [KnowledgeCompiler][room=room-7suwuo8b] version=56 mode=incremental dirty=2 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=213ms
+2026-11-06T06:40:25.929347986Z [WikiCompiler][room=room-7suwuo8b] version=56 generation=f0fd599d-4781-4df7-b2bf-b4f297e76c4e topics=5
+2026-11-06T06:40:28.660500994Z [KnowledgeCompiler][room=room-7suwuo8b] version=58 mode=incremental dirty=2 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=175ms
+2026-11-06T06:40:28.712939989Z [WikiCompiler][room=room-7suwuo8b] version=58 generation=f90a11d4-14e3-4a64-9aed-2a016c2808d3 topics=5
+2026-11-06T06:40:31.262892400Z [KnowledgeCompiler][room=room-7suwuo8b] version=59 mode=incremental dirty=2 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=185ms
+2026-11-06T06:40:31.316692600Z [WikiCompiler][room=room-7suwuo8b] version=59 generation=a18908eb-bdad-46ab-844e-45e89ea779e2 topics=5
+2026-11-06T06:40:37.755883548Z [KnowledgeCompiler][room=room-7suwuo8b] version=60 mode=incremental dirty=2 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=245ms
+2026-11-06T06:40:37.810840858Z [WikiCompiler][room=room-7suwuo8b] version=60 generation=c7c16d6a-f72f-40ce-af8e-3031e76f5212 topics=5
+2026-11-06T06:41:36.107349242Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:41:36.107386796Z   roomKey: 'room-61cqj7t9',
+2026-11-06T06:41:36.107557162Z   errors: [],
+2026-11-06T06:41:36.107559051Z   warnings: [],
+2026-11-06T06:41:36.191821850Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:41:36.191848250Z   roomKey: 'room-61cqj7t9',
+2026-11-06T06:41:36.191947171Z   errors: [],
+2026-11-06T06:41:36.191948161Z   warnings: [],
+2026-11-06T06:42:56.285439844Z [KnowledgeCompiler][room=room-11rdjk0x] failed: ENOENT: no such file or directory, lstat '/app/knowledge/room-11rdjk0x/README.md' (failCount=15 cooldownMs=300000)
+2026-11-06T06:42:56.706485703Z [KnowledgeCompiler][room=room-2ya2bfow] version=3491 mode=incremental dirty=2 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=254ms
+2026-11-06T06:42:57.084822193Z [WikiCompiler] reconcile rooms=210
+2026-11-06T06:42:57.111908681Z [KnowledgeCompiler][room=room-5cn5b287] version=774 mode=incremental dirty=5 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=261ms
+2026-11-06T06:42:57.314551704Z [KnowledgeCompiler][room=room-61cqj7t9] version=553 mode=incremental dirty=15 changedFiles=1 unchangedFiles=2 deletedFiles=0 duration=168ms
+2026-11-06T06:42:57.824897947Z [KnowledgeCompiler][room=room-7suwuo8b] version=60 mode=incremental dirty=7 changedFiles=2 unchangedFiles=3 deletedFiles=0 duration=321ms
+2026-11-06T06:42:59.040103564Z [KnowledgeCompiler][room=room-qajvo1m3] version=759 mode=incremental dirty=14 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=249ms
+2026-11-06T06:42:59.955233085Z [KnowledgeCompiler][room=room-x6oywn1p] failed: ENOENT: no such file or directory, lstat '/app/knowledge/room-x6oywn1p/README.md' (failCount=15 cooldownMs=300000)
+2026-11-06T06:43:01.519036003Z [WikiCompiler] contract supplements paused: contract tree missing room=room-au05qkq6
+2026-11-06T06:44:06.785099193Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:44:06.785125508Z   roomKey: 'room-6j4dw1vl',
+2026-11-06T06:44:06.785224164Z   errors: [],
+2026-11-06T06:44:06.785225100Z   warnings: [],
+2026-11-06T06:44:06.823606373Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:44:06.823667027Z   roomKey: 'room-6j4dw1vl',
+2026-11-06T06:44:06.824188957Z   errors: [],
+2026-11-06T06:44:06.824194270Z   warnings: [],
+2026-11-06T06:44:15.460367220Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:44:15.460391049Z   roomKey: 'room-ejoa2q0j',
+2026-11-06T06:44:15.460517645Z   errors: [],
+2026-11-06T06:44:15.460518725Z   warnings: [],
+2026-11-06T06:44:15.543148376Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:44:15.543191385Z   roomKey: 'room-ejoa2q0j',
+2026-11-06T06:44:15.543291832Z   errors: [],
+2026-11-06T06:44:15.543292775Z   warnings: [],
+2026-11-06T06:45:12.506706043Z {"ts":"2026-11-06T06:45:12.506Z","event":"operation.commit","mapId":"room-5cn5b287","operationId":"12cec075-4657-4430-bc40-8be7dc5df00a","version":775,"actorId":"liunanye","code":"node.batch","durationMs":64}
+2026-11-06T06:45:14.474304297Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:45:14.474337508Z   roomKey: 'room-61cqj7t9',
+2026-11-06T06:45:14.474519339Z   errors: [],
+2026-11-06T06:45:14.474521019Z   warnings: [],
+2026-11-06T06:45:14.552472475Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:45:14.552517722Z   roomKey: 'room-61cqj7t9',
+2026-11-06T06:45:14.552686672Z   errors: [],
+2026-11-06T06:45:14.552688197Z   warnings: [],
+2026-11-06T06:45:14.820570918Z [KnowledgeCompiler][room=room-5cn5b287] version=775 mode=incremental dirty=21 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=309ms
+2026-11-06T06:45:14.906349303Z [WikiCompiler][room=room-5cn5b287] version=775 generation=c28bc0e8-b888-4f8c-ae14-e1262ef0af53 topics=8
+2026-11-06T06:46:14.226570134Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:46:14.226593987Z   roomKey: 'room-ouh6h8la',
+2026-11-06T06:46:14.226695536Z   errors: [],
+2026-11-06T06:46:14.226696511Z   warnings: [],
+2026-11-06T06:46:14.278734738Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:46:14.278763034Z   roomKey: 'room-ouh6h8la',
+2026-11-06T06:46:14.278864831Z   errors: [],
+2026-11-06T06:46:14.278865851Z   warnings: [],
+2026-11-06T06:46:22.599353154Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:46:22.599376462Z   roomKey: 'room-kvyu6kb6',
+2026-11-06T06:46:22.599472422Z   errors: [],
+2026-11-06T06:46:22.599473363Z   warnings: [],
+2026-11-06T06:46:22.653391100Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:46:22.653412860Z   roomKey: 'room-kvyu6kb6',
+2026-11-06T06:46:22.653517555Z   errors: [],
+2026-11-06T06:46:22.653518412Z   warnings: [],
+2026-11-06T06:47:07.217453993Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:47:07.217474218Z   roomKey: 'room-xgoibqb8',
+2026-11-06T06:47:07.217588545Z   errors: [],
+2026-11-06T06:47:07.217589531Z   warnings: [],
+2026-11-06T06:47:07.367173048Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:47:07.367201314Z   roomKey: 'room-xgoibqb8',
+2026-11-06T06:47:07.367322357Z   errors: [],
+2026-11-06T06:47:07.367323363Z   warnings: [],
+2026-11-06T06:47:12.879746067Z [KnowledgeCompiler][room=room-qajvo1m3] version=760 mode=incremental dirty=2 changedFiles=0 unchangedFiles=5 deletedFiles=0 duration=226ms
+2026-11-06T06:47:12.939458401Z [WikiCompiler][room=room-qajvo1m3] version=760 generation=706018e0-1b08-49c8-9bbf-17e4133d5511 topics=5
+2026-11-06T06:47:20.519792207Z [KnowledgeCompiler][room=room-qajvo1m3] version=761 mode=incremental dirty=2 changedFiles=0 unchangedFiles=5 deletedFiles=0 duration=178ms
+2026-11-06T06:47:20.580036232Z [WikiCompiler][room=room-qajvo1m3] version=761 generation=0d51ca0f-d0c1-4b18-8088-e29187c407c3 topics=5
+2026-11-06T06:47:37.985939197Z [KnowledgeCompiler][room=room-xgoibqb8] version=30113 mode=incremental dirty=2 changedFiles=0 unchangedFiles=9 deletedFiles=0 duration=328ms
+2026-11-06T06:47:38.201811667Z [WikiCompiler][room=room-xgoibqb8] version=30113 generation=932d9348-18fd-477e-a544-fdf34e17696e topics=9
+2026-11-06T06:47:48.266742382Z [KnowledgeCompiler][room=room-xgoibqb8] version=30115 mode=incremental dirty=3 changedFiles=0 unchangedFiles=9 deletedFiles=0 duration=328ms
+2026-11-06T06:47:48.492712713Z [WikiCompiler][room=room-xgoibqb8] version=30115 generation=cef7128e-101b-4f4c-a8c6-9937d62a641c topics=9
+2026-11-06T06:47:52.335739119Z [KnowledgeCompiler][room=room-xgoibqb8] version=30116 mode=incremental dirty=2 changedFiles=1 unchangedFiles=8 deletedFiles=0 duration=332ms
+2026-11-06T06:47:52.562159029Z [WikiCompiler][room=room-xgoibqb8] version=30116 generation=b79f0b18-5ad4-4798-a26a-31c843a00366 topics=9
+2026-11-06T06:47:56.432723507Z [KnowledgeCompiler][room=room-5cn5b287] version=775 mode=incremental dirty=21 changedFiles=1 unchangedFiles=7 deletedFiles=0 duration=235ms
+2026-11-06T06:47:56.763949119Z [WikiCompiler] reconcile rooms=210
+2026-11-06T06:47:57.935545850Z [KnowledgeCompiler][room=room-qajvo1m3] version=761 mode=incremental dirty=2 changedFiles=0 unchangedFiles=5 deletedFiles=0 duration=215ms
+2026-11-06T06:47:58.756924324Z [KnowledgeCompiler][room=room-xgoibqb8] version=30116 mode=incremental dirty=3 changedFiles=1 unchangedFiles=8 deletedFiles=0 duration=321ms
+2026-11-06T06:48:01.016416902Z [WikiCompiler] contract supplements paused: contract tree missing room=room-au05qkq6
+2026-11-06T06:48:02.247299399Z [KnowledgeCompiler][room=room-xgoibqb8] version=30119 mode=incremental dirty=4 changedFiles=1 unchangedFiles=8 deletedFiles=0 duration=339ms
+2026-11-06T06:48:02.477191721Z [WikiCompiler][room=room-xgoibqb8] version=30119 generation=5488a0a1-6c40-4cbf-b9e7-e2af3c1a40bd topics=9
+2026-11-06T06:48:18.336491328Z [KnowledgeCompiler][room=room-xgoibqb8] version=30120 mode=incremental dirty=2 changedFiles=1 unchangedFiles=8 deletedFiles=0 duration=322ms
+2026-11-06T06:48:18.557515132Z [WikiCompiler][room=room-xgoibqb8] version=30120 generation=5e95005a-fca8-4dcd-a052-ceeea7af7af8 topics=9
+2026-11-06T06:48:22.171187083Z [KnowledgeCompiler][room=room-xgoibqb8] version=30122 mode=incremental dirty=3 changedFiles=1 unchangedFiles=8 deletedFiles=0 duration=332ms
+2026-11-06T06:48:22.387217715Z [WikiCompiler][room=room-xgoibqb8] version=30122 generation=2ea736ee-f23b-491d-8506-9e2fc9b51e7d topics=9
+2026-11-06T06:48:25.908311690Z [KnowledgeCompiler][room=room-xgoibqb8] version=30123 mode=incremental dirty=2 changedFiles=1 unchangedFiles=8 deletedFiles=0 duration=320ms
+2026-11-06T06:48:26.183768128Z [WikiCompiler][room=room-xgoibqb8] version=30123 generation=8c03e2cc-d0c6-470e-993b-bc4d6bcc8c69 topics=9
+2026-11-06T06:48:34.947479172Z [KnowledgeCompiler][room=room-xgoibqb8] version=30124 mode=incremental dirty=2 changedFiles=1 unchangedFiles=8 deletedFiles=0 duration=334ms
+2026-11-06T06:48:35.172507220Z [WikiCompiler][room=room-xgoibqb8] version=30124 generation=d4afc5e3-d63e-4308-8a45-7daa279fd5e6 topics=9
+2026-11-06T06:48:39.493402672Z [KnowledgeCompiler][room=room-xgoibqb8] version=30126 mode=incremental dirty=3 changedFiles=1 unchangedFiles=8 deletedFiles=0 duration=369ms
+2026-11-06T06:48:39.708218957Z [WikiCompiler][room=room-xgoibqb8] version=30126 generation=003c2d66-48a1-41d4-9b29-71ceb3cb4b2c topics=9
+2026-11-06T06:48:43.761421184Z [KnowledgeCompiler][room=room-xgoibqb8] version=30129 mode=incremental dirty=3 changedFiles=1 unchangedFiles=8 deletedFiles=0 duration=442ms
+2026-11-06T06:48:44.371595701Z [KnowledgeCompiler][room=room-xgoibqb8] version=30131 mode=incremental dirty=2 changedFiles=1 unchangedFiles=8 deletedFiles=0 duration=445ms
+2026-11-06T06:48:44.957249810Z [KnowledgeCompiler][room=room-xgoibqb8] version=30132 mode=incremental dirty=2 changedFiles=1 unchangedFiles=8 deletedFiles=0 duration=431ms
+2026-11-06T06:48:45.239339897Z [WikiCompiler][room=room-xgoibqb8] version=30132 generation=564a4c16-33fa-4715-8913-0343a92ceb29 topics=9
+2026-11-06T06:48:45.607072010Z [KnowledgeCompiler][room=room-xgoibqb8] version=30133 mode=incremental dirty=2 changedFiles=1 unchangedFiles=8 deletedFiles=0 duration=366ms
+2026-11-06T06:48:45.847153916Z [WikiCompiler][room=room-xgoibqb8] version=30133 generation=8aea242f-7fc9-4a72-b98f-f65c0d8831a1 topics=9
+2026-11-06T06:48:49.229085669Z [KnowledgeCompiler][room=room-xgoibqb8] version=30134 mode=incremental dirty=2 changedFiles=1 unchangedFiles=8 deletedFiles=0 duration=361ms
+2026-11-06T06:48:49.476731927Z [WikiCompiler][room=room-xgoibqb8] version=30134 generation=fa85a602-0469-4f41-a2e7-71658eaac179 topics=9
+2026-11-06T06:49:04.511673645Z [KnowledgeCompiler][room=room-xgoibqb8] version=30136 mode=incremental dirty=2 changedFiles=1 unchangedFiles=8 deletedFiles=0 duration=594ms
+2026-11-06T06:49:05.142834694Z [KnowledgeCompiler][room=room-xgoibqb8] version=30137 mode=incremental dirty=2 changedFiles=1 unchangedFiles=8 deletedFiles=0 duration=441ms
+2026-11-06T06:49:05.401528152Z [WikiCompiler][room=room-xgoibqb8] version=30137 generation=665d69de-67f4-4ddb-8ca0-ada40b40680e topics=9
+2026-11-06T06:49:12.141309515Z [KnowledgeCompiler][room=room-xgoibqb8] version=30138 mode=incremental dirty=2 changedFiles=1 unchangedFiles=8 deletedFiles=0 duration=330ms
+2026-11-06T06:49:12.364327490Z [WikiCompiler][room=room-xgoibqb8] version=30138 generation=9921abd7-ea06-41c8-9f55-b776336600e6 topics=9
+2026-11-06T06:49:15.763562519Z [KnowledgeCompiler][room=room-xgoibqb8] version=30140 mode=incremental dirty=3 changedFiles=1 unchangedFiles=8 deletedFiles=0 duration=300ms
+2026-11-06T06:49:16.000884984Z [WikiCompiler][room=room-xgoibqb8] version=30140 generation=e6a95322-8b6a-49d9-ac40-4d254ee07b35 topics=9
+2026-11-06T06:49:17.807903081Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:49:17.807925107Z   roomKey: 'room-22q1zlw0',
+2026-11-06T06:49:17.808028091Z   errors: [],
+2026-11-06T06:49:17.808029009Z   warnings: [],
+2026-11-06T06:49:17.983609496Z ROOM_INTEGRITY_REPORT {
+2026-11-06T06:49:17.983636544Z   roomKey: 'room-22q1zlw0',
+2026-11-06T06:49:17.983734679Z   errors: [],
+2026-11-06T06:49:17.983735613Z   warnings: [],
+2026-11-06T06:49:19.954479567Z [KnowledgeCompiler][room=room-xgoibqb8] version=30141 mode=incremental dirty=3 changedFiles=1 unchangedFiles=8 deletedFiles=0 duration=331ms
+2026-11-06T06:49:20.189295089Z [WikiCompiler][room=room-xgoibqb8] version=30141 generation=79873998-b5ee-402e-897f-7c81b541da39 topics=9
+2026-11-06T06:49:26.907383143Z [KnowledgeCompiler][room=room-xgoibqb8] version=30142 mode=incremental dirty=2 changedFiles=1 unchangedFiles=8 deletedFiles=0 duration=309ms
+2026-11-06T06:49:27.147884660Z [WikiCompiler][room=room-xgoibqb8] version=30142 generation=9eb623ed-6705-466f-a3cd-65db0a0fca58 topics=9
+2026-11-06T06:49:27.335320549Z [KnowledgeCompiler][room=room-7suwuo8b] version=63 mode=incremental dirty=2 changedFiles=0 unchangedFiles=5 deletedFiles=0 duration=187ms
+2026-11-06T06:49:27.390890876Z [WikiCompiler][room=room-7suwuo8b] version=63 generation=d8b2dd75-e936-4f41-98fb-5f41681ba3a8 topics=5
+2026-11-06T06:49:34.224599671Z [KnowledgeCompiler][room=room-xgoibqb8] version=30143 mode=incremental dirty=2 changedFiles=1 unchangedFiles=8 deletedFiles=0 duration=509ms
+2026-11-06T06:49:34.503795590Z [WikiCompiler][room=room-xgoibqb8] version=30143 generation=fbe9604f-34e3-4050-bc66-5a0cd09a22e9 topics=9
+2026-11-06T06:49:35.520684323Z [KnowledgeCompiler][room=room-7suwuo8b] version=68 mode=incremental dirty=3 changedFiles=1 unchangedFiles=4 deletedFiles=0 duration=245ms
+2026-11-06T06:49:35.586896503Z [WikiCompiler][room=room-7suwuo8b] version=68 generation=7f0074f7-7ae0-4121-99b0-d31b81aaa2c0 topics=5
+2026-11-06T06:49:38.210198898Z [KnowledgeCompiler][room=room-xgoibqb8] version=30145 mode=incremental dirty=3 changedFiles=1 unchangedFiles=8 deletedFiles=0 duration=331ms
+2026-11-06T06:49:38.450029883Z [WikiCompiler][room=room-xgoibqb8] version=30145 generation=3607b3b0-15d5-44d9-aeed-718147c3b0f7 topics=9
+2026-11-06T06:49:41.223451992Z [KnowledgeCompiler][room=room-7suwuo8b] version=70 mode=incremental dirty=4 changedFiles=3 unchangedFiles=2 deletedFiles=0 duration=217ms
+2026-11-06T06:49:41.287293801Z [WikiCompiler][room=room-7suwuo8b] version=70 generation=7a3e4c36-8626-4b63-a0d6-587a1567e8a0 topics=5
+2026-11-06T06:49:41.583942225Z [KnowledgeCompiler][room=room-xgoibqb8] version=30146 mode=incremental dirty=2 changedFiles=0 unchangedFiles=9 deletedFiles=0 duration=296ms
+2026-11-06T06:49:41.798318255Z [WikiCompiler][room=room-xgoibqb8] version=30146 generation=ab9bc6ce-6b6c-481d-a9c6-40b11866c8d8 topics=9

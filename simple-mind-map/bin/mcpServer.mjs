@@ -12,6 +12,7 @@ import { readAttachmentKnowledge, searchAttachmentKnowledge } from './mcpAttachm
 import { registerLeaveTools, registerApprovalTools } from './leaveWorkflow/mcp.mjs'
 import { registerHrmsTools } from './hrmsAgent/mcp.mjs'
 import mcpUserToken from './mcpUserToken.js'
+import requestErrorLog from './requestErrorLog.js'
 import {
   resolveAttachmentUploadInput,
   uploadAttachmentAndMountNode
@@ -2436,6 +2437,7 @@ async function startHttp() {
   const transports = new Map()
 
   const httpServer = http.createServer(async (req, res) => {
+    requestErrorLog.observeRequestErrors(req, res, 'mcp')
     setCors(res)
     const url = new URL(
       req.url || '/',
@@ -2468,6 +2470,10 @@ async function startHttp() {
     const httpLifecycle = createMcpHttpLifecycle(req, res, mcpDiagnostics)
 
     const authorization = authorized(req)
+    if (authorization !== null && MCP_TOKEN) {
+      const user = verifyMcpUserToken(bearerToken(authorization), MCP_TOKEN)
+      req.authUser = { id: user ? user.userId : 'mcp-service' }
+    }
     if (authorization === null) {
       res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' })
       res.end(JSON.stringify({ error: 'unauthorized' }))
@@ -2478,6 +2484,10 @@ async function startHttp() {
       const sessionId = req.headers['mcp-session-id']
       if (req.method === 'POST') {
         const body = await readJson(req)
+        if (body && body.method === 'tools/call') {
+          req.logMcpTool = body.params && body.params.name
+          req.logRoomKey = body.params && body.params.arguments && body.params.arguments.room_key
+        }
         httpLifecycle?.markBodyParsed(body)
         let transport = sessionId ? transports.get(sessionId) : undefined
         if (!transport && isInitializeRequest(body)) {

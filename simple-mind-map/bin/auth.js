@@ -1955,6 +1955,7 @@ async function authenticateRequest(req) {
   )
   const row = result.rows[0]
   if (!row) return null
+  req.logAuthenticatedUserId = row.user_id
   return {
     id: row.user_id,
     corpId: row.corp_id,

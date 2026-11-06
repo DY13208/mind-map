@@ -106,6 +106,7 @@ function trackSocket(conn) {
 }
 
 const server = http.createServer(async (request, response) => {
+  require('./requestErrorLog').observeRequestErrors(request, response)
   performanceDiagnostics.observeHttp(request, response)
   try {
     const pathname = new URL(request.url, 'http://127.0.0.1').pathname

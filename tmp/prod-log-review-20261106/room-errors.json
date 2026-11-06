@@ -1,0 +1,314 @@
+{
+  "<no-room> 502 GET /collab-v2/": {
+    "count": 35,
+    "first": "2026-11-06T04:52:53.427430749Z",
+    "last": "2026-11-06T04:52:56.613660083Z",
+    "url": "/collab-v2/"
+  },
+  "<no-room> 502 GET /api/workflow-definitions": {
+    "count": 8,
+    "first": "2026-11-06T04:52:53.502066994Z",
+    "last": "2026-11-06T04:52:56.236756035Z",
+    "url": "/api/workflow-definitions"
+  },
+  "<no-room> 502 GET /api/collab-v2/ops": {
+    "count": 1,
+    "first": "2026-11-06T04:52:53.587529976Z",
+    "last": "2026-11-06T04:52:53.587529976Z",
+    "url": "/api/collab-v2/ops"
+  },
+  "<no-room> 502 GET /api/leave-notifications": {
+    "count": 1,
+    "first": "2026-11-06T04:52:53.642803257Z",
+    "last": "2026-11-06T04:52:53.642803257Z",
+    "url": "/api/leave-notifications"
+  },
+  "room-li7w80mv 502 GET /api/files/:room/ref-resolve": {
+    "count": 1,
+    "first": "2026-11-06T04:52:53.642807186Z",
+    "last": "2026-11-06T04:52:53.642807186Z",
+    "url": "/api/files/room-li7w80mv/ref-resolve"
+  },
+  "<no-room> 502 GET /api/notifications/access-results": {
+    "count": 1,
+    "first": "2026-11-06T04:52:53.642809260Z",
+    "last": "2026-11-06T04:52:53.642809260Z",
+    "url": "/api/notifications/access-results"
+  },
+  "room-li7w80mv 502 POST /api/files/:room/presence": {
+    "count": 1,
+    "first": "2026-11-06T04:52:53.642811181Z",
+    "last": "2026-11-06T04:52:53.642811181Z",
+    "url": "/api/files/room-li7w80mv/presence"
+  },
+  "<no-room> 502 GET /api/users/me/mentions/unread-count": {
+    "count": 1,
+    "first": "2026-11-06T04:52:53.643002626Z",
+    "last": "2026-11-06T04:52:53.643002626Z",
+    "url": "/api/users/me/mentions/unread-count"
+  },
+  "<no-room> 502 GET /api/notifications/access-requests": {
+    "count": 1,
+    "first": "2026-11-06T04:52:53.643060014Z",
+    "last": "2026-11-06T04:52:53.643060014Z",
+    "url": "/api/notifications/access-requests"
+  },
+  "room-ejoa2q0j 502 GET /api/files/:room/ref-resolve": {
+    "count": 2,
+    "first": "2026-11-06T04:52:53.752307693Z",
+    "last": "2026-11-06T04:52:54.843586338Z",
+    "url": "/api/files/room-ejoa2q0j/ref-resolve"
+  },
+  "room-fyr2s0pb 502 GET /api/files/:room/ref-resolve": {
+    "count": 1,
+    "first": "2026-11-06T04:52:53.902165747Z",
+    "last": "2026-11-06T04:52:53.902165747Z",
+    "url": "/api/files/room-fyr2s0pb/ref-resolve"
+  },
+  "room-q789jhdd 502 GET /api/files/:room/ref-resolve": {
+    "count": 1,
+    "first": "2026-11-06T04:52:54.006229340Z",
+    "last": "2026-11-06T04:52:54.006229340Z",
+    "url": "/api/files/room-q789jhdd/ref-resolve"
+  },
+  "room-yf3hvn8t 502 GET /api/files/:room/ref-resolve": {
+    "count": 1,
+    "first": "2026-11-06T04:52:54.006238871Z",
+    "last": "2026-11-06T04:52:54.006238871Z",
+    "url": "/api/files/room-yf3hvn8t/ref-resolve"
+  },
+  "room-67iyfyuv 502 GET /api/files/:room/ref-resolve": {
+    "count": 1,
+    "first": "2026-11-06T04:52:54.151891132Z",
+    "last": "2026-11-06T04:52:54.151891132Z",
+    "url": "/api/files/room-67iyfyuv/ref-resolve"
+  },
+  "room-su987o10 502 GET /api/files/:room/ref-resolve": {
+    "count": 1,
+    "first": "2026-11-06T04:52:54.158083722Z",
+    "last": "2026-11-06T04:52:54.158083722Z",
+    "url": "/api/files/room-su987o10/ref-resolve"
+  },
+  "<no-room> 502 GET /mcp": {
+    "count": 1,
+    "first": "2026-11-06T04:52:54.428741908Z",
+    "last": "2026-11-06T04:52:54.428741908Z",
+    "url": "/mcp"
+  },
+  "room-hft1202f 502 GET /api/files/:room/ref-resolve": {
+    "count": 1,
+    "first": "2026-11-06T04:52:55.077223819Z",
+    "last": "2026-11-06T04:52:55.077223819Z",
+    "url": "/api/files/room-hft1202f/ref-resolve"
+  },
+  "room-qajvo1m3 502 GET /api/files/:room/ref-resolve": {
+    "count": 1,
+    "first": "2026-11-06T04:52:55.098786926Z",
+    "last": "2026-11-06T04:52:55.098786926Z",
+    "url": "/api/files/room-qajvo1m3/ref-resolve"
+  },
+  "room-cwiluvby 502 GET /api/files/:room/ref-resolve": {
+    "count": 1,
+    "first": "2026-11-06T04:52:55.120338833Z",
+    "last": "2026-11-06T04:52:55.120338833Z",
+    "url": "/api/files/room-cwiluvby/ref-resolve"
+  },
+  "room-0bqxe4mx 502 GET /api/files/:room/ref-resolve": {
+    "count": 1,
+    "first": "2026-11-06T04:52:55.146704312Z",
+    "last": "2026-11-06T04:52:55.146704312Z",
+    "url": "/api/files/room-0bqxe4mx/ref-resolve"
+  },
+  "room-dk3fkzb5 502 GET /api/files/:room/ref-resolve": {
+    "count": 1,
+    "first": "2026-11-06T04:52:55.174325709Z",
+    "last": "2026-11-06T04:52:55.174325709Z",
+    "url": "/api/files/room-dk3fkzb5/ref-resolve"
+  },
+  "room-9pj5n0jm 502 GET /api/files/:room/ref-resolve": {
+    "count": 1,
+    "first": "2026-11-06T04:52:55.186872068Z",
+    "last": "2026-11-06T04:52:55.186872068Z",
+    "url": "/api/files/room-9pj5n0jm/ref-resolve"
+  },
+  "room-00a7oxfd 502 GET /api/files/:room/ref-resolve": {
+    "count": 1,
+    "first": "2026-11-06T04:52:55.199720696Z",
+    "last": "2026-11-06T04:52:55.199720696Z",
+    "url": "/api/files/room-00a7oxfd/ref-resolve"
+  },
+  "room-fw9w7xfz 502 GET /api/files/:room/ref-resolve": {
+    "count": 1,
+    "first": "2026-11-06T04:52:55.219167853Z",
+    "last": "2026-11-06T04:52:55.219167853Z",
+    "url": "/api/files/room-fw9w7xfz/ref-resolve"
+  },
+  "room-06tp6o3c 502 GET /api/files/:room/ref-resolve": {
+    "count": 1,
+    "first": "2026-11-06T04:52:55.229102439Z",
+    "last": "2026-11-06T04:52:55.229102439Z",
+    "url": "/api/files/room-06tp6o3c/ref-resolve"
+  },
+  "room-6j4dw1vl 502 GET /api/files/:room/ref-resolve": {
+    "count": 1,
+    "first": "2026-11-06T04:52:55.831253368Z",
+    "last": "2026-11-06T04:52:55.831253368Z",
+    "url": "/api/files/room-6j4dw1vl/ref-resolve"
+  },
+  "room-60q6noy9 502 GET /api/files/:room/ref-resolve": {
+    "count": 1,
+    "first": "2026-11-06T04:52:56.136043867Z",
+    "last": "2026-11-06T04:52:56.136043867Z",
+    "url": "/api/files/room-60q6noy9/ref-resolve"
+  },
+  "<no-room> 400 GET /mcp": {
+    "count": 34,
+    "first": "2026-11-06T04:52:59.226703012Z",
+    "last": "2026-11-06T06:01:03.579163904Z",
+    "url": "/mcp"
+  },
+  "<no-room> 400 GET /api/leave-template": {
+    "count": 94,
+    "first": "2026-11-06T04:53:04.326343759Z",
+    "last": "2026-11-06T06:49:17.718442673Z",
+    "url": "/api/leave-template"
+  },
+  "<no-room> 400 GET /file-kb-mcp/mcp": {
+    "count": 6,
+    "first": "2026-11-06T04:57:23.353257306Z",
+    "last": "2026-11-06T05:31:26.253926760Z",
+    "url": "/file-kb-mcp/mcp"
+  },
+  "room-ejoa2q0j 404 GET /api/files/:room/locate": {
+    "count": 1,
+    "first": "2026-11-06T05:25:43.374127082Z",
+    "last": "2026-11-06T05:25:43.374127082Z",
+    "url": "/api/files/room-ejoa2q0j/locate"
+  },
+  "<no-room> 409 GET /mcp": {
+    "count": 2,
+    "first": "2026-11-06T05:31:14.793372400Z",
+    "last": "2026-11-06T05:31:16.316041752Z",
+    "url": "/mcp"
+  },
+  "<no-room> 403 GET /api/workflow-definitions": {
+    "count": 495,
+    "first": "2026-11-06T05:31:36.305183721Z",
+    "last": "2026-11-06T06:31:35.867561893Z",
+    "url": "/api/workflow-definitions"
+  },
+  "<no-room> 404 POST /mcp": {
+    "count": 40,
+    "first": "2026-11-06T05:32:55.669612010Z",
+    "last": "2026-11-06T06:46:39.889312323Z",
+    "url": "/mcp"
+  },
+  "<no-room> 400 DELETE /mcp": {
+    "count": 12,
+    "first": "2026-11-06T05:32:55.679952731Z",
+    "last": "2026-11-06T06:39:25.851752443Z",
+    "url": "/mcp"
+  },
+  "room-6xn4ue0m 403 GET /api/files/:room/ref-resolve": {
+    "count": 16,
+    "first": "2026-11-06T05:33:06.623427951Z",
+    "last": "2026-11-06T06:03:06.267132773Z",
+    "url": "/api/files/room-6xn4ue0m/ref-resolve"
+  },
+  "room-hft1202f 403 GET /api/files/:room/ref-resolve": {
+    "count": 16,
+    "first": "2026-11-06T05:33:06.631973937Z",
+    "last": "2026-11-06T06:03:06.273420822Z",
+    "url": "/api/files/room-hft1202f/ref-resolve"
+  },
+  "room-0x3922cm 403 GET /api/files/:room/ref-resolve": {
+    "count": 15,
+    "first": "2026-11-06T05:33:06.638500156Z",
+    "last": "2026-11-06T05:50:16.650059235Z",
+    "url": "/api/files/room-0x3922cm/ref-resolve"
+  },
+  "room-li7w80mv 403 GET /api/files/:room/ref-resolve": {
+    "count": 16,
+    "first": "2026-11-06T05:33:06.655551800Z",
+    "last": "2026-11-06T06:03:06.290343223Z",
+    "url": "/api/files/room-li7w80mv/ref-resolve"
+  },
+  "room-xgoibqb8 403 PATCH /api/files/:room/view-state": {
+    "count": 7,
+    "first": "2026-11-06T06:00:13.514612539Z",
+    "last": "2026-11-06T06:07:56.965831795Z",
+    "url": "/api/files/room-xgoibqb8/view-state"
+  },
+  "<no-room> 401 POST /mcp": {
+    "count": 1,
+    "first": "2026-11-06T06:01:14.572477981Z",
+    "last": "2026-11-06T06:01:14.572477981Z",
+    "url": "/mcp"
+  },
+  "room-va10r59h 403 GET /api/files/:room/ref-resolve": {
+    "count": 1,
+    "first": "2026-11-06T06:03:06.268168317Z",
+    "last": "2026-11-06T06:03:06.268168317Z",
+    "url": "/api/files/room-va10r59h/ref-resolve"
+  },
+  "room-22q1zlw0 403 GET /api/files/:room/ref-resolve": {
+    "count": 1,
+    "first": "2026-11-06T06:03:06.272978278Z",
+    "last": "2026-11-06T06:03:06.272978278Z",
+    "url": "/api/files/room-22q1zlw0/ref-resolve"
+  },
+  "room-mflie9je 403 GET /api/files/:room/ref-resolve": {
+    "count": 2,
+    "first": "2026-11-06T06:03:06.278551692Z",
+    "last": "2026-11-06T06:29:04.717734410Z",
+    "url": "/api/files/room-mflie9je/ref-resolve"
+  },
+  "room-piho042b 403 GET /api/files/:room/ref-resolve": {
+    "count": 1,
+    "first": "2026-11-06T06:03:06.284494726Z",
+    "last": "2026-11-06T06:03:06.284494726Z",
+    "url": "/api/files/room-piho042b/ref-resolve"
+  },
+  "<no-room> 400 DELETE /file-kb-mcp/mcp": {
+    "count": 1,
+    "first": "2026-11-06T06:14:07.802922439Z",
+    "last": "2026-11-06T06:14:07.802922439Z",
+    "url": "/file-kb-mcp/mcp"
+  },
+  "room-qajvo1m3 404 GET /api/files/:room/subtree": {
+    "count": 1,
+    "first": "2026-11-06T06:39:08.506249326Z",
+    "last": "2026-11-06T06:39:08.506249326Z",
+    "url": "/api/files/room-qajvo1m3/subtree"
+  },
+  "<no-room> 404 GET /api/kb/batches/00000000-0000-0000-0000-000000000000": {
+    "count": 1,
+    "first": "2026-11-06T06:40:16.279704201Z",
+    "last": "2026-11-06T06:40:16.279704201Z",
+    "url": "/api/kb/batches/00000000-0000-0000-0000-000000000000"
+  },
+  "<no-room> 499 GET /api/workflow-definitions": {
+    "count": 1,
+    "first": "2026-11-06T06:43:35.989854014Z",
+    "last": "2026-11-06T06:43:35.989854014Z",
+    "url": "/api/workflow-definitions"
+  },
+  "room-6rinhr3f 409 GET /api/files/:room/info": {
+    "count": 1,
+    "first": "2026-11-06T06:44:09.257308060Z",
+    "last": "2026-11-06T06:44:09.257308060Z",
+    "url": "/api/files/room-6rinhr3f/info"
+  },
+  "room-6rinhr3f 409 GET /api/files/:room/meta": {
+    "count": 1,
+    "first": "2026-11-06T06:44:09.409034119Z",
+    "last": "2026-11-06T06:44:09.409034119Z",
+    "url": "/api/files/room-6rinhr3f/meta"
+  },
+  "room-ouh6h8la 403 PATCH /api/files/:room/view-state": {
+    "count": 1,
+    "first": "2026-11-06T06:46:17.702198933Z",
+    "last": "2026-11-06T06:46:17.702198933Z",
+    "url": "/api/files/room-ouh6h8la/view-state"
+  }
+}
