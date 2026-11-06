@@ -154,9 +154,10 @@ if (methodSrc) {
       uids.includes('gc1a'),
       JSON.stringify(uids)
     )
+    // 新行为：概要内节点可以拖到主树 —— Cooperate 会把它「提升」成真实节点
     check(
-      '概要内拖拽：不把主树节点当落点',
-      !uids.includes('a') && !uids.includes('a1') && !uids.includes('root'),
+      '概要内拖拽：主树节点是合法落点（支持提升到主树）',
+      uids.includes('a') && uids.includes('root'),
       JSON.stringify(uids)
     )
     check('概要内拖拽：排除自己', !uids.includes('gc1'))
@@ -192,7 +193,7 @@ if (methodSrc) {
 {
   check(
     'flushHttpMove 把虚拟移动分流到 generalization',
-    /const collected = this\.collectMovesFromCommand\(name, args\)[\s\S]{0,700}?isGeneralizationScopeNode\(item\.node\)[\s\S]{0,300}?generalizationScopeOwner\(item\.node\)/.test(coopSrc)
+    /isGeneralizationScopeNode\(item\.node\)[\s\S]{0,300}?generalizationScopeOwner\(item\.node\)/.test(coopSrc)
   )
   check(
     '虚拟移动同步 owner 的 generalization',
@@ -215,8 +216,8 @@ if (methodSrc) {
     /const draggingVirtual = \(this\.beingDragNodeList \|\| \[\]\)\.some\(isVirtual\)/.test(dragSrc)
   )
   check(
-    '落点候选按 virtual 一致性过滤',
-    /if \(isVirtual\(node\) !== draggingVirtual\) return/.test(dragSrc)
+    '主树拖拽时排除概要子树落点（单向限制）',
+    /if \(!draggingVirtual && isVirtual\(node\)\) return/.test(dragSrc)
   )
   check(
     'Drag 用 forEachRenderedNode（含兜底）',

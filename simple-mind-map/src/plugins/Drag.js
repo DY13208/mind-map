@@ -508,10 +508,14 @@ class Drag extends Base {
     // 它们不在主树 children 上，bfsWalk(root) 遍历不到 —— 只走主树的话，
     // 概要里的节点根本找不到落点，表现就是「概要后面的节点无法移动」。
     //
-    // 但只允许「概要内拖到概要内」：把主树的真实节点拖进概要子树会让它从主树
-    // 消失，而它对应的服务端节点行还在（会重复出现/同步失败）。所以拖拽源在
-    // 概要子树里时，落点也只在概要子树里找；反之亦然。
-    // 概要节点自身仍排除：它不是真实节点，落点用它的子节点（前后兄弟）即可。
+    // 落点候选 = 主树节点 + 概要子树节点；概要节点自身仍排除（它不是真实
+    // 节点，落点用它的子节点即前后兄弟即可）。
+    //
+    // 两种跨边界方向：
+    //   · 虚拟 → 主树：允许。Cooperate 会把它「提升」成服务端真实节点
+    //     （从 owner.generalization 摘出 + node.insert）。
+    //   · 主树 → 虚拟：禁止。主树节点有服务端行，塞进概要子树会让它从主树
+    //     消失而行还在，导致重复出现/同步失败。这类落点直接跳过。
     const renderer = this.mindMap.renderer
     const isVirtual = node => {
       let cur = node
@@ -531,7 +535,8 @@ class Drag extends Base {
       if (this.checkIsInBeingDragNodeList(node)) {
         return
       }
-      if (isVirtual(node) !== draggingVirtual) return
+      // 主树节点拖拽时，概要子树不能当落点（会产生有行却不在主树的孤点）
+      if (!draggingVirtual && isVirtual(node)) return
       if (!list[node.layerIndex]) {
         list[node.layerIndex] = []
       }
