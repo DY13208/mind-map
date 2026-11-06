@@ -2486,17 +2486,17 @@ class Render {
   }
 
   //  将节点移动到另一个节点的前面
-  insertBefore(node, exist) {
-    this.insertTo(node, exist, 'before')
+  insertBefore(node, exist, extras) {
+    this.insertTo(node, exist, 'before', extras)
   }
 
   //  将节点移动到另一个节点的后面
-  insertAfter(node, exist) {
-    this.insertTo(node, exist, 'after')
+  insertAfter(node, exist, extras) {
+    this.insertTo(node, exist, 'after', extras)
   }
 
   // 将节点移动到另一个节点的前面或后面
-  insertTo(node, exist, dir = 'before') {
+  insertTo(node, exist, dir = 'before', extras) {
     let nodeList = formatDataToArray(node)
     nodeList = nodeList.filter(item => {
       return !item.isRoot
@@ -2505,7 +2505,7 @@ class Render {
     if (
       this.runAfterHydrate(
         [exist && exist.parent].filter(Boolean),
-        () => this.insertTo(node, exist, dir),
+        () => this.insertTo(node, exist, dir, extras),
         dir === 'after' ? 'INSERT_AFTER' : 'INSERT_BEFORE'
       )
     ) {
@@ -2591,6 +2591,10 @@ class Render {
       existParent.nodeData.children.splice(targetDataIndex, 0, item.nodeData)
       item.parent = existParent
       this.resetMovedNodePosition(item)
+      if (extras && (extras.dir === 'left' || extras.dir === 'right')) {
+        item.setData({ dir: extras.dir })
+        item.dir = extras.dir
+      }
     })
     touchedParents.forEach(parent => {
       if (!parent) return
@@ -2964,9 +2968,15 @@ class Render {
       this.resetMovedNodePosition(item)
       const position = positions.find(entry => entry.uid === getNodeUid(item))
       if (position) {
-        item.setData({ isFloating: true, customLeft: position.customLeft, customTop: position.customTop })
-        item.customLeft = position.customLeft
-        item.customTop = position.customTop
+        if (position.isFloating) {
+          item.setData({ isFloating: true, customLeft: position.customLeft, customTop: position.customTop })
+          item.customLeft = position.customLeft
+          item.customTop = position.customTop
+        }
+        if (position.dir === 'left' || position.dir === 'right') {
+          item.setData({ dir: position.dir })
+          item.dir = position.dir
+        }
       }
     })
     touchedParents.forEach(parent => {

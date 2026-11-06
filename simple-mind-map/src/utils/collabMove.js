@@ -51,7 +51,8 @@ function snapshotMoveOrigins(args = []) {
         position: {
           customLeft: typeof node.getData === 'function' ? node.getData('customLeft') : undefined,
           customTop: typeof node.getData === 'function' ? node.getData('customTop') : undefined,
-          isFloating: typeof node.getData === 'function' ? !!node.getData('isFloating') : false
+          isFloating: typeof node.getData === 'function' ? !!node.getData('isFloating') : false,
+          dir: typeof node.getData === 'function' ? node.getData('dir') : undefined
         },
         node
       }
@@ -153,11 +154,14 @@ function planNativeMove({ uid, parentUid, index, parentKids, oldParentUid }) {
 // A detach is one move operation, including its independent-theme geometry.
 function movePositionPatch(node) {
   const floating = node && node.getData && node.getData('isFloating')
-  return {
+  const dir = node && node.getData && node.getData('dir')
+  const patch = {
     customLeft: floating ? node.getData('customLeft') : null,
     customTop: floating ? node.getData('customTop') : null,
     isFloating: !!floating
   }
+  if (dir === 'left' || dir === 'right') patch.dir = dir
+  return patch
 }
 
 const api = {

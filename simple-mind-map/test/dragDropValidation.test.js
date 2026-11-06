@@ -24,6 +24,9 @@ vm.runInNewContext(source,{
     resolveDropBusinessNode:n=>n,
     publishGeneralizationDragTrace(){},
     generalizationCorridorPx:()=>0
+  },
+  mindMapDragDir:{
+    resolveMindMapDropDir:()=>null
   }
 })
 const Drag = moduleMock.exports
@@ -80,7 +83,7 @@ test('dropping a parent on a descendant cancels even with free drag enabled', as
   let reset=false
   const drag=Object.assign(Object.create(Drag.prototype),{
     isMousedown:true,isDragging:true,clone:{},drawTransform:{scaleX:1,scaleY:1,translateX:0,translateY:0},beingDragNodeList:[parent],
-    mindMap:{opt:{enableFreeDrag:true},toPos:(x,y)=>({x,y}),execCommand(){throw new Error('no mutation permitted')}},
+    mindMap:{opt:{enableFreeDrag:true},toPos:(x,y)=>({x,y}),emit(){},execCommand(){throw new Error('no mutation permitted')}},
     reset(){reset=true},onMove(){throw new Error('invalid drop must not update preview')}
   })
   await drag.onMouseup({clientX:110,clientY:110})
@@ -93,7 +96,7 @@ test('release resolves the final target before an unexpired hover throttle',asyn
     isMousedown:true,isDragging:true,clone:{},drawTransform:{scaleX:1,scaleY:1,translateX:0,translateY:0},beingDragNodeList:[parent],nodeList:[target],
     placeholder:{size(){}},placeHolderLine:{hide(){}},removeExtraLines(){},
     onMove(){},handleOverlapNode(){},handleLogicalStructure(n){this.overlapNode=n},reset(){},
-    mindMap:{opt:{layout:'logicalStructure',beforeDragEnd:args=>{finalTarget=args.overlapNodeUid;return true}},toPos:(x,y)=>({x,y}),execCommand(){}}
+    mindMap:{opt:{layout:'logicalStructure',beforeDragEnd:args=>{finalTarget=args.overlapNodeUid;return true}},toPos:(x,y)=>({x,y}),emit(){},execCommand(){}}
   })
   target.getData=k=>k==='isActive'?false:'target'
   await drag.onMouseup({clientX:110,clientY:110})

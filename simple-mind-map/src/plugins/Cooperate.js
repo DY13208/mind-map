@@ -174,7 +174,8 @@ const NULLABLE_PATCH_KEYS = [
   'commentResolved',
   'customLeft',
   'customTop',
-  'isFloating'
+  'isFloating',
+  'dir'
 ]
 
 const FIELD_COMMANDS = {
@@ -4289,7 +4290,7 @@ class Cooperate {
       // Move events can carry restored coordinates when undoing a move.
       const positionData = { ...(payload.data || {}), ...(payload.patch || {}) }
       const positionPatch = {}
-      ;['customLeft', 'customTop', 'isFloating'].forEach(key => {
+      ;['customLeft', 'customTop', 'isFloating', 'dir'].forEach(key => {
         if (Object.prototype.hasOwnProperty.call(positionData, key)) {
           positionPatch[key] = positionData[key]
           node[key] = positionData[key] == null ? undefined : positionData[key]
@@ -6204,7 +6205,8 @@ class Cooperate {
       commentResolved: next.commentResolved,
       customLeft: next.customLeft,
       customTop: next.customTop,
-      isFloating: next.isFloating
+      isFloating: next.isFloating,
+      dir: next.dir
     }
     Object.keys(next || {}).forEach(key => {
       if (checkIsNodeStyleDataKey(key)) stylePayload[key] = next[key]
@@ -8804,6 +8806,9 @@ class Cooperate {
         node.setData(origin.position)
         node.customLeft = origin.position.customLeft == null ? undefined : origin.position.customLeft
         node.customTop = origin.position.customTop == null ? undefined : origin.position.customTop
+        if (origin.position.dir === 'left' || origin.position.dir === 'right') {
+          node.dir = origin.position.dir
+        }
       }
       if (typeof this.mindMap.render === 'function') this.mindMap.render()
     } finally {
@@ -8958,7 +8963,7 @@ class Cooperate {
     }
     if (!patch || typeof patch !== 'object') return
     const fields = {}
-    for (const key of ['customLeft', 'customTop', 'isFloating']) {
+    for (const key of ['customLeft', 'customTop', 'isFloating', 'dir']) {
       if (Object.prototype.hasOwnProperty.call(patch, key)) fields[key] = patch[key]
     }
     if (!Object.keys(fields).length) return

@@ -9,6 +9,7 @@ import Base from '../layouts/Base'
 import { CONSTANTS } from '../constants/constant'
 import AutoMove from '../utils/AutoMove'
 import collabPaste from '../utils/collabPaste'
+import mindMapDragDir from '../utils/mindMapDragDir'
 
 // Parse #rgb/#rrggbb/rgb()/rgba() and report whether the colour is dark.
 const isDarkColor = color => {
@@ -289,6 +290,14 @@ class Drag extends Base {
       })
     }
     // 存在重叠子节点，则移动作为其子节点
+    const dropDir = this.getMindMapDropDir()
+    const dirExtras = dropDir ? { dir: dropDir } : null
+    const dirPositions = dropDir
+      ? (this.beingDragNodeList || []).map(node => ({
+          uid: node && node.getData && node.getData('uid'),
+          dir: dropDir
+        }))
+      : []
     if (this.overlapNode) {
       requestSyncPaint()
       markRemeasure(this.overlapNode)
@@ -297,7 +306,8 @@ class Drag extends Base {
       const moved = await this.mindMap.execCommand(
         'MOVE_NODE_TO',
         this.beingDragNodeList,
-        this.overlapNode
+        this.overlapNode,
+        dirPositions
       )
       didMove = moved !== false
     } else if (this.prevNode) {
@@ -309,7 +319,8 @@ class Drag extends Base {
       const moved = await this.mindMap.execCommand(
         'INSERT_AFTER',
         this.beingDragNodeList,
-        this.prevNode
+        this.prevNode,
+        dirExtras
       )
       didMove = moved !== false
     } else if (this.nextNode) {
@@ -321,7 +332,8 @@ class Drag extends Base {
       const moved = await this.mindMap.execCommand(
         'INSERT_BEFORE',
         this.beingDragNodeList,
-        this.nextNode
+        this.nextNode,
+        dirExtras
       )
       didMove = moved !== false
     } else if (hadClone && this.mindMap.opt.enableDetachedDrag !== false) {
@@ -893,6 +905,35 @@ class Drag extends Base {
     this.placeHolderExtraLines = []
   }
 
+  getMindMapDropDir() {
+    const sibling = this.prevNode || this.nextNode
+    const root =
+      (this.mindMap.renderer && this.mindMap.renderer.root) ||
+      (this.overlapNode && this.overlapNode.isRoot ? this.overlapNode : null) ||
+      (sibling && sibling.parent && sibling.parent.isRoot ? sibling.parent : null)
+    const siblingDir = (() => {
+      if (!sibling) return ''
+      const fromData =
+        typeof sibling.getData === 'function' ? sibling.getData('dir') : ''
+      if (fromData === 'left' || fromData === 'right') return fromData
+      if (sibling.dir === 'left' || sibling.dir === 'right') return sibling.dir
+      return ''
+    })()
+    let rootCenterX
+    if (root && this.drawTransform) {
+      const rootRect = this.getNodeRect(root)
+      rootCenterX = (rootRect.left + rootRect.right) / 2
+    }
+    return mindMapDragDir.resolveMindMapDropDir({
+      layout: this.mindMap.opt && this.mindMap.opt.layout,
+      overlapIsRoot: !!(this.overlapNode && this.overlapNode.isRoot),
+      siblingIsFirstLevel: !!(sibling && sibling.parent && sibling.parent.isRoot),
+      siblingDir,
+      pointerX: this.mouseMoveX,
+      rootCenterX
+    })
+  }
+
   //  检测重叠节点
   checkOverlapNode() {
     if (!this.drawTransform || !this.placeholder) {
@@ -1319,8 +1360,13 @@ class Drag extends Base {
     // 即可识别为“作为子节点”，并渲染子节点占位提示。
     const corridor = this.getChildDropCorridor(node)
     const { scaleX } = this.drawTransform
-    const hitLeft = nodeRect.left - (dir === LEFT ? corridor * scaleX : 0)
-    const hitRight = nodeRect.right + (dir === LEFT ? 0 : corridor * scaleX)
+    const allowBothRootSides = node.isRoot && layout === LAYOUT.MIND_MAP
+    const hitLeft =
+      nodeRect.left -
+      (dir === LEFT || allowBothRootSides ? corridor * scaleX : 0)
+    const hitRight =
+      nodeRect.right +
+      (dir === LEFT && !allowBothRootSides ? 0 : corridor * scaleX)
     if (hitLeft <= mouseMoveX && hitRight >= mouseMoveX) {
       // 检测兄弟节点位置
       if (
