@@ -154,6 +154,7 @@ output/*.py
 !/web/tests/generalization-delete-protect-owner.test.cjs
 !/web/tests/generalization-subtree-spacing.test.cjs
 !/web/tests/generalization-delete-freeze.test.cjs
+!/web/tests/generalization-delete-loop.test.cjs
 
 # 环境配置与备份
 .env

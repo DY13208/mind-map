@@ -2643,6 +2643,16 @@ class Render {
       if (isAppointNodes) appointNodes = list
     }
     if (!list.length) return
+    // 关键：循环必须自己推进，不能依赖 removeNodeFromActiveList 的副作用。
+    //
+    // 原来 list 直接引用 this.activeNodeList，循环里靠「removeNodeFromActiveList
+    // 把这个节点从 activeNodeList 里 splice 掉」来缩短 list，再配合 i-- 让下标
+    // 停住。上面那步 filter（删概要时保护宿主会用）一旦执行，list 就变成了**新
+    // 数组**，而 removeNodeFromActiveList 只会去缩短 activeNodeList —— 新数组
+    // 长度不变，i-- 又抵消了 i++，于是同一个节点被反复处理，主线程彻底卡死
+    // （只有概要子树里的节点会命中 filter，所以只有它们「一按 delete 就死」）。
+    // 改成先拷一份快照，循环里无条件把它消费掉，终止性不再依赖任何外部副作用。
+    list = list.slice()
     let root = list.find(node => {
       return node.isRoot
     })
@@ -2654,8 +2664,18 @@ class Render {
     } else {
       // 如果只选中了一个节点，删除后激活其兄弟节点或者父节点
       needActiveNode = this.getNextActiveNode(list)
+      // 兜底上限：即便将来有人在循环里引入会让 list 增长的副作用，
+      // 这里也不会把页面转死。
+      const maxLoop = list.length * 2 + 8
+      let loopCount = 0
       for (let i = 0; i < list.length; i++) {
+        if (++loopCount > maxLoop) break
         const node = list[i]
+        if (!node) {
+          list.splice(i, 1)
+          i--
+          continue
+        }
         const currentEditNode = this.textEdit.getCurrentEditNode()
         if (
           currentEditNode &&
@@ -2664,11 +2684,9 @@ class Render {
           // 如果当前节点正在编辑中，那么先完成编辑
           this.textEdit.hideEditTextBox()
         }
-        if (isAppointNodes) list.splice(i, 1)
         if (node.isGeneralization) {
           this.deleteNodeGeneralization(node)
           this.removeNodeFromActiveList(node)
-          i--
         } else {
           this.removeNodeFromActiveList(node)
           this.mindMap.command.recordContentChange?.({ removed: [node] })
@@ -2677,15 +2695,17 @@ class Render {
           // removeFromParentNodeData 只改 nodeData.children，实例数组还留着被删
           // 节点。概要子树的节点尤其危险：它的 parent 是概要节点，而概要子树
           // 的兄弟激活/布局/lru 都按实例数组走 —— 残留的已删实例会被重新激活
-          // 或参与排版，它背后的 SVG group 可能已经移除，渲染随即抛错；
-          // isRendering 卡在 true，协作层就在 while 里死等，页面表现为卡死。
+          // 或参与排版，它背后的 SVG group 可能已经移除，渲染随即抛错。
           const parentNode = node.parent
           if (parentNode && Array.isArray(parentNode.children)) {
             const idx = parentNode.children.indexOf(node)
             if (idx > -1) parentNode.children.splice(idx, 1)
           }
-          i--
         }
+        // 无论上面走哪个分支、removeNodeFromActiveList 有没有真正移除，
+        // 都从这里把当前项从快照里消费掉，保证下标推进。
+        list.splice(i, 1)
+        i--
       }
     }
     this.activeNodeList = []
@@ -2752,6 +2772,9 @@ class Render {
       if (isAppointNodes) appointNodes = list
     }
     if (!list.length) return
+    // 和 removeNode 一样：删概要时的 filter 会让 list 变成新数组，之后不能再
+    // 假设它和 activeNodeList 是同一个对象。这里用快照，避免后续按引用产生分歧。
+    list = list.slice()
     if (
       this.runAfterHydrate(
         list,

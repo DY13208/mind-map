@@ -155,7 +155,7 @@ if (nextSrc) {
 {
   const removeNodeBody = (() => {
     const s = renderSrc.indexOf('removeNode(appointNodes = [])')
-    return s < 0 ? '' : renderSrc.slice(s, s + 2400)
+    return s < 0 ? '' : renderSrc.slice(s, s + 4200)
   })()
   const removeCurrentBody = (() => {
     const s = renderSrc.indexOf('removeCurrentNode(appointNodes = [])')
