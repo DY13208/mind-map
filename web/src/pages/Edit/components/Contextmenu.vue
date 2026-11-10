@@ -34,6 +34,7 @@
       <div class="item" @click="exec('UNEXPAND_ALL')"><MenuIcon name="collapse" /><span class="name">{{ $t('contextmenu.unExpandNodeChild') }}</span></div>
       <div class="item" @click="copyNodeForAi"><MenuIcon name="clipboard" /><span class="name">复制给 AI（SOP）</span></div>
       <div
+        v-if="canPublishApproval"
         class="item disabled"
         data-testid="publish-node-approval-readonly"
         title="当前为只读模式，请先在工具栏切换为编辑模式"
@@ -96,7 +97,7 @@
         <MenuIcon name="clipboard" />
         <span class="name">蒸馏skill</span>
       </div>
-      <div class="item" data-testid="publish-node-approval" @click="publishNodeApproval">
+      <div v-if="canPublishApproval" class="item" data-testid="publish-node-approval" @click="publishNodeApproval">
         <MenuIcon name="network" />
         <span class="name">发布这个审批流</span>
       </div>
@@ -491,7 +492,7 @@ import { transformToMarkdown } from 'simple-mind-map/src/parse/toMarkdown'
 import { transformToTxt } from 'simple-mind-map/src/parse/toTxt'
 import { setDataToClipboard, setImgToClipboard, copy } from '@/utils'
 import { numberTypeList, numberLevelList } from '@/config'
-import { roomFromLocation } from '@/utils/roomLocation'
+import { isApprovalPublicationRoom, roomFromLocation } from '@/utils/roomLocation'
 import { createShortNodeLink, formatNodeLinkText, copyNodeLinkText } from '@/utils/shortNodeLink'
 import {
   getSafeArea,
@@ -550,6 +551,9 @@ export default {
     }
   },
   computed: {
+    canPublishApproval() {
+      return isApprovalPublicationRoom(roomFromLocation(this.$route))
+    },
     ...mapState({
       isZenMode: state => state.localConfig.isZenMode,
       isDark: state => state.localConfig.isDark,
@@ -828,16 +832,35 @@ export default {
       const reference = this.getNodeAiReference()
       this.hide()
       if (!reference) return
-      if (node._approvalDefinitionState && node._approvalDefinitionState.state !== 'published')
-        return this.$message.warning('该审批流已恢复草稿，请重新发布后复制给 AI 执行')
-      const children = (node.nodeData && node.nodeData.children) || []
+      const children = node.getPureData().children
+      const readText = child => {
+        const raw = String(child.data && child.data.text || '')
+        const text = /<\/?[a-z][^>]*>/i.test(raw) ? getTextFromHtml(raw) : raw
+        return text.replace(/\s+/g, ' ').trim()
+      }
+      const requirements = children.find(child => readText(child) === '提交要求')
+      const fieldNames = ((requirements && requirements.children) || []).map(readText).filter(Boolean)
+      const formatFields = names => names.length
+        ? '\n' + names.map(name => `- ${name.replace(/[:：]$/, '')}：`).join('\n')
+        : ''
+      let fields = formatFields(fieldNames)
+      const copyDraft = () => this.copyAiInstruction(
+        reference + fields,
+        '审批草稿及提交要求已复制'
+      )
+      if (node._approvalDefinitionState && node._approvalDefinitionState.state !== 'published') {
+        return copyDraft()
+      }
       if (node._approvalDefinitionState || children.some(c=>/^(提交要求|流程标识[:：])/.test(String(c.data && c.data.text || '').replace(/<[^>]+>/g,'').trim()))) {
         try {
           const source={roomKey:roomFromLocation(this.$route),nodeUid:this.nodeUid(node)}
           const tpl=await approvalService.template(source)
+          if (!fields && tpl.kind === 'generic' && Array.isArray(tpl.fields)) {
+            fields = formatFields(tpl.fields.map(field => field.label).filter(Boolean))
+          }
           if (tpl.publication.agent_mode) {
-            if (!tpl.publication.valid) return this.$message.warning('该审批流已恢复草稿，请重新发布后复制给 AI 执行')
-            await this.copyAiInstruction(`执行已发布审批流：${reference}`, '审批执行指令已复制，可粘贴给 AI 使用')
+            if (!tpl.publication.valid) return copyDraft()
+            await this.copyAiInstruction(reference + fields, '审批节点及提交要求已复制')
             return
           }
         } catch(e) { return this.$message.warning(e.message || '无法核验审批发布状态，请稍后重试') }
@@ -858,7 +881,7 @@ export default {
     },
 
     publishNodeApproval() {
-      if (this.submenuClickGate || !this.node) return
+      if (this.submenuClickGate || !this.node || !this.canPublishApproval) return
       if (!this.editable) {
         this.$message.warning('当前为只读权限，无法发布审批流')
         return

@@ -3,6 +3,9 @@ const LAST_ROOM_STORAGE_KEY = 'cpd:lastRoom'
 const SESSION_STORAGE_KEY = 'SIMPLE_MIND_MAP_SESSION'
 const SOP_ROOM_STORAGE_KEY = 'assistant.sopRoom'
 const SKIP_MY_MAPS_REDIRECT_KEY = 'cpd:skipMyMapsRedirect'
+export function isApprovalPublicationRoom(roomKey) {
+  return roomKey === 'room-yk3tz4aj' || roomKey === 'room-8xvkkypn'
+}
 
 export function rememberLastRoom(roomKey) {
   const key = String(roomKey || '').trim()

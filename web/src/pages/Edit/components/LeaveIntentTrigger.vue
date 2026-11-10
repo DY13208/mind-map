@@ -13,7 +13,7 @@
     }}</span>
     <button type="button" :disabled="busy" @click="openCurrent">
       <i class="el-icon-date" /><span>{{
-        hasSubmissionRequirements && !requestId
+        canPublishApproval && !requestId
           ? '发布这个审批流'
           : isPolicy
           ? '配置审批流程'
@@ -58,7 +58,7 @@
 </template>
 <script>
 import service, { openLeaveRequest } from '@/services/leaveService'
-import { roomFromLocation } from '@/utils/roomLocation'
+import { isApprovalPublicationRoom, roomFromLocation } from '@/utils/roomLocation'
 import { signature as definitionSignature } from '../../../../../simple-mind-map/src/utils/approvalDefinition'
 import {
   extractFields,
@@ -119,6 +119,9 @@ export default {
     approvalLaunchSequence: 0
   }),
   computed: {
+    canPublishApproval() {
+      return this.hasSubmissionRequirements && isApprovalPublicationRoom(roomFromLocation(this.$route))
+    },
     hasSubmissionRequirements() {
       return !!this.node && ((this.node.nodeData && this.node.nodeData.children) || []).some(
         child => String((child.data || {}).text || '').replace(/<[^>]+>/g, '').trim() === '提交要求'
@@ -168,7 +171,7 @@ export default {
   },
   methods: {
     publishDefinition(node) {
-      if (!node) return
+      if (!node || !isApprovalPublicationRoom(roomFromLocation(this.$route))) return
       if (this.$store.state.isReadonly) {
         this.$message.warning(
           '当前为只读模式，请先在工具栏点“眼睛/铅笔”图标切换为编辑模式，再发布审批流'
@@ -224,7 +227,7 @@ export default {
       this.definitionRefreshTimer=setTimeout(this.refreshDefinitions,800)
     },
     openCurrent() {
-      return this.hasSubmissionRequirements ? this.publishDefinition(this.node) : this.open()
+      return this.canPublishApproval && !this.requestId ? this.publishDefinition(this.node) : this.open()
     },
     async startNodeApproval(selectedNode) {
       if (this.busy || !selectedNode || this.$store.state.isReadonly) return
