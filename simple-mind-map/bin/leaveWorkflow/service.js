@@ -291,6 +291,8 @@ async function publish(pool, req, body) {
       'manage'
     )
     operation(body)
+    if (body.agentMode === true && !['room-yk3tz4aj', 'room-8xvkkypn'].includes(tpl.source.roomKey))
+      throw fail('AGENT_PUBLISH_ROOM_REQUIRED', '当前房间不支持发布 Agent 审批流', 403)
     const previousPublication = await publication(db, tpl, who)
     if (previousPublication.agent_mode && body.agentMode !== true)
       throw fail('AGENT_PUBLISH_REQUIRED','此节点是 Agent 审批定义，请使用“发布这个审批流”重新发布',409)

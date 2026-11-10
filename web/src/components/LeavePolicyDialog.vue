@@ -1,7 +1,7 @@
 <template>
   <el-dialog
     :visible.sync="visible"
-    :title="agentMode ? '发布这个审批流' : '审批流程配置'"
+    :title="agentMode && canPublishHere ? '发布这个审批流' : '审批流程配置'"
     custom-class="leavePolicyDialog"
     append-to-body
     :close-on-click-modal="false"
@@ -70,6 +70,7 @@
           ><el-button :disabled="loading || busy" @click="load"
             >重新读取</el-button
           ><el-button
+            v-if="!agentMode || canPublishHere"
             type="primary"
             :loading="busy"
             :disabled="!policy.canPublish || configurationPending"
@@ -86,6 +87,7 @@
 </template>
 <script>
 import service from '@/services/leaveService'
+import { isApprovalPublicationRoom, roomFromLocation } from '@/utils/roomLocation'
 export default {
   data: () => ({
     visible: false,
@@ -102,6 +104,10 @@ export default {
     searchSequence: 0
   }),
   computed: {
+    canPublishHere() {
+      return isApprovalPublicationRoom(roomFromLocation(this.$route)) &&
+        this.policy && this.policy.source.roomKey === roomFromLocation(this.$route)
+    },
     configurationPending() {
       return !this.policy || (this.policy.configurationErrors || []).length > 0 || this.bindings.some(s=>!s.accounts.length&&!s.dynamicReady)
     },
@@ -163,6 +169,7 @@ export default {
       }
     },
     async publish() {
+      if (this.agentMode && !this.canPublishHere) return
       this.busy = true
       this.error = ''
       try {
