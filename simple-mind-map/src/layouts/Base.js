@@ -84,7 +84,17 @@ class Base {
       // 只在都有数据时才进行对比
       return false
     }
-    return lastData !== JSON.stringify(curData)
+    // curData 可能含有渲染期实例引用（如概要虚拟子树 live-link 进来的
+    // _node → MindMapNode 循环引用）。直接序列化会抛 TypeError 中断整次
+    // 布局，画布上留下空壳节点/幽灵括号。序列化失败时按「已变化」处理，
+    // 让节点走重新测量：宁可多算一次，不可中断布局。
+    let curSnapshot
+    try {
+      curSnapshot = JSON.stringify(curData)
+    } catch (err) {
+      return true
+    }
+    return lastData !== curSnapshot
   }
 
   // 检查库前置或后置内容是否改变了

@@ -111,6 +111,50 @@ function countVisibleLayoutNodes(tree) {
   return count
 }
 
+// 节点实例是否位于概要虚拟子树内（自身或任一祖先是概要节点）。
+function isInGeneralizationScope(node) {
+  let cur = node
+  let depth = 0
+  while (cur && depth < 200) {
+    if (cur.isGeneralization) return true
+    cur = cur.parent
+    depth++
+  }
+  return false
+}
+
+// 就地剔除 nodeData 子树上的渲染期实例引用（`_node` → MindMapNode，
+// 带循环引用）。主树 nodeData 携带 _node 是节点复用机制的一部分；
+// 但一旦被移进概要虚拟子树，它会被 live-link 进 owner 的
+// data.generalization，此后任何对 owner 内部数据的 JSON 序列化
+// （布局的 checkIsNodeDataChange、拷贝、同步打包）都会因循环引用
+// 抛错，整次布局中断——画布上留下空壳节点/幽灵括号的直接来源。
+// 剔除后 createNode 仍可经 lru/lastNodeCache 按 uid 复用实例。
+function stripNodeTreeRenderRefs(nodeData, depth = 0) {
+  if (!nodeData || typeof nodeData !== 'object' || depth > 60) return
+  delete nodeData._node
+  if (Array.isArray(nodeData.children)) {
+    nodeData.children.forEach(child =>
+      stripNodeTreeRenderRefs(child, depth + 1)
+    )
+  }
+  const data = nodeData.data
+  if (data && typeof data === 'object' && data.generalization) {
+    const gens = Array.isArray(data.generalization)
+      ? data.generalization
+      : [data.generalization]
+    gens.forEach(gen => {
+      if (!gen || typeof gen !== 'object') return
+      delete gen._node
+      if (Array.isArray(gen.children)) {
+        gen.children.forEach(child =>
+          stripNodeTreeRenderRefs(child, depth + 1)
+        )
+      }
+    })
+  }
+}
+
 //  渲染
 class Render {
   //  构造函数
@@ -2587,6 +2631,12 @@ class Render {
           targetDataIndex++
         }
       }
+      // 下潜（主树 → 概要虚拟子树）：被移动的 nodeData 带着 _node 渲染
+      // 引用，一旦 splice 进概要作用域会 live-link 进 owner.generalization，
+      // 循环引用会让接下来的布局/拷贝/同步全部崩掉。先剔除。
+      if (isInGeneralizationScope(existParent)) {
+        stripNodeTreeRenderRefs(item.nodeData)
+      }
       existBorthers.splice(existIndex, 0, item)
       existParent.nodeData.children.splice(targetDataIndex, 0, item.nodeData)
       item.parent = existParent
@@ -2957,6 +3007,10 @@ class Render {
       toNode.nodeData.children = toNode.nodeData.children.filter(
         child => !(child && child.data && child.data.uid === uid)
       )
+      // 下潜（主树 → 概要虚拟子树）：同 insertTo，先剔除 _node 渲染引用。
+      if (isInGeneralizationScope(toNode)) {
+        stripNodeTreeRenderRefs(item.nodeData)
+      }
       toNode.nodeData.children.push(item.nodeData)
       if (Array.isArray(toNode.children)) {
         toNode.children = toNode.children.filter(

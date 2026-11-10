@@ -119,12 +119,61 @@ function mergeVirtualEditIntoOwner(ownerGeneralization, virtualUid, patch = {}) 
   return next.length ? next : null
 }
 
+// 从概要素材里摘掉某个 uid 的子树（含其自身）。
+// 用途：把概要里的节点「提升」成主树真实节点时，owner 的 generalization 必须
+// 同步少掉这一截，否则本地会出现两份（概要里一份、主树一份）。
+// 返回 { removed, next }：removed 是被摘走的原始对象，next 是处理后的列表
+// （可能为 null，表示已经没有概要了）。
+function detachGeneralizationNode(ownerGeneralization, targetUid) {
+  const target = targetUid ? String(targetUid) : ''
+  if (!target) return { removed: null, next: ownerGeneralizationPayload(ownerGeneralization) }
+  const list = listGeneralization(ownerGeneralization).filter(Boolean)
+  let removed = null
+  const uidOf = item =>
+    (item && ((item.data && item.data.uid) || item.uid)) || ''
+  const kidsOf = item => {
+    if (!item) return null
+    if (Array.isArray(item.children)) return item.children
+    if (item.data && Array.isArray(item.data.children)) return item.data.children
+    return null
+  }
+  const walk = children => {
+    if (!Array.isArray(children) || removed) return
+    for (let i = 0; i < children.length; i++) {
+      const child = children[i]
+      if (!child) continue
+      if (uidOf(child) === target) {
+        removed = children.splice(i, 1)[0]
+        return
+      }
+      const kids = kidsOf(child)
+      if (kids) walk(kids)
+      if (removed) return
+    }
+  }
+  const next = list.map(item => snapshotValue(item))
+  next.forEach(item => {
+    if (removed) return
+    const kids = kidsOf(item)
+    if (kids) walk(kids)
+  })
+  if (!removed) {
+    return { removed: null, next: ownerGeneralizationPayload(ownerGeneralization) }
+  }
+  const cleaned = next
+    .map(stripEphemeralGen)
+    .filter(item => item && !(item.children && item.children.length === 0 && item.__dropEmpty))
+  const payload = cleaned.filter(Boolean)
+  return { removed, next: payload.length ? payload : null }
+}
+
 const api = {
   snapshotValue,
   listGeneralization,
   generalizationSignature,
   ownerGeneralizationPayload,
-  mergeVirtualEditIntoOwner
+  mergeVirtualEditIntoOwner,
+  detachGeneralizationNode
 }
 
 module.exports = api

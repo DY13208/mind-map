@@ -3941,6 +3941,12 @@ class Cooperate {
 
   isGeneralizationUid(parentUid, uid) {
     if (!parentUid || !uid) return false
+    // 数据层判定优先：父 uid 位于概要虚拟子树内（按 renderTree 的
+    // data.generalization 递归收集，不依赖渲染实例是否就绪）。粘贴/插入进
+    // 概要的瞬间节点实例可能还没建出来，只看实例会把虚拟父当成真实父，
+    // 导致 node.insert 发到服务端被 PARENT_DELETED 拒掉（409），进而触发
+    // 本地误恢复把刚粘贴的节点清掉。
+    if (this.virtualGeneralizationUidSet().has(String(parentUid))) return true
     const renderer = this.mindMap && this.mindMap.renderer
     const parentNode =
       renderer && typeof renderer.findNodeByUid === 'function'
@@ -3971,6 +3977,84 @@ class Cooperate {
   // 概要虚拟子树节点对应的真实 owner 节点（用于把编辑映射到 generalization 通道）。
   generalizationScopeOwner(node) {
     return generalizationScopeOwner(node)
+  }
+
+  // 按 uid 判断是否属于概要虚拟子树。
+  //
+  // 虚拟节点没有服务端行，任何 `/subtree?uid=`、`node.update`、`node.move`
+  // 都会 404 或 428。凡是「要拿 uid 去访问服务端」的入口，都必须先过这道闸。
+  // 判定顺序：
+  //   1. 画布上有实例 → 沿 parent 链找概要点（最准，覆盖运行时新建的节点）
+  //   2. 实例不在（懒加载/纯数据）→ 扫渲染树里所有 generalization 的后代
+  isVirtualGeneralizationUid(uid) {
+    const key = uid ? String(uid) : ''
+    if (!key) return false
+    const renderer = this.mindMap && this.mindMap.renderer
+    if (!renderer) return false
+    const node =
+      typeof renderer.findNodeByUid === 'function'
+        ? renderer.findNodeByUid(key)
+        : null
+    if (node) return isGeneralizationScopeNode(node)
+    return this.virtualGeneralizationUidSet().has(key)
+  }
+
+  // 渲染树里所有「概要后代」的 uid 集合。
+  // 以 renderTree 引用为缓存键：树被替换（setData / 全量刷新）才重算。
+  // 原地改概要素材时 renderTree 不换，所以再用 generalization 的 uid 串做签名。
+  virtualGeneralizationUidSet() {
+    const renderer = this.mindMap && this.mindMap.renderer
+    const tree = renderer && renderer.renderTree
+    if (!tree) {
+      this._virtualGenUids = new Set()
+      this._virtualGenTree = null
+      this._virtualGenSig = ''
+      return this._virtualGenUids
+    }
+    const set = new Set()
+    let sigParts = []
+    const childUidOf = child =>
+      (child && ((child.data && child.data.uid) || child.uid)) || ''
+    const childKidsOf = child => {
+      if (!child) return []
+      return child.children || (child.data && child.data.children) || []
+    }
+    // 一条概要（或一个概要素材对象）下的整棵子树
+    const collectFrom = item => {
+      if (!item) return
+      const kids = item.children || (item.data && item.data.children) || []
+      const walk = child => {
+        if (!child) return
+        const uid = childUidOf(child)
+        if (uid) {
+          set.add(String(uid))
+          sigParts.push(String(uid))
+        }
+        childKidsOf(child).forEach(walk)
+      }
+      ;(Array.isArray(kids) ? kids : []).forEach(walk)
+    }
+    const visit = node => {
+      if (!node || !node.data) return
+      const gen = node.data.generalization
+      if (gen) {
+        ;(Array.isArray(gen) ? gen : [gen]).forEach(collectFrom)
+      }
+      ;(node.children || []).forEach(visit)
+    }
+    visit(tree)
+    const sig = sigParts.join(',')
+    if (
+      this._virtualGenUids &&
+      this._virtualGenTree === tree &&
+      this._virtualGenSig === sig
+    ) {
+      return this._virtualGenUids
+    }
+    this._virtualGenUids = set
+    this._virtualGenTree = tree
+    this._virtualGenSig = sig
+    return set
   }
 
   requestRemoteApplyRender(uids, callback, source = 'remote apply') {
@@ -4371,6 +4455,17 @@ class Cooperate {
     if (node && node.isRoot) return true
     if (node && node.isGeneralization) {
       v2Trace('remote.apply.delete.skip-gen', { uid })
+      return true
+    }
+    // 下潜（主树节点移进概要）会删掉它的服务端行，node.deleted 事件回声
+    // 到达时它已经渲染在概要虚拟子树里 —— 这条删除不能再作用于本地，
+    // 否则刚拖进概要的节点会被自己的删除回声抹掉。
+    if (node && isGeneralizationScopeNode(node)) {
+      v2Trace('remote.apply.delete.skip-gen-scope', { uid })
+      return true
+    }
+    if (this.virtualGeneralizationUidSet().has(String(uid))) {
+      v2Trace('remote.apply.delete.skip-gen-uid-set', { uid })
       return true
     }
     if (this.isGeneralizationUid(payloadParentUid(payload), uid)) {
@@ -5943,6 +6038,18 @@ class Cooperate {
     return !!(uid && this.ackedUids && this.ackedUids.has(uid))
   }
 
+  // 该 uid 在服务端是否存在真实节点行。
+  // isPersistAcked 只覆盖「本会话内写入并收到 ack」的节点；preview
+  // 加载的主树节点从未进 ackedUids（setHttpCollab 会清空且不标记），
+  // 但它们显然有服务端行。currentData 是服务端行树的客户端镜像
+  // （transformTreeDataToObject 只走 children，概要虚拟子树节点不会
+  // 进入），用它补齐 preview 节点；两个信号任一命中即视为有行。
+  hasServerNodeRow(uid) {
+    if (!uid) return false
+    if (this.isPersistAcked(uid)) return true
+    return !!(this.currentData && this.currentData[String(uid)])
+  }
+
   resolveHttpPatchNode(node, command) {
     const resolved = collabSpecialObjects.resolveCollaborationTarget(node, command)
     if (resolved.kind === 'generalization' && resolved.owner) return resolved.owner
@@ -6362,6 +6469,9 @@ class Cooperate {
 
   nodeNeedsHydrate(node) {
     if (!node) return false
+    // 概要虚拟子树节点没有服务端行，拉子树一定 404。它们的数据完整存在
+    // owner.generalization 里，本地就是全量，永远不需要 hydrate。
+    if (isGeneralizationScopeNode(node)) return false
     const live =
       (node.nodeData && node.nodeData.children && node.nodeData.children.length) ||
       0
@@ -6469,6 +6579,8 @@ class Cooperate {
   async hydrateFromHttp(node, options = {}) {
     if (this._disposed || (this.mindMap && this.mindMap._destroyed)) return
     if (!node || !this.httpFetchSubtree) return
+    // 概要虚拟子树节点：服务端没有行，/subtree 一定 404，直接当已完整。
+    if (isGeneralizationScopeNode(node)) return
     const uid = node.getData && node.getData('uid')
     const data = node.nodeData
     if (!uid || !data) return
@@ -6643,6 +6755,8 @@ class Cooperate {
     if (!data || !this.httpFetchSubtree) return data
     const uid = data.data && data.data.uid
     if (!uid) return data
+    // 概要虚拟子树节点（纯数据形态）同样没有服务端行，不要拉。
+    if (this.isVirtualGeneralizationUid(uid)) return data
     const guard = beginHydration(this, uid)
     const isCurrent = guard.isCurrent
     try {
@@ -7038,10 +7152,28 @@ class Cooperate {
       else this.fillRepairGuards.delete(uid)
     }
     if (MOVE_COMMANDS[name] && name !== 'INSERT_PARENT_NODE') {
+      // 移动概要虚拟子树节点时，必须趁 parent 链还没被改之前记下它的 owner：
+      // 一旦移出概要子树，generalizationScopeOwner 就再也找不到了。
+      const hoistCandidates = []
+      const collectHoist = value => {
+        if (Array.isArray(value)) return value.forEach(collectHoist)
+        if (!value || typeof value.getData !== 'function') return
+        if (!isGeneralizationScopeNode(value)) return
+        const owner = generalizationScopeOwner(value)
+        if (!owner) return
+        hoistCandidates.push({
+          node: value,
+          uid: value.getData('uid'),
+          owner,
+          ownerUid: owner.getData && owner.getData('uid')
+        })
+      }
+      collectHoist(args)
       this.pendingMoveCommand = {
         name,
         args,
-        origins: collabMove.snapshotMoveOrigins(args)
+        origins: collabMove.snapshotMoveOrigins(args),
+        hoistCandidates
       }
     }
     if (
@@ -7171,6 +7303,151 @@ class Cooperate {
       (this.mindMap.renderer && this.mindMap.renderer.activeNodeList) || []
     active.forEach(consider)
     return owners
+  }
+
+  // 把概要虚拟子树里的节点「提升」成主树上的真实节点。
+  //
+  // 概要里的节点没有服务端行，它的数据只存在 owner.generalization 里。用户把它
+  // 拖到主树位置时，语义上等于「从概要里摘出来、在正式树里新建一个节点」：
+  //   ① 从 owner 的 generalization 摘掉这棵子树（含后代）
+  //   ② 同步 owner，概要那边立刻少一截
+  //   ③ 清理这个节点上一切「服务端已有」的假设，让它走正常 insert
+  // 步骤 ③ 是关键：不清的话 flushHttpInsert 会认为它早已推送过而跳过。
+  hoistVirtualNode(node, owner, uid) {
+    if (!node || !owner || !uid) return Promise.resolve()
+    const ownerUid = owner.getData && owner.getData('uid')
+    try {
+      const list = owner.getData && owner.getData('generalization')
+      const detached = collabGeneralization.detachGeneralizationNode(list, uid)
+      if (detached && owner.setData) {
+        const next = detached.next && detached.next.length ? detached.next : null
+        owner.setData({ generalization: next })
+      }
+    } catch (err) {
+      console.warn('[mind-map] detach generalization failed', err)
+    }
+    // 这个 uid 从没在服务端存在过；清掉一切「已同步」痕迹，让 insert 认领它
+    this.forgetHttpUid(uid)
+    if (this.deletedUids) this.deletedUids.delete(String(uid))
+    if (this.abandonedInsertUids) this.abandonedInsertUids.delete(String(uid))
+    if (this.recentHttpDeleted) this.recentHttpDeleted.delete(String(uid))
+    // 子树里的后代同样从没存在过
+    const forgetTree = child => {
+      if (!child) return
+      const childUid = (child.getData && child.getData('uid')) || child.uid
+      if (childUid) {
+        this.forgetHttpUid(childUid)
+        if (this.deletedUids) this.deletedUids.delete(String(childUid))
+        if (this.abandonedInsertUids) this.abandonedInsertUids.delete(String(childUid))
+      }
+      ;(child.children || []).forEach(forgetTree)
+    }
+    ;(node.children || []).forEach(forgetTree)
+    // 概要那边已经少了这个节点
+    if (ownerUid) {
+      Promise.resolve()
+        .then(() => this.syncHttpGeneralization(owner))
+        .catch(err => console.warn('[mind-map] sync owner after hoist failed', err))
+    }
+    // 把它和它的子树当新节点插进服务端。
+    // V2 模式下裸调 flushHttpInsert 是空操作：collabV2Adapter && !_v2InsertFromCommand
+    // 时它只 warn 一声 LOCAL_NODE_WITHOUT_OPERATION 就 return。提升节点会静默丢失——
+    // owner 素材已摘、服务端新行没插，刷新即消失。必须仿照命令路径
+    // （interceptGuardedCommand → 快照 → flush）补上插入收集上下文，
+    // 让 collectV2CommandInsertRecords 的差集收集把它当新节点走 node.insert 落库。
+    if (this.collabV2Adapter) {
+      const renderer = this.mindMap && this.mindMap.renderer
+      const knownUids = new Set()
+      const hoistUids = new Set()
+      const walkUids = (nodeData, out) => {
+        if (!nodeData || typeof nodeData !== 'object') return
+        const u = nodeData.data && nodeData.data.uid
+        if (u) out.add(u)
+        ;(nodeData.children || []).forEach(child => walkUids(child, out))
+      }
+      // 差集基准 = 当前树上除提升子树外的全部 uid。收集器据此把提升节点及其
+      // 后代判为「新节点」；树上其余节点即便 isPersistAcked 为 false（preview
+      // 加载的常态，ackedUids 从不标记它们）也不会被误插一遍。
+      // 注意不能用 snapshotV2InsertCollect()：它以激活节点建快照，提升节点正
+      // 处于激活态，会被记进 knownUids 而漏收。
+      if (renderer && renderer.root && renderer.root.nodeData) {
+        walkUids(renderer.root.nodeData, knownUids)
+      }
+      walkUids(node.nodeData, hoistUids)
+      hoistUids.forEach(u => knownUids.delete(u))
+      if (!knownUids.size) knownUids.add(ownerUid || String(uid))
+      // 收集范围挂到新父节点上：以 parent.nodeData 为 roots 扫描时，提升节点
+      // 拿到的是它在 parent.children 里的真实 index，服务端落库位置才不会错。
+      // 同时带上节点自身兜底（collectNewNodeDataInserts 按 uid 去重，不会重复）。
+      const collectNodes = []
+      if (node.parent) collectNodes.push(node.parent)
+      collectNodes.push(node)
+      this._insertKnownUids = knownUids
+      this._insertCollectNodes = collectNodes
+      this._v2InsertFromCommand = true
+      // 提升节点不是粘贴产物，跳过 _lastPastedUids 白名单过滤，
+      // 否则粘贴 batch 尚在途时提升节点会被误过滤掉。
+      this._v2InsertIgnorePastedFilter = true
+    }
+    return Promise.resolve()
+      .then(() => this.flushHttpInsert())
+      .catch(err => console.warn('[mind-map] insert hoisted node failed', err))
+  }
+
+  // 把主树真实节点「下潜」进概要虚拟子树。与 hoistVirtualNode 互为反向：
+  //   ① 服务端删掉它的节点行（含后代，行没了才不会在主树里重复出现）
+  //   ② 清掉它身上一切「服务端已有」的标记，让它回到纯虚拟状态
+  //   ③ 数据本身已经活链进 owner.generalization，同步 owner 即可持久化
+  // node.deleted 事件回声由 applyV2PayloadDelete 的虚拟作用域守卫挡掉。
+  descendVirtualNode(node, uid) {
+    if (!node || !uid) return Promise.resolve()
+    const uids = []
+    const walk = n => {
+      if (!n) return
+      const u = n.getData && n.getData('uid')
+      if (u) uids.push(String(u))
+      ;(n.children || []).forEach(walk)
+    }
+    walk(node)
+    // 这些 uid 从现在起是虚拟的：清掉「已同步」痕迹，
+    // 防止后续 flushHttpInsert / flushHttpMove 再把它们当真实节点认领
+    uids.forEach(u => {
+      this.forgetHttpUid(u)
+      if (this.deletedUids) this.deletedUids.delete(u)
+      if (this.abandonedInsertUids) this.abandonedInsertUids.delete(u)
+      if (this.recentHttpDeleted) this.recentHttpDeleted.delete(u)
+      // currentData 是服务端行树的镜像；行删了镜像也要同步少掉，
+      // 否则 hasServerNodeRow 会拿 stale 信号把纯虚拟节点再判成有行。
+      if (this.currentData) delete this.currentData[u]
+    })
+    const owner = generalizationScopeOwner(node)
+    // 服务端删除是受保护写入：必须带 expected（uid + subtree_token），
+    // 否则 428 PRECONDITION_REQUIRED，行删不掉，刷新后主树里会多出一份。
+    // subtree_token 从写保护守卫查询（nodes/query?include_subtree_token）取。
+    const guard = this.httpFetchWriteGuard
+      ? Promise.resolve(this.readWriteGuard(uid, true)).catch(err => {
+          console.warn('[mind-map] descend write guard failed', uid, err.message || err)
+          return null
+        })
+      : Promise.resolve(null)
+    const del = guard
+      .then(row => {
+        if (!this.httpDeleteNode) return null
+        const expected = row && row.subtree_token
+          ? { uid: String(uid), subtree_token: row.subtree_token }
+          : undefined
+        return Promise.resolve(
+          this.httpDeleteNode(uid, {
+            keepChildren: false,
+            ...(expected ? { expected } : {})
+          })
+        ).catch(err => {
+          console.warn('[mind-map] descend delete failed', uid, err.message || err)
+        })
+      })
+    return del.then(() => {
+      if (owner) this.syncHttpGeneralization(owner)
+    })
   }
 
   syncHttpGeneralization(owner) {
@@ -7771,7 +8048,20 @@ class Cooperate {
       return
     }
     const diff = diffHttpHistoryTrees(previous, current)
+    // 概要虚拟子树节点的 undo/redo 不能逐条发服务端写：
+    //   - node.delete / node.update / node.move 都会 404 或 428
+    //     （日志实证：'受保护的节点写入缺少 expected 校验信息'）
+    //   - 它们的状态本来就整体存在 owner.generalization 里
+    // 所以把这些 uid 的 diff 收集起来，最后统一同步一次 owner。
+    const virtualUndoTouch = new Set()
+    const isVirtualDiffUid = uid => {
+      if (!uid) return false
+      if (!this.isVirtualGeneralizationUid(uid)) return false
+      virtualUndoTouch.add(String(uid))
+      return true
+    }
     diff.removed.forEach(item => {
+      if (isVirtualDiffUid(item.uid)) return
       this.forgetHttpUid(item.uid)
       this.recentHttpDeleted.set(item.uid, Date.now())
       if (!this.httpDeleteNode) return
@@ -7780,10 +8070,12 @@ class Cooperate {
       )
     })
     diff.added.forEach(item => {
+      if (isVirtualDiffUid(item.uid)) return
       this.recentHttpDeleted.delete(item.uid)
     })
     diff.moved.forEach(item => {
       if (!this.httpPatchNode || !item.uid) return
+      if (isVirtualDiffUid(item.uid)) return
       const sameParent =
         item.fromParent == null ||
         item.parent == null ||
@@ -7803,6 +8095,7 @@ class Cooperate {
     })
     diff.updated.forEach(item => {
       if (!this.httpPatchNode || !item.uid) return
+      if (isVirtualDiffUid(item.uid)) return
       const payload = this.historyTreePayload(item.data)
       const snap = JSON.stringify(payload)
       this.lastPushed[item.uid] = {
@@ -7813,6 +8106,29 @@ class Cooperate {
       this.httpPatchNode(item.uid, payload).catch(() => {})
     })
     if (diff.added.length) this.scheduleHttpStructureSync(0)
+    // 虚拟子树的 undo/redo 统一落到 owner.generalization
+    if (virtualUndoTouch.size) {
+      const owners = new Set()
+      const renderer = this.mindMap && this.mindMap.renderer
+      virtualUndoTouch.forEach(uid => {
+        const live = renderer && renderer.findNodeByUid && renderer.findNodeByUid(uid)
+        const owner = live && generalizationScopeOwner(live)
+        if (owner) owners.add(owner)
+      })
+      // 概要素材本身被删/加时，实例可能已经不在了 —— 退化为扫描所有带概论的节点
+      if (!owners.size) {
+        const walk = node => {
+          if (!node || !node.data) return
+          if (node.data.generalization) {
+            const live = renderer && renderer.findNodeByUid && renderer.findNodeByUid(node.data.uid)
+            if (live) owners.add(live)
+          }
+          ;(node.children || []).forEach(walk)
+        }
+        if (renderer && renderer.renderTree) walk(renderer.renderTree)
+      }
+      owners.forEach(owner => this.syncHttpGeneralization(owner))
+    }
   }
 
   nodePlain(node) {
@@ -8255,6 +8571,9 @@ class Cooperate {
 
   collectV2CommandInsertRecords(opts = {}) {
     const knownUids = opts.knownUids || this._insertKnownUids || new Set()
+    // 粘贴白名单只应约束粘贴产生的插入；提升（hoist）插入与粘贴无关，
+    // 由调用方置 ignorePastedFilter 跳过，避免误过滤。
+    const ignorePastedFilter = !!opts.ignorePastedFilter
     let nodes = opts.collectNodes || this._insertCollectNodes || []
     if (!nodes.length) {
       const renderer = this.mindMap && this.mindMap.renderer
@@ -8295,7 +8614,11 @@ class Cooperate {
     })
     const filtered = rows.filter(row => {
       if (!row || !row.uid || !row.parent) return false
-      if (this._lastPastedUids && this._lastPastedUids.size) {
+      if (
+        !ignorePastedFilter &&
+        this._lastPastedUids &&
+        this._lastPastedUids.size
+      ) {
         if (!this._lastPastedUids.has(row.uid)) return false
       }
       return !this.isGeneralizationUid(row.parent, row.uid)
@@ -8415,6 +8738,7 @@ class Cooperate {
       this.isSetData
     ) {
       this._v2InsertFromCommand = false
+      this._v2InsertIgnorePastedFilter = false
       return
     }
     if (this.collabV2Adapter && !this._v2InsertFromCommand) {
@@ -8425,7 +8749,11 @@ class Cooperate {
     this._v2InsertFromCommand = false
     const knownUids = this._insertKnownUids
     const collectNodes = this._insertCollectNodes
-    const flushOpts = { fromCommand, knownUids, collectNodes }
+    // 提升（hoist）插入不是粘贴产物：一次性标志，读后即清，
+    // 防止 _lastPastedUids 白名单把提升节点误过滤。
+    const ignorePastedFilter = !!this._v2InsertIgnorePastedFilter
+    this._v2InsertIgnorePastedFilter = false
+    const flushOpts = { fromCommand, knownUids, collectNodes, ignorePastedFilter }
     if (this.collabV2Adapter && fromCommand) {
       flushOpts.preRecords = this.collectV2CommandInsertRecords(flushOpts)
     }
@@ -8824,19 +9152,47 @@ class Cooperate {
       return Promise.resolve()
     }
     const origins = (this.pendingMoveCommand && this.pendingMoveCommand.origins) || []
+    const hoistCandidates =
+      (this.pendingMoveCommand && this.pendingMoveCommand.hoistCandidates) || []
     const originByUid = new Map(origins.map(item => [item.uid, item]))
     const collected = this.collectMovesFromCommand(name, args)
     this.pendingMoveCommand = null
+    // 跨边界：移动前在概要虚拟子树里、移动后落到主树 —— 这是「提升」。
+    // 虚拟节点没有服务端行，直接发 node.move 会被 NODE_DELETED 顶回来
+    // （表现为拖完弹回）。正确做法是：
+    //   ① 从原 owner 的 generalization 里摘掉它
+    //   ② 同步 owner（概要那边少一个节点）
+    //   ③ 把它当新节点走 insert，落到主树位置上
+    const hoistedUids = new Set()
+    const hoistWorks = []
+    hoistCandidates.forEach(candidate => {
+      const { node, uid, owner } = candidate
+      if (!uid || !owner) return
+      // 仍然在某个概要子树里（概要内排序）→ 不是提升，交给下面的虚拟分支
+      if (isGeneralizationScopeNode(node)) return
+      hoistedUids.add(String(uid))
+      hoistWorks.push(this.hoistVirtualNode(node, owner, uid))
+    })
     // 概要虚拟子树内的移动不能发 node.move：这些节点没有服务端节点行，
     // 服务端 resolveParent/getLive 拿不到行会返回 NODE_DELETED，前端表现为
     // 「拖完又弹回去」。它们的父子关系本来就存在 owner 的 generalization 里，
     // 整体同步 owner 即可。
     const moves = []
     const virtualOwners = new Set()
+    const descendWorks = []
     collected.forEach(item => {
+      if (hoistedUids.has(String(item.uid))) return
       if (isGeneralizationScopeNode(item.node)) {
         const owner = generalizationScopeOwner(item.node)
         if (owner) virtualOwners.add(owner)
+        // 下潜：这个 uid 原本是主树真实节点（服务端有行），刚被移进概要虚拟
+        // 子树。数据已经活链进 owner.generalization（随 virtualOwners 同步），
+        // 但服务端的旧行必须删掉，否则刷新后主树里会多出一份（重复节点）。
+        // 注意用 hasServerNodeRow 而不是 isPersistAcked：preview 加载的主树
+        // 节点不在 ackedUids 里，但它们有服务端行，下潜时必须删行。
+        if (this.hasServerNodeRow(item.uid)) {
+          descendWorks.push(this.descendVirtualNode(item.node, item.uid))
+        }
         return
       }
       moves.push(item)
@@ -8844,10 +9200,20 @@ class Cooperate {
     if (virtualOwners.size) {
       virtualOwners.forEach(owner => this.syncHttpGeneralization(owner))
     }
+    if (descendWorks.length) {
+      Promise.all(descendWorks).catch(err => {
+        console.error('[mind-map] descend virtual node failed', err)
+      })
+    }
+    if (hoistWorks.length) {
+      Promise.all(hoistWorks).catch(err => {
+        console.error('[mind-map] hoist virtual node failed', err)
+      })
+    }
     if (!moves.length) {
       v2Trace('local.move.skip', {
         name,
-        reason: virtualOwners.size ? 'generalization-only' : 'no-nodes'
+        reason: virtualOwners.size || hoistWorks.length ? 'generalization-only' : 'no-nodes'
       })
       return Promise.resolve()
     }
@@ -8974,7 +9340,27 @@ class Cooperate {
   flushHttpReparentChildren(node) {
     if (!this.httpPatchNode || !node) return Promise.resolve()
     const parentUid = node.getData && node.getData('uid')
-    const kids = (node.nodeData && node.nodeData.children) || []
+    const rawKids = (node.nodeData && node.nodeData.children) || []
+    // 概要虚拟子树节点不能单独 reparent（服务端无行，428/404）。
+    // 它们的位置本来就存在 owner.generalization 的 children 顺序里，
+    // 只保留 index 的相对顺序即可 —— 因此过滤后重新按原顺序编号。
+    const kids = rawKids.filter(child => {
+      const uid = child && child.data && child.data.uid
+      return !!uid && !this.isVirtualGeneralizationUid(uid)
+    })
+    if (!kids.length) {
+      // 全是虚拟节点：把顺序写回 owner 的 generalization 即可
+      const owners = new Set()
+      rawKids.forEach(child => {
+        const uid = child && child.data && child.data.uid
+        const renderer = this.mindMap && this.mindMap.renderer
+        const live = uid && renderer && renderer.findNodeByUid && renderer.findNodeByUid(uid)
+        const owner = live && generalizationScopeOwner(live)
+        if (owner) owners.add(owner)
+      })
+      owners.forEach(owner => this.syncHttpGeneralization(owner))
+      return Promise.resolve()
+    }
     if (this.collabV2Adapter && kids.length > 1) {
       return this.submitV2('node.batch', {
         ops: kids.map((child, index) => ({
@@ -9068,6 +9454,15 @@ class Cooperate {
     for (const node of list) {
       const uid = node.getData && node.getData('uid')
       let copied = null
+      // 概要虚拟子树节点：服务端没有行，httpFetchDeepSubtree 必然 404，
+      // 一旦 404 就走进下面的 hydrateDataTree 兜底，对每个虚拟 uid 再拉一次，
+      // 结果整棵复制树被替换成残缺数据 —— 粘贴出来就是一堆重复/空节点。
+      // 它们的全部数据就在本地（owner.generalization），直接按实例复制。
+      if (isGeneralizationScopeNode(node)) {
+        copied = copyNodeTree({}, node, true, true)
+        if (copied) trees.push(copied)
+        continue
+      }
       if (uid && this.httpFetchDeepSubtree) {
         try {
           const result = await this.httpFetchDeepSubtree(uid)
