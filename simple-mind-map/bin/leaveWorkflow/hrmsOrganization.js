@@ -1,6 +1,7 @@
-const ENDPOINT = '/api/method/employee_roster.integrations.approval_directory.resolve_hrbp'
-const HEAD_ENDPOINT = '/api/method/employee_roster.integrations.approval_directory.resolve_department_head'
-const DIRECTORY_ENDPOINT = '/api/method/employee_roster.integrations.approval_directory.resolve_directory'
+const external = require('../hrmsExternalApi')
+
+const ENDPOINT = '/api/v1/hrms/external/directory/hrbp'
+const HEAD_ENDPOINT = '/api/v1/hrms/external/directory/head'
 // 职责/部门反查：只在节点写明前缀时才启用，避免把真实姓名误当职位。
 const DIRECTORY_SPEC = /^(职务|职位|岗位|部门成员|部门人员|部门)[:：](.+)$/
 const DIRECTORY_KIND = {职务:'designation',职位:'designation',岗位:'designation',部门成员:'department',部门人员:'department',部门:'department'}
@@ -14,7 +15,9 @@ function config(env = process.env) {
   const apiSecret = String(env.HRMS_ORG_API_SECRET || '')
   const company = String(env.HRMS_ORG_COMPANY || '').trim()
   const corpId = String(env.HRMS_ORG_CORP_ID || '').trim()
-  return {base,apiKey,apiSecret,company,corpId,ready:!!base && !!company && !!corpId && /^[A-Za-z0-9]{8,128}$/.test(apiKey) && /^[A-Za-z0-9]{8,128}$/.test(apiSecret)}
+  // 新系统走换票（Bearer），不再用 token key:secret；凭据由 hrmsExternalApi 校验，
+  // 这里只要求地址、公司、企业三件套齐全。
+  return {base,apiKey,apiSecret,company,corpId,ready:!!base && !!company && !!corpId}
 }
 // 节点文本可能带「·」「-」等分隔前缀（例如「抄送·总经理」剥掉「抄送」后剩「·总经理」）。
 function clean(value) {
@@ -31,7 +34,7 @@ function role(value) {
   if (DIRECTORY_SPEC.test(text)) return 'directory'
   return ''
 }
-/** 解析「职务：X」「部门成员：X」「职务：VP@季翔」；@ 后面是多人时的姓名限定。 */
+/** 解析「职务：X」「部门成员：人事组」「职务：VP@季翔」；@ 后面是多人时的姓名限定。 */
 function directorySpec(value) {
   const text = clean(value)
   const matched = text.match(DIRECTORY_SPEC)
@@ -44,9 +47,13 @@ function directorySpec(value) {
   if (!query) return null
   return {kind,query,names}
 }
-/** Frappe 把业务错误放在 _server_messages 里，状态码是 417；抽出来给用户看人话。 */
-function frappeMessage(payload) {
+/**
+ * 新系统统一封装 {code, success, msg, data}；错误优先取人话 msg。
+ * 保留老 Frappe 的 _server_messages 解析，过渡期仍可能收到。
+ */
+function apiMessage(payload) {
   try {
+    if (payload && typeof payload.msg === 'string' && payload.msg) return payload.msg
     const raw = payload && payload._server_messages
     if (!raw) return ''
     const first = JSON.parse(raw)[0]
@@ -57,58 +64,34 @@ function frappeMessage(payload) {
     return ''
   }
 }
-async function callDirectory(cfg, spec, options = {}) {
-  const url = new URL(DIRECTORY_ENDPOINT, cfg.base)
-  url.searchParams.set('query', spec.query)
-  url.searchParams.set('kind', spec.kind)
-  url.searchParams.set('company', cfg.company)
-  const response = await (options.fetchImpl || fetch)(url, {
-    method:'GET',redirect:'error',signal:AbortSignal.timeout(5000),
-    headers:{Accept:'application/json',Authorization:`token ${cfg.apiKey}:${cfg.apiSecret}`}
-  })
-  if (!response.ok) {
-    let payload = null
-    try { payload = await response.json() } catch (_) { /* 非 JSON 就走通用提示 */ }
-    throw new Error(frappeMessage(payload) || `人事组织查询失败（HTTP ${response.status}），请检查只读账号和组织权限`)
-  }
-  return await response.json()
-}
 /**
- * 职务/部门反查成员（抄送「总经理」「人事组」这类角色名用）。
- * 返回全部命中成员；是否唯一由调用方判断——审核人必须唯一，抄送可以多个。
+ * 调用 directory 接口。新系统只认员工ID/工号/企微userid，不认中文姓名；
+ * 外部 Token 默认只能查本人（查他人需要 HR 辖区授权，否则返回 403）。
  */
+async function callPerson(pathname, employeeRef, cfg, options = {}) {
+  const response = await external.callApi(pathname, {
+    env: options.env,
+    user: options.user,
+    fetchImpl: options.fetchImpl,
+    searchParams: {company: cfg.company, employee_ref: employeeRef}
+  })
+  const body = response && response.data
+  if (!body || body.success === false)
+    throw new Error(apiMessage(body) || '人事组织查询失败，请检查只读账号和组织权限')
+  if (!body.data) throw new Error('人事组织未返回有效的成员信息')
+  return body.data
+}
 async function resolveDirectory(spec, corpId, options = {}) {
   const cfg = config(options.env)
   if (!cfg.ready) throw new Error('人事组织架构只读接口尚未配置')
   if (cfg.corpId !== corpId) throw new Error('人事组织架构与当前企业不匹配')
   if (!spec || !spec.query) throw new Error('请填写要查询的职务或部门名称')
-  let payload
-  try {
-    payload = await callDirectory(cfg, spec, options)
-  } catch (e) {
-    // auto 是「拿角色名直接去试」，失败时原样抛人事侧文案会让人不知道该写什么。
-    // 补一句可操作的指引：职位名要以人事系统为准，可用「职务：正式名@姓名」精确指定。
-    if (spec.kind === 'auto')
-      throw new Error(
-        `${e.message}；若「${spec.query}」是职位，请按人事系统的正式职位名写成「职务：正式职位名${spec.names&&spec.names.length?'@'+spec.names.join('、'):'@姓名'}」，` +
-        `若是部门请写成「部门成员：部门简称」`
-      )
-    throw e
-  }
-  const result = payload && payload.message
-  if (!result || result.company !== cfg.company || !Array.isArray(result.members))
-    throw new Error('人事组织未返回有效的成员列表')
-  let members = result.members.filter(
-    m => m && m.status === 'Active' && m.name && /^[A-Za-z0-9_.@-]{1,64}$/.test(m.wecomUserId || '')
+  // 新系统（YR-HRMS）不提供「按职务/部门反查成员」的对外端点：
+  // README 明确没有可指定任意公司的公开目录端点。给出可操作的替代写法。
+  throw new Error(
+    `人事系统不再提供按「${spec.query}」反查成员的接口；` +
+    `请把该节点改成具体人员，或写成「部门负责人」「对应HRBP」由组织架构解析`
   )
-  if (!members.length) throw new Error(`「${spec.query}」未找到在职且绑定企微账号的成员`)
-  if (spec.names && spec.names.length) {
-    const wanted = new Set(spec.names)
-    members = members.filter(m => wanted.has(m.name))
-    if (!members.length)
-      throw new Error(`「${spec.query}」里没有登记为 ${spec.names.join('、')} 的成员`)
-  }
-  return {company:result.company,query:result.query,kind:result.kind,members}
 }
 async function resolveHrbp(employeeRef, corpId, options = {}) {
   const cfg = config(options.env)
@@ -116,16 +99,7 @@ async function resolveHrbp(employeeRef, corpId, options = {}) {
   if (cfg.corpId !== corpId) throw new Error('人事组织架构与当前企业不匹配')
   const ref = String(employeeRef || '').trim()
   if (!ref || ref.length > 160) throw new Error('请先在提交要求中填写唯一的员工姓名或员工编号')
-  const url = new URL(ENDPOINT,cfg.base)
-  url.searchParams.set('employee_ref',ref)
-  url.searchParams.set('company',cfg.company)
-  const response = await (options.fetchImpl || fetch)(url, {
-    method:'GET',redirect:'error',signal:AbortSignal.timeout(5000),
-    headers:{Accept:'application/json',Authorization:`token ${cfg.apiKey}:${cfg.apiSecret}`}
-  })
-  if (!response.ok) throw new Error(`人事组织查询失败（HTTP ${response.status}），请检查只读账号和组织权限`)
-  const payload = await response.json()
-  const result = payload && payload.message
+  const result = await callPerson(ENDPOINT, ref, cfg, options)
   if (!result || result.company !== cfg.company || !result.employee || !result.department ||
       !result.hrbp || result.hrbp.status !== 'Active' || !result.hrbp.name ||
       !/^[A-Za-z0-9_.@-]{1,64}$/.test(result.hrbp.wecomUserId || ''))
@@ -140,16 +114,7 @@ async function resolveDepartmentHead(employeeRef, corpId, options = {}) {
   if (cfg.corpId !== corpId) throw new Error('人事组织架构与当前企业不匹配')
   const ref = String(employeeRef || '').trim()
   if (!ref || ref.length > 160) throw new Error('请先在提交要求中填写唯一的员工姓名或员工编号')
-  const url = new URL(HEAD_ENDPOINT,cfg.base)
-  url.searchParams.set('employee_ref',ref)
-  url.searchParams.set('company',cfg.company)
-  const response = await (options.fetchImpl || fetch)(url, {
-    method:'GET',redirect:'error',signal:AbortSignal.timeout(5000),
-    headers:{Accept:'application/json',Authorization:`token ${cfg.apiKey}:${cfg.apiSecret}`}
-  })
-  if (!response.ok) throw new Error(`人事组织查询失败（HTTP ${response.status}），请检查只读账号和组织权限`)
-  const payload = await response.json()
-  const result = payload && payload.message
+  const result = await callPerson(HEAD_ENDPOINT, ref, cfg, options)
   const head = result && result.head
   if (!result || result.company !== cfg.company || !result.employee || !result.department ||
       !head || head.status !== 'Active' || !head.name ||

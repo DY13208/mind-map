@@ -416,8 +416,11 @@ async function organizationMember(db,tpl,who,fields,dynamicRole){
     const local=(await db.query('select wecom_userid from wecom_users where corp_id=$1 and user_id=$2',[who.corp_id,employeeRef])).rows[0]
     employeeRef=local&&local.wecom_userid
   }
-  if(!employeeRef){const me=(await db.query('select wecom_userid from wecom_users where corp_id=$1 and user_id=$2',[who.corp_id,who.user_id])).rows[0];employeeRef=me&&me.wecom_userid}
-  const assignment=dynamicRole==='head'?await organization.resolveDepartmentHead(employeeRef,who.corp_id):await organization.resolveHrbp(employeeRef,who.corp_id)
+  // 换票需要「当前登录人」的企微账号：即使 employeeRef 已由表单给出也要查一次。
+  const me=(await db.query('select wecom_userid from wecom_users where corp_id=$1 and user_id=$2',[who.corp_id,who.user_id])).rows[0]
+  if(!employeeRef)employeeRef=me&&me.wecom_userid
+  const caller={id:who.user_id,wecomUserId:me&&me.wecom_userid}
+  const assignment=dynamicRole==='head'?await organization.resolveDepartmentHead(employeeRef,who.corp_id,{user:caller}):await organization.resolveHrbp(employeeRef,who.corp_id,{user:caller})
   const person=dynamicRole==='head'?assignment.head:assignment.hrbp
   const member=await ensureLocalMember(db,who,person)
   return {account:member.user_id,name:member.name,source:'人事组织架构',employee:assignment.employee,department:assignment.department,company:assignment.company}
