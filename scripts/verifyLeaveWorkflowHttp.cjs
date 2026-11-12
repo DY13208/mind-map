@@ -6,6 +6,7 @@ const http = require('node:http'),
   path = require('node:path')
 const { Client } = require('../simple-mind-map/node_modules/pg')
 const core = require('../simple-mind-map/bin/leaveWorkflow/core')
+const bridge = require('../simple-mind-map/bin/leaveWorkflow/hrmsBridge')
 const source = {
   roomKey: 'room-yk3tz4aj',
   nodeUid: '1f580e83-3ced-43da-9f52-1e72f68992e0'
@@ -42,7 +43,8 @@ async function main() {
   const port = socket.address().port
   await new Promise(r => socket.close(r))
   const base = 'http://127.0.0.1:' + port,
-    sharedToken = randomBytes(32).toString('hex')
+    sharedToken = randomBytes(32).toString('hex'),
+    bridgeKey = randomBytes(32).toString('hex')
   const child = spawn(
     process.execPath,
     ['simple-mind-map/bin/collabServer.js'],
@@ -74,6 +76,9 @@ async function main() {
         WORKBUDDY_AUTH_ENABLED: 'false',
         KNOWLEDGE_COMPILER_ENABLED: 'false',
         HRMS_SYNC_ENABLED: '0',
+        HRMS_API_BASE: 'http://127.0.0.1:1',
+        WCPD_HRMS_APPROVAL_BRIDGE_KEY: bridgeKey,
+        WCPD_HRMS_APPROVAL_BRIDGE_CORP_ID: 'wwleaverequesttest',
         HRMS_AGENT_WRITES_ENABLED: 'true', // Synthetic page-confirmation tests only.
         WCPD_AI_REVIEW_ENABLED: '0',
         TENCENT_COS_SECRET_ID: '',
@@ -541,7 +546,7 @@ async function main() {
     registerApprovalTools(
       {
         tool(name, _description, schema, handler) {
-          check(name, 'approval_request')
+          if (name !== 'approval_request') return
           toolSchema = z.object(schema)
           toolHandler = handler
         }
@@ -625,18 +630,20 @@ async function main() {
     })
     check(submitted.status, 'pending')
     g = await item('manager', '/api/workflow-requests/' + g.id)
-    g = await item(
-      'manager',
-      '/api/workflow-requests/' + g.id + '/decide',
-      'POST',
-      {
-        expectedRevision: g.revision,
-        operationId: randomUUID(),
-        decision: 'approve',
-        reason: '隔离测试：已按渠道模板核对全部要点',
-        checkedCriteria: g.steps[0].criteria.map(c => c.uid)
-      }
-    )
+    const remoteDecision = {
+      corpId: 'wwleaverequesttest', actor: 'manager', requestId: g.id, step: 0, revision: g.revision,
+      operationId: randomUUID(), decision: 'approve',
+      reason: '隔离测试：已按渠道模板核对全部要点',
+      checkedCriteria: g.steps[0].criteria.map(c => c.uid)
+    }
+    const decideFromHrms = envelope => fetch(base + '/api/workflow-hrms-bridge/decision', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(envelope)
+    })
+    check((await decideFromHrms(remoteDecision)).status, 403, 'unsigned callbacks are rejected')
+    const verified = await decideFromHrms(bridge.sign(bridgeKey, 'decision', remoteDecision))
+    check(verified.status, 200, 'valid service callback does not require a browser session')
+    check((await verified.json()).revision, g.revision + 1)
+    g = await item('manager', '/api/workflow-requests/' + g.id)
     check(g.status, 'approved')
     check(
       (await item('applicant', '/api/workflow-requests/' + g.id)).history.some(

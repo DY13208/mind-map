@@ -22,6 +22,10 @@ function startWorker(pool, writer) {
 async function handle(req, res, { url, db, writer, readBody, sendJson }) {
   if (!/^\/api\/(?:leave|workflow)-/.test(url.pathname)) return false
   const run = startWorker(db, writer)
+  if (await require('./hrmsBridge').handle(req, res, { url, db, readBody, sendJson })) {
+    if (url.pathname.endsWith('/decision') && res.statusCode === 200) setImmediate(run)
+    return true
+  }
   try {
     const genericEntry = url.pathname.startsWith('/api/workflow-')
     const path = url.pathname.replace('/api/workflow-', '/api/leave-')

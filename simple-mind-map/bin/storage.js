@@ -1889,6 +1889,7 @@ async function initSchemaOnce() {
   await require('./leaveWorkflow/service').initSchema(pool)
   await require('./hrmsAgent/service').initSchema(pool)
   require('./leaveWorkflow/hrmsSync').startWorker(pool)
+  require('./leaveWorkflow/hrmsBridge').startWorker(pool)
   // 「@我的」提及索引 / 已读状态（幂等建表，新表建索引很快）
   await require('./commentMentions').initSchema(pool)
   const collabV2Schema = require('./collabV2/schema')
