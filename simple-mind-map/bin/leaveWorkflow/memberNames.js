@@ -1,7 +1,9 @@
-// Match a complete Chinese name with an optional English display-name suffix.
+// Match a complete Chinese name with an optional English suffix and trailing emoji.
 // Never use substring matching; multiple directory matches must be disambiguated.
 function chineseName(value){
- const match=String(value||'').trim().match(/^([\p{Script=Han}·]{2,})(?:\s*[A-Za-z][A-Za-z0-9 ._-]*|\s*[（(][A-Za-z][A-Za-z0-9 ._-]*[）)])?$/u)
+ const text=String(value||'').trim()
+ const withoutEmoji=text.replace(/(?:[\p{Extended_Pictographic}\p{Emoji_Modifier}\p{Regional_Indicator}\uFE0F\u200D]\s*)+$/u,'').trimEnd()
+ const match=withoutEmoji.match(/^([\p{Script=Han}·]{2,})(?:\s*[A-Za-z][A-Za-z0-9 ._-]*|\s*[（(][A-Za-z][A-Za-z0-9 ._-]*[）)])?$/u)
  return match?match[1]:''
 }
 async function findMembers(db,corp,name){

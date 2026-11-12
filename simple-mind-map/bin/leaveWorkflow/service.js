@@ -572,7 +572,7 @@ async function routing(db, tpl, who, fields = {}) {
   for (const s of steps) {
     s.assigneeName =
       (users.find(u => u.user_id === s.assigneeId) || {}).name || ''
-    if (s.assigneeId === who.user_id)
+    if (tpl.kind !== 'generic' && s.assigneeId === who.user_id)
       missing.push(`${s.role}与申请人相同，须在脑图配置其他审核人`)
   }
   return { steps, cc: [...new Set(cc)], missing, resolved }
