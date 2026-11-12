@@ -23,6 +23,80 @@ test('only Agent applications have synchronized approval events', () => {
   assert.equal(bridge.isAgent({ template: {}, report: {} }), false)
 })
 
+test('outbox sends the recorded AI decision to the assigned reviewer separately from CC', async () => {
+  let payload
+  const row = {
+    id: 'a0000000-0000-4000-8000-000000000001',
+    revision: 2, round: 1, status: 'approved', corp_id: 'corp', requester_id: 'requester',
+    template: { agentInput: true, fields: [] }, fields: {}, report: {},
+    steps: [{ assigneeId: 'reviewer', role: '总经理', decidedBy: 'ai-review',
+      decision: 'approve', reason: '符合已发布规则' }]
+  }
+  const db = { async query(sql, args) {
+    if (sql.includes('wecom_users')) return {
+      rows: args[1].map(id => ({ user_id: id, wecom_userid: 'wecom-' + id }))
+    }
+    payload = args[3]
+    return { rows: [] }
+  } }
+  await bridge.enqueue(db, row, ['requester', 'cc'], 'approved', {}, { enabled: true, corp: 'corp' })
+  assert.deepEqual(payload.recipients, ['wecom-requester', 'wecom-cc'])
+  assert.deepEqual(payload.automaticReviews, [
+    { index: 0, assignee: 'wecom-reviewer', role: '总经理', decision: 'approve', reason: '符合已发布规则' }
+  ])
+})
+
+test('signed timeline returns recorded rules only for participants in the mirrored round', async t => {
+  const env = {
+    HRMS_API_BASE: 'http://127.0.0.1:8080',
+    WCPD_HRMS_APPROVAL_BRIDGE_KEY: key,
+    WCPD_HRMS_APPROVAL_BRIDGE_CORP_ID: 'test-corp'
+  }
+  const previous = Object.fromEntries(Object.keys(env).map(name => [name, process.env[name]]))
+  Object.assign(process.env, env)
+  t.after(() => {
+    for (const [name, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[name]
+      else process.env[name] = value
+    }
+  })
+  const input = { requestId: randomUUID(), round: 1, revision: 2, corpId: 'test-corp' }
+  const audit = [{ actor_id: 'applicant', action: 'submit', detail: {
+    automaticDecision: { decision: 'approve', rule: { text: '发起后全部流程默认同意' } }
+  } }]
+  const people = [{ account: 'applicant', name: '申请人' }]
+  const db = { async query(sql, args) {
+    if (sql.includes('wecom_userid=$2')) return { rows: [{ user_id: args[1] }] }
+    if (sql.includes('from leave_requests')) return { rows: [{
+      requester_id: 'applicant', template: { agentDefinition: { version: '1' } },
+      status: 'approved', round: 1, revision: 2, cc: ['cc'],
+      steps: [{ assigneeId: 'reviewer', decidedBy: 'ai-review', decision: 'approve' }]
+    }] }
+    if (sql.includes('from leave_events')) {
+      assert.match(sql, /detail - 'snapshot'/)
+      return { rows: args[2] === '1' ? audit : [] }
+    }
+    assert.match(sql, /from wecom_users/)
+    return { rows: people }
+  } }
+  async function read(actor, overrides = {}, direction = 'timeline') {
+    let response
+    const handled = await bridge.handle({ method: 'POST' }, {}, {
+      url: { pathname: '/api/workflow-hrms-bridge/timeline' }, db,
+      readBody: async () => bridge.sign(key, direction, { ...input, actor, ...overrides }),
+      sendJson: (_res, status, body) => { response = { status, body } }
+    })
+    assert.equal(handled, true)
+    return response
+  }
+  assert.deepEqual(await read('cc'), { status: 200, body: { ok: true, data: { audit, people } } })
+  assert.equal((await read('reviewer')).status, 200)
+  assert.equal((await read('other')).status, 403)
+  assert.equal((await read('applicant', { round: 2 })).status, 403)
+  assert.equal((await read('applicant', { revision: 3 })).status, 403)
+  assert.equal((await read('cc', {}, 'decision')).status, 403)
+})
+
 test('signed HRMS decision advances the real WCPD transaction and queues the next notice', {
   skip: !process.env.APPROVAL_BRIDGE_TEST_DB_URL
 }, async () => {

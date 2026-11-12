@@ -1,12 +1,12 @@
 const { createHmac, timingSafeEqual } = require('node:crypto')
 
-const directions = new Set(['snapshot', 'decision', 'attachment'])
+const directions = new Set(['snapshot', 'decision', 'attachment', 'timeline'])
 const route = '/api/workflow-hrms-bridge'
 const maxClockSkew = 300
 const workers = new WeakSet()
 
 function isCallback(method, pathname) {
-  return method === 'POST' && [route + '/decision', route + '/attachment'].includes(pathname)
+  return method === 'POST' && ['/decision', '/attachment', '/timeline'].some(path => pathname === route + path)
 }
 
 function denied(message = '人事审批同步签名无效') {
@@ -63,7 +63,12 @@ async function initSchema(db) {
 async function enqueue(db, row, recipients, kind, detail = {}, cfg = config()) {
   if (!cfg.enabled || row.corp_id !== cfg.corp || !isAgent(row)) return
   const step = row.status === 'pending' ? row.steps[row.current_step] : null
-  const ids = [...new Set([row.requester_id, step?.assigneeId, ...recipients].filter(Boolean))]
+  const automaticSteps = detail.fromReturned ? [] : row.steps
+    .map((step, index) => ({ ...step, index }))
+    .filter(step => step.decidedBy === 'ai-review' && ['approve', 'reject'].includes(step.decision))
+  const ids = [...new Set([
+    row.requester_id, step?.assigneeId, ...recipients, ...automaticSteps.map(step => step.assigneeId)
+  ].filter(Boolean))]
   const { rows } = await db.query(
     'select user_id,wecom_userid from wecom_users where corp_id=$1 and user_id=any($2::text[])',
     [row.corp_id, ids]
@@ -87,6 +92,15 @@ async function enqueue(db, row, recipients, kind, detail = {}, cfg = config()) {
     kind,
     requester: accounts.get(row.requester_id) || '',
     recipients: [...new Set(recipients.filter(Boolean))].map(id => accounts.get(id) || ''),
+    ...(automaticSteps.length ? {
+      automaticReviews: automaticSteps.map(step => ({
+        index: step.index,
+        assignee: accounts.get(step.assigneeId) || '',
+        role: step.role.slice(0, 140),
+        decision: step.decision,
+        reason: step.reason || '自动审批未记录具体依据'
+      }))
+    } : {}),
     title: submitted.template.title || '请假申请',
     fields: (submitted.template.fields || []).filter(field => field.type !== 'attachment').map(field => ({
       label: field.label, value: submitted.fields[field.key] ?? ''
@@ -166,6 +180,39 @@ function startWorker(pool) {
   setImmediate(tick)
 }
 
+async function timeline(db, input, actor) {
+  if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(input.requestId) ||
+      !Number.isSafeInteger(input.round) || input.round < 1 ||
+      !Number.isSafeInteger(input.revision) || input.revision < 1) throw denied()
+  const { rows: [request] } = await db.query(`
+    select requester_id, template, report, steps, cc, round, revision, current_step, status
+    from leave_requests where id=$1 and corp_id=$2`, [input.requestId, input.corpId])
+  if (!request || !isAgent(request) || input.revision > request.revision) throw denied()
+
+  const { rows: audit } = await db.query(`
+    select actor_id, action, detail - 'snapshot' as detail, created_at
+    from leave_events where request_id=$1 and revision<=$2 and detail->>'round'=$3
+      and action in ('submit','decide','withdraw')
+    order by id`, [input.requestId, input.revision, String(input.round)])
+  if (!audit.some(event => event.action === 'submit')) throw denied()
+  const isCurrent = request.round === input.round && request.revision === input.revision
+  const activeAssignee = isCurrent && request.status === 'pending'
+    ? request.steps[request.current_step]?.assigneeId : null
+  const automaticReviewer = request.round === input.round && request.steps.some(step =>
+    step.assigneeId === actor && step.decidedBy === 'ai-review' &&
+    ['approve', 'reject'].includes(step.decision))
+  if (actor !== request.requester_id && actor !== activeAssignee &&
+      !automaticReviewer &&
+      !(isCurrent && request.status === 'approved' && request.cc.includes(actor)) &&
+      !audit.some(event => event.action === 'decide' && event.actor_id === actor)) throw denied()
+
+  const accounts = [...new Set(audit.map(event => event.actor_id))]
+  const { rows: people } = await db.query(`
+    select user_id as account,name from wecom_users where corp_id=$1 and user_id=any($2::text[])
+  `, [input.corpId, accounts])
+  return { audit, people }
+}
+
 async function handle(req, res, { url, db, readBody, sendJson }) {
   if (!isCallback(req.method, url.pathname)) return false
   try {
@@ -178,6 +225,10 @@ async function handle(req, res, { url, db, readBody, sendJson }) {
       'select user_id from wecom_users where corp_id=$1 and wecom_userid=$2', [cfg.corp, input.actor]
     )
     if (rows.length !== 1) throw denied('无法匹配当前审批人的企微账号')
+    if (direction === 'timeline') {
+      sendJson(res, 200, { ok: true, data: await timeline(db, input, rows[0].user_id) })
+      return true
+    }
     const actorReq = { ...req, authUser: { id: rows[0].user_id, wecomUserId: input.actor }, verifiedMcpSource: null }
     const service = require('./service')
     if (direction === 'decision') {
