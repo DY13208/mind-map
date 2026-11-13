@@ -5,7 +5,7 @@
 // and was holding the room lock longer by blocking that event loop.
 require('./loadEnv')
 
-const { initSchema, getPool, operationEvents } = require('./storage')
+const { getPool, operationEvents } = require('./storage')
 const {
   createEventBus,
   createPostgresBus,
@@ -19,7 +19,6 @@ function enabled(name, fallback) {
 }
 
 async function main() {
-  await initSchema()
   let bus = createEventBus({ pool: getPool() })
   try {
     if (typeof bus.start === 'function') await bus.start()

@@ -137,17 +137,6 @@ fi
 if flag_on "${WIKI_COMPILER_SYNC_ENABLED:-true}"; then
   run_wiki=true
 fi
-if [ "$run_knowledge" = true ] || [ "$run_wiki" = true ]; then
-  supervise compilers /tmp/compilers.pid env \
-    KNOWLEDGE_COMPILER_ENABLED="$run_knowledge" \
-    WIKI_COMPILER_SYNC_ENABLED="$run_wiki" \
-    node /app/simple-mind-map/bin/compilerProcess.js &
-  compiler_loop=$!
-else
-  compiler_loop=
-  echo "[gateway] background compilers disabled"
-fi
-
 supervise collab /tmp/collab.pid env \
   NODE_OPTIONS=--max-old-space-size=3072 \
   KNOWLEDGE_COMPILER_ENABLED=false \
@@ -178,6 +167,18 @@ if [ "$i" -ge 120 ]; then
 fi
 
 echo "[gateway] collab is ready"
+# Collab owns the shared schema. Compilers start after its health check passes.
+if [ "$run_knowledge" = true ] || [ "$run_wiki" = true ]; then
+  supervise compilers /tmp/compilers.pid env \
+    KNOWLEDGE_COMPILER_ENABLED="$run_knowledge" \
+    WIKI_COMPILER_SYNC_ENABLED="$run_wiki" \
+    node /app/simple-mind-map/bin/compilerProcess.js &
+  compiler_loop=$!
+else
+  compiler_loop=
+  echo "[gateway] background compilers disabled"
+fi
+
 supervise mcp /tmp/mcp.pid node /app/simple-mind-map/bin/mcpServer.mjs --http &
 mcp_loop=$!
 supervise ai /tmp/ai.pid node /app/web/scripts/ai.js &

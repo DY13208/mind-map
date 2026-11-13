@@ -398,6 +398,8 @@ Promise.all([initSchema(), initAuth()])
       }
     }
     server.listen(port, host, () => {
+      require('./leaveWorkflow/hrmsSync').startWorker(getPool())
+      require('./leaveWorkflow/hrmsBridge').startWorker(getPool())
       require('./localKnowledge/http').checkConfiguration().catch(error => console.warn('[local-knowledge]', error.message))
       console.log(`Collab server running at ws://${host}:${port}`)
       console.log(`Collab HTTP API: http://${host}:${port}/api/files`)
