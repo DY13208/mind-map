@@ -13,7 +13,7 @@ const context={module:{exports:{}},collabGeneralization:gen,generalizationSignat
 vm.runInNewContext(`class Insert {${methods}};module.exports=Insert`,context)
 function deferred(){let resolve;const promise=new Promise(r=>resolve=r);return{promise,resolve}}
 async function test(batch){
- const owner=new context.module.exports(),started=deferred(),ack=deferred(),sent=[],data=[{text:'default A',style:{color:'red'}},{text:'default B'}]
+ const owner=new context.module.exports(),started=deferred(),ack=deferred(),sent=[],data=[{text:'<p><strong>default A</strong></p>',richText:true,style:{color:'red'}},{text:'default B'}]
  Object.assign(owner,{collabV2Adapter:{},pendingUids:new Set(),acked:new Set(),lastPushed:{},recentPushed:new Map(),scheduled:0,
   isPersistAcked(uid){return this.acked.has(uid)},isTombstonedUid:()=>false,isGeneralizationUid:()=>false,flushHttpTextNow:async()=>false,
   mindMap:{renderer:{findNodeByUid(uid){const i=Number(uid.slice(1));return{getData:k=>k?data[i][k]:data[i]}}}},
@@ -23,18 +23,20 @@ async function test(batch){
   httpAddNode:async payload=>{sent.push(JSON.parse(JSON.stringify(payload)));started.resolve();await ack.promise},
   submitV2:async(type,payload)=>{sent.push(JSON.parse(JSON.stringify(payload)));started.resolve();await ack.promise;return{opId:'qa-op'}}
  })
- const rows=data.slice(0,batch?2:1).map((d,i)=>({uid:'n'+i,parent:'root',index:i+1,anchorUid:i?'n0':'existing',text:d.text,data:d}))
+ const rows=data.slice(0,batch?2:1).map((d,i)=>({uid:'n'+i,parent:'root',index:i+1,anchorUid:i?'n0':'existing',text:i?'default B':'default A',data:d}))
  const pending=owner.flushHttpInsertNow({fromCommand:true,preRecords:rows})
  await started.promise
  data[0].text='Typed before ACK';data[0].style.color='blue';if(batch)data[1].text='Second typed before ACK'
  ack.resolve();await pending
- assert.equal(owner.lastPushed.n0.text,'default A','ACK baseline must contain sent text')
+ assert.equal(owner.lastPushed.n0.text,'<p><strong>default A</strong></p>','ACK baseline must contain sent rich text')
  assert.equal(owner.lastPushed.n0.style.color,'red','ACK must not capture a live nested style mutation')
  assert(owner._pendingTextUids.has('n0'),'newer text must remain queued')
  if(batch){assert.equal(owner.lastPushed.n1.text,'default B');assert(owner._pendingTextUids.has('n1'))}
  assert.equal(owner.scheduled,batch?2:1)
  const payloads=batch?sent[0].ops.map(op=>op.payload):sent
- assert.equal(payloads[0].data.text,'default A')
+ assert.equal(payloads[0].text,'<p><strong>default A</strong></p>')
+ assert.equal(payloads[0].data.text,payloads[0].text)
+ assert.equal(payloads[0].data.richText,true)
  assert.deepEqual(payloads.map(payload=>[payload.anchorUid,payload.index,payload.allowStaleAnchorFallback]),
   batch?[['existing',1,true],['n0',2,true]]:[['existing',1,true]])
  console.log('PASS',batch?'batch inserts':'single insert','preserve text typed before ACK')

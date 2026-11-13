@@ -8887,10 +8887,18 @@ class Cooperate {
     })
     // Records may reference live node data. Freeze exactly what this insert
     // will send before any await, including top-level text/note overrides.
-    records = records.map(row => ({
-      ...row,
-      data: collabGeneralization.snapshotValue({ ...(row.data || {}), text: row.text, note: row.note || '' })
-    }))
+    records = records.map(row => {
+      // V2 must commit the same rich text the editor already sees. Sending
+      // plain text first makes the background sync rewrite it after paste.
+      const text = this.collabV2Adapter && row.data && row.data.text != null
+        ? String(row.data.text)
+        : row.text
+      return {
+        ...row,
+        text,
+        data: collabGeneralization.snapshotValue({ ...row.data, text, note: row.note || '' })
+      }
+    })
     if (records.length) {
       const flushed = await this.flushHttpTextNow()
       if (flushed && this.httpFlushHistoryVersion) {
