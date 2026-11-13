@@ -1,7 +1,7 @@
 const { createHash, randomUUID } = require('node:crypto')
 const { assertRoomAccess, getAccess, roleAllows } = require('./roomAcl')
 const { identity, subtree } = require('./leaveWorkflow/service')
-const { plain } = require('./leaveWorkflow/core')
+const { plain, label } = require('./leaveWorkflow/core')
 const { marker } = require('./leaveWorkflow/workflowCore')
 const { createShortNodeLinks } = require('./shortNodeLinks')
 const { resolveRoomRef } = require('./roomNodes')
@@ -104,33 +104,59 @@ function describe(nodes, roomId, nodeId, routes) {
 
 function buildSupplementDraft({ snapshot, missing, version }) {
   const root = snapshot.find(node => node.parent === null)
-  const title = ruleText(root.data.text).slice(0, 100)
-  const sections = snapshot.filter(node =>
-    /^(提交要求|申请字段|必要条件|申请资料)[：:]?$/.test(ruleText(node.data.text)))
-  const sectionIds = new Set(sections.map(node => node.uid))
-  const lines = snapshot.flatMap(node => [ruleText(node.data.text), ruleText(node.data.note)].join('\n').split('\n'))
-  const sources = [...new Set(snapshot.filter(node => sectionIds.has(node.parent))
-    .map(node => ruleText(node.data.text).slice(0, 80)).filter(Boolean))].slice(0, 8)
-  const resumeBirthYear = sources.some(text => /简历/.test(text)) &&
-    lines.some(line => /简历.*(?:出生年份|\d{4}年.{0,5}出生)/.test(line))
-  const handling = lines.find(line =>
-    /^(若|如|当|如果)?(?:必需|必要|所需|关键)?(?:数据|资料|字段|附件|简历)(?:缺失|缺少|未提供|无法读取|不完整)/.test(line) &&
-    /补齐|补填|人工|退回|暂停|跳过/.test(line))
-  const entries = {
-    [fields[0]]: {
-      text: title ? `适用于提交至「${title}」的申请。` : '',
-      review: true
-    },
-    [fields[1]]: {
-      text: sources.length ? `读取申请中提交的${sources.join('、')}。${resumeBirthYear ? '从简历附件识别出生年份。' : ''}` : '',
-      review: !sources.length
-    },
-    [fields[2]]: {
-      text: handling ? handling.slice(0, 500) : '必需资料缺失、无法读取或关键字段无法确认时，转人工核对并补齐资料。',
-      review: !handling
-    }
+  const children = new Map()
+  for (const node of snapshot) {
+    if (!children.has(node.parent)) children.set(node.parent, [])
+    children.get(node.parent).push(node)
   }
-  return { version, fields: fields.filter(field => missing.includes(field)).map(field => ({ field, ...entries[field] })) }
+  const under = node => children.get(node.uid) || []
+  const branch = node => [node, ...under(node).flatMap(branch)]
+  const name = node => label(ruleText(node.data.text).split(/[:：\n]/, 1)[0])
+  const readLines = node => [ruleText(node.data.text), ruleText(node.data.note)]
+    .flatMap(text => text.split('\n')).map(line => line.trim()).filter(Boolean)
+  const top = under(root)
+  const sections = top.filter(node => /^(提交要求|申请字段|必要条件|申请资料)$/.test(name(node)))
+  const inputNames = [...new Set(sections.flatMap(under).map(name).filter(Boolean))]
+  const isDecision = node => /^(默认同意|以下情况拒绝|须确认|审核要点|审批条件|自动判断规则)$/.test(name(node))
+  const workflow = top.filter(node => name(node) === '审批流程')
+  const roles = [...top, ...workflow.flatMap(under)].filter(node =>
+    !sections.includes(node) && !workflow.includes(node) && !isDecision(node) && under(node).some(isDecision))
+  const decisionGroups = [...top.filter(isDecision), ...roles.flatMap(node => under(node).filter(isDecision))]
+  const decisionLines = decisionGroups.flatMap(branch).flatMap(readLines)
+  const standaloneLines = top.filter(node => !sections.includes(node) && !roles.includes(node) &&
+    !fields.includes(name(node)) && !marker(node.data.text)).flatMap(readLines)
+  const inputPattern = inputNames.sort((a, b) => b.length - a.length)
+    .map(text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')
+  const clauses = decisionGroups.length ? decisionLines : standaloneLines
+  const sources = new Set(inputPattern ? clauses.join('\n').match(new RegExp(inputPattern, 'g')) : [])
+  const resumeFields = inputNames.filter(text => /简历/.test(text))
+  const resumeBirthYear = !decisionGroups.length && resumeFields.length === 1 &&
+    clauses.some(line => /简历.*(?:出生年份|\d{4}年.{0,5}出生)/.test(line))
+  if (resumeBirthYear) sources.add(resumeFields[0])
+
+  const missingSubject = `(?:必需|必要|所需|关键)?(?:${[inputPattern, '数据', '资料', '字段', '附件', '简历'].filter(Boolean).join('|')})`
+  const missingCondition = new RegExp(
+    `^(?:如果|若|如|当)?(?:${missingSubject}(?:缺失|缺少|未填写|未提供|无法读取|无法确认|不完整)|(?:缺少|未填写|未提供|无法读取|无法确认)${missingSubject})`
+  )
+  const handling = [...new Set([...readLines(root), ...standaloneLines, ...decisionLines].filter(line => {
+    const condition = line.match(missingCondition)
+    return condition && /补齐|补填|人工|退回|暂停|跳过|拒绝|驳回/.test(line.slice(condition[0].length))
+  }))].join('\n')
+  const title = label(ruleText(root.data.text))
+  const roleNames = [...new Set(roles.map(name).filter(Boolean))].map(role => `「${role}」`).join('、')
+  const scope = title ? `适用于「${title}」申请${roleNames ? `的${roleNames}审批环节` : ''}。` : ''
+  const sourceNames = [...sources].map(source => `「${source}」`).join('、')
+  const sourceText = sourceNames
+    ? `读取申请中提交的${sourceNames}。${resumeBirthYear ? '从简历附件识别出生年份。' : ''}`
+    : ''
+  const entries = { [fields[0]]: scope, [fields[1]]: sourceText, [fields[2]]: handling }
+  return {
+    version,
+    fields: fields.filter(field => missing.includes(field)).map(field => {
+      const text = entries[field].length <= 500 ? entries[field] : ''
+      return { field, text, review: !text }
+    })
+  }
 }
 
 async function handle(req, res, { url, db, readBody, sendJson }) {

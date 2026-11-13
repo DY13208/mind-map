@@ -353,29 +353,40 @@ async function publish(pool, req, body) {
     return publication(db, tpl, who)
   })
 }
+async function definitionState(db, req, who, room, nodeUid) {
+  try {
+    const tpl = await template(db, req, { roomKey: room, nodeUid }, false)
+    const pub = await publication(db, tpl, who)
+    return pub.agent_mode
+      ? { nodeUid, title: tpl.title, version: String(pub.id), state: pub.state }
+      : null
+  } catch (error) {
+    if (!['SUBMISSION_REQUIREMENTS_REQUIRED', 'TEMPLATE_NOT_FOUND', 'TEMPLATE_LIMIT',
+      'TEMPLATE_CYCLE', 'TEMPLATE_NOT_REGISTERED'].includes(error.code)) throw error
+    await db.query(
+      'update leave_policy_publications set invalidated_at=now() where corp_id=$1 and source_room=$2 and source_uid=$3 and agent_mode and invalidated_at is null',
+      [who.corp_id, room, nodeUid]
+    )
+    return { nodeUid, state: 'draft' }
+  }
+}
 async function definitions(db,req,room,after='') {
   const who=await identity(db,req)
   await acl.assertRoomAccess(db,{...req,forceAcl:true},room,'view')
   const candidates=(await db.query('select distinct source_uid from leave_policy_publications where corp_id=$1 and source_room=$2 and agent_mode and source_uid>$3 order by source_uid limit 21',[who.corp_id,room,after])).rows
   const list=[]
   for(const row of candidates.slice(0,20)) {
-    try {
-      const tpl=await template(db,req,{roomKey:room,nodeUid:row.source_uid},false)
-      const pub=await publication(db,tpl,who)
-      if(pub.agent_mode) list.push({nodeUid:row.source_uid,title:tpl.title,version:String(pub.id),state:pub.state})
-    }catch(e){
-      if (!['SUBMISSION_REQUIREMENTS_REQUIRED','TEMPLATE_NOT_FOUND','TEMPLATE_LIMIT','TEMPLATE_CYCLE','TEMPLATE_NOT_REGISTERED'].includes(e.code)) throw e
-      await db.query('update leave_policy_publications set invalidated_at=coalesce(invalidated_at,now()) where corp_id=$1 and source_room=$2 and source_uid=$3 and agent_mode',[who.corp_id,room,row.source_uid])
-      list.push({nodeUid:row.source_uid,state:'draft'})
-    }
+    const entry = await definitionState(db, req, who, room, row.source_uid)
+    if (entry) list.push(entry)
   }
   return {list,hasMore:candidates.length>20,nextCursor:candidates.length>20?candidates[19].source_uid:null}
 }
 async function invalidateDefinition(db,req,body) {
   const who=await identity(db,req)
   await acl.assertRoomAccess(db,{...req,forceAcl:true},body.roomKey,'edit')
-  await db.query('update leave_policy_publications set invalidated_at=coalesce(invalidated_at,now()) where corp_id=$1 and source_room=$2 and source_uid=$3 and id::text=$4 and agent_mode',[who.corp_id,body.roomKey,body.nodeUid,String(body.version || '')])
-  return {state:'draft'}
+  // Older editors can request invalidation after lazy loading. Verify the saved tree first.
+  const entry = await definitionState(db, req, who, body.roomKey, body.nodeUid)
+  return { state: entry?.state || 'draft' }
 }
 function resolveAccounts(binding, who) {
   const departments = (Array.isArray(who.departments)

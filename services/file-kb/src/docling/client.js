@@ -21,9 +21,17 @@ const FROM_FORMAT = {
 }
 
 function sleep(ms, signal) {
+  if (signal?.aborted) return Promise.reject(signal.reason || new Error('aborted'))
   return new Promise((resolve, reject) => {
-    const t = setTimeout(resolve, ms)
-    if (signal) signal.addEventListener('abort', () => { clearTimeout(t); reject(signal.reason || new Error('aborted')) }, { once: true })
+    const onAbort = () => {
+      clearTimeout(timer)
+      reject(signal.reason || new Error('aborted'))
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    signal?.addEventListener('abort', onAbort, { once: true })
   })
 }
 
@@ -47,6 +55,7 @@ function createDoclingClient({
     mixed: { ocr: true, force: false, documentTimeoutS: ocrDocumentTimeoutS, totalTimeoutMs: ocrTotalTimeoutMs }
   }
   async function call(url, init = {}, timeoutMs = requestTimeoutMs, outerSignal) {
+    if (outerSignal) outerSignal.throwIfAborted()
     if (!baseUrl) throw new DoclingUnavailableError('DOCLING_URL not configured')
     breaker.before()
     const ctrl = new AbortController()

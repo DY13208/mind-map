@@ -74,11 +74,20 @@ async function reviewAndMerge(task, pr, {
       await set('reviewing')
       if (!testRunner) throw new Error('An isolated test runner is required for merging')
       await git(['init', '-q'])
-      await git(['fetch', '--no-tags', 'https://github.com/' + task.route.repository + '.git',
+      await git(['fetch', '--no-tags', '--depth=50',
+        'https://github.com/' + task.route.repository + '.git',
         'refs/heads/' + task.route.branch + ':refs/heads/target',
         'refs/pull/' + number + '/head:refs/heads/review'])
-      if (await git(['rev-parse', 'refs/heads/target']) !== base ||
-        await git(['rev-parse', 'refs/heads/review']) !== head) return await set('changed')
+      // pr.base.sha is the merge base at PR creation and never moves, while the
+      // target branch keeps advancing. Requiring them to be equal wedged every
+      // review in `changed` as soon as main got a new commit; require the base to
+      // still be an ancestor and merge against the current branch head instead.
+      const targetHead = await git(['rev-parse', 'refs/heads/target'])
+      if (await git(['rev-parse', 'refs/heads/review']) !== head) return await set('changed')
+      if (targetHead !== base &&
+        !await git(['merge-base', '--is-ancestor', base, targetHead]).then(() => true, () => false)) {
+        return await set('changed')
+      }
       const range = base + '...' + head
       const paths = await git(['diff', '--no-renames', '--name-only', '-z', range, '--'])
       if (!paths || !validDiff(paths, task.route.paths)) {
@@ -90,7 +99,7 @@ async function reviewAndMerge(task, pr, {
       }
       await git(['checkout', '--detach', head])
       const joined = await git(['-c', 'user.name=Mind Map Workflow', '-c', 'user.email=workflow@users.noreply.github.com',
-        'merge', '--no-ff', '--no-commit', base]).then(() => true, () => false)
+        'merge', '--no-ff', '--no-commit', targetHead]).then(() => true, () => false)
       if (!joined) return await set('blocked', { findings: ['当前 PR 与主分支存在合并冲突。'] })
       const [runner, ...runnerArgs] = [...testRunner, ...task.route.test]
       try {
@@ -106,14 +115,17 @@ async function reviewAndMerge(task, pr, {
       let testBytes = 0
       for (const arg of task.route.test) {
         if (!/^tests\/hrms\/[\w./-]+\.py$/.test(arg) || arg.split('/').includes('..')) continue
-        const text = await git(['show', ':backend/' + arg]).catch(() => '')
+        // Read from the PR head, not the merge result: the revision agent checks
+        // out refs/pull/<n>/head, so any line number the reviewer sees here must
+        // match that tree or the revised patch lands on the wrong lines.
+        const text = await git(['show', head + ':backend/' + arg]).catch(() => '')
         const bytes = Buffer.byteLength(text)
         if (!bytes || testBytes + bytes > 70000) continue
         tests.push({ path: 'backend/' + arg, text })
         testBytes += bytes
       }
       const stdout = await execute(agent[0], agent.slice(1), {
-        cwd, env: agentEnv, signal, timeout: 4 * 60 * 1000,
+        cwd, env: agentEnv, signal, timeout: 9 * 60 * 1000,
         input: JSON.stringify({ mode: 'review', rule, diff, head, base, test: task.route.test, tests })
       })
       const result = verdictOf(stdout)
@@ -133,9 +145,12 @@ async function reviewAndMerge(task, pr, {
           await revise({ head, base, number, findings })
         } catch (error) {
           if (signal.aborted) throw error
-          console.error('[workflow-merge] revision failed', task.id, error.code || error.message)
+          const code = String(error.stderr || '').match(/^\[workflow-development-agent\] (AGENT_[A-Z]+)\s*$/m)?.[1]
+          const reason = code || (error.stderr || error.message || '未知原因')
+          console.error('[workflow-merge] revision failed', task.id, code || error.code || error.message,
+            String(error.stderr || '').trim().split('\n').slice(-2).join(' | ').slice(0, 300))
           return await set('blocked', {
-            findings: [...findings, '自动修正未完成：' + String(error.message || '未知原因').slice(0, 160)].slice(0, 8),
+            findings: [...findings, '自动修正未完成：' + String(reason).slice(0, 160)].slice(0, 8),
             revisions, revisedHeads
           })
         }
@@ -172,7 +187,8 @@ async function reviewAndMerge(task, pr, {
     await set('merged', { commit: result.sha })
   } catch (error) {
     if (signal.aborted) throw error
-    console.error('[workflow-merge]', task.id, error.code || error.message)
+    console.error('[workflow-merge]', task.id, error.code || error.message,
+      String(error.stderr || '').trim().split('\n').slice(-3).join(' | ').slice(0, 400))
     if ([405, 409, 422].includes(error.status)) return await set('waiting_checks')
     await set('failed')
   }

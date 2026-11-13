@@ -19,7 +19,7 @@ function run(command, args, { input, onOutputLine, ...options } = {}) {
     const child = execFile(command, args, {
       timeout: 120000, maxBuffer: 8 * 1024 * 1024, windowsHide: true, ...options
     }, (error, stdout, stderr) => {
-      if (error) reject(Object.assign(error, { stderr }))
+      if (error) reject(Object.assign(error, { stderr, stdout }))
       else resolve(stdout.trimEnd())
     })
     if (onOutputLine) createInterface({ input: child.stdout, terminal: false, crlfDelay: Infinity }).on('line', onOutputLine)
@@ -177,7 +177,7 @@ async function processTask(db, task, { agent, token, testRunner, execute = run }
     }
     let testResult = task.test_result
     if (!remoteBranch) {
-      await remote(['clone', '--single-branch', '--branch', route.branch, '--', remoteUrl, cwd], { cwd: root })
+      await remote(['clone', '--single-branch', '--depth=50', '--branch', route.branch, '--', remoteUrl, cwd], { cwd: root })
       await git(['switch', '-c', branch])
       const baseCommit = await git(['rev-parse', 'HEAD'])
       const checkBase = async () => {

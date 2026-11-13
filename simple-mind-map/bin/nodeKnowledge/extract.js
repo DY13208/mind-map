@@ -4,32 +4,35 @@ const fs = require('fs')
 const path = require('path')
 
 const DOCLING_IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'webp'])
-let doclingRuntime = null
+const doclingRuntimes = new Map()
+const APPROVAL_OCR_TIMEOUT_MS = 60 * 1000
 
-function doclingConfigured() {
-  return !!String(process.env.DOCLING_URL || '').trim()
+function doclingUrl(sourceKind) {
+  const approvalUrl = sourceKind === 'approval_request'
+    ? String(process.env.APPROVAL_ATTACHMENT_DOCLING_URL || '').trim()
+    : ''
+  const generalUrl = String(process.env.NODE_KNOWLEDGE_OCR_URL || '').trim()
+    ? ''
+    : String(process.env.DOCLING_URL || '').trim()
+  return (approvalUrl || generalUrl).replace(/\/+$/, '')
 }
 
-function legacyOcrConfigured() {
-  return !!String(process.env.NODE_KNOWLEDGE_OCR_URL || '').trim()
-}
-
-function shouldUseDocling(fileName, mimeType = '') {
-  if (!doclingConfigured() || legacyOcrConfigured()) return false
+function shouldUseDocling(fileName, mimeType = '', sourceKind) {
+  if (!doclingUrl(sourceKind)) return false
   const kind = kindOf(fileName, normalizeMime(mimeType, fileName))
   if (kind === 'pdf') return true
   const ext = path.extname(String(fileName || '')).toLowerCase().slice(1)
   return kind === 'image' && DOCLING_IMAGE_EXTENSIONS.has(ext)
 }
 
-function getDoclingRuntime() {
-  if (doclingRuntime) return doclingRuntime
+function getDoclingRuntime(baseUrl) {
+  if (doclingRuntimes.has(baseUrl)) return doclingRuntimes.get(baseUrl)
   const { doclingOcrConfig } = require('../../../services/file-kb/src/config')
   const { createDoclingClient } = require('../../../services/file-kb/src/docling/client')
   const settings = doclingOcrConfig(process.env)
-  doclingRuntime = {
+  const runtime = {
     client: createDoclingClient({
-      baseUrl: String(process.env.DOCLING_URL || '').trim().replace(/\/+$/, ''),
+      baseUrl,
       apiKey: String(process.env.DOCLING_API_KEY || ''),
       ocrMode: settings.doclingOcrMode,
       ocrEngine: settings.doclingOcrEngine,
@@ -45,7 +48,8 @@ function getDoclingRuntime() {
     }),
     docToBlocks: require('../../../services/file-kb/src/structurer/blocks').docToBlocks
   }
-  return doclingRuntime
+  doclingRuntimes.set(baseUrl, runtime)
+  return runtime
 }
 
 function clip(text, max = MAX_EXTRACT_CHARS) {
@@ -288,12 +292,15 @@ async function extractWithDocling(source, options = {}) {
   const ext = path.extname(fileName).toLowerCase().slice(1)
   const kind = kindOf(fileName, mimeType)
   try {
-    const runtime = getDoclingRuntime()
+    const runtime = getDoclingRuntime(doclingUrl(options.sourceKind))
     const converted = await runtime.client.convertFile({
       ...(Buffer.isBuffer(source) ? { buffer: source } : { filePath: source }),
       fileName,
       mimeType,
-      ext
+      ext,
+      signal: options.sourceKind === 'approval_request'
+        ? AbortSignal.timeout(APPROVAL_OCR_TIMEOUT_MS)
+        : undefined
     })
     const text = clip(runtime.docToBlocks(converted.json)
       .map(block => String(block.text || '').trim())
@@ -337,7 +344,7 @@ async function extractWithDocling(source, options = {}) {
 
 async function extractFile(filePath, options = {}) {
   const fileName = options.fileName || path.basename(filePath || 'file')
-  if (shouldUseDocling(fileName, options.mimeType)) {
+  if (shouldUseDocling(fileName, options.mimeType, options.sourceKind)) {
     return extractWithDocling(filePath, { ...options, fileName })
   }
   return extractBuffer(await fs.promises.readFile(filePath), { ...options, fileName })
@@ -355,7 +362,7 @@ async function extractBuffer(buffer, options = {}) {
       errorMessage: ''
     }
   }
-  if (shouldUseDocling(fileName, mimeType)) {
+  if (shouldUseDocling(fileName, mimeType, options.sourceKind)) {
     return extractWithDocling(buffer, { ...options, fileName, mimeType })
   }
   if (kind === 'text') {

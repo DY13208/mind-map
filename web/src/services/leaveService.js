@@ -54,7 +54,6 @@ export default {
       body: JSON.stringify({ ids })
     }),
   definitions: (room, cursor) => item('/api/workflow-definitions?' + new URLSearchParams({room_key:room,...(cursor?{cursor}:{})})),
-  invalidateDefinition: body => item('/api/workflow-definitions/invalidate',{method:'POST',body:JSON.stringify(body)}),
   publish: (fingerprint, source, options = {}) =>
     item('/api/leave-template/publish', {
       method: 'POST',

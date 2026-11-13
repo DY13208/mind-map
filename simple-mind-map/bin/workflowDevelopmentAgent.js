@@ -45,6 +45,7 @@ const instructions = [
 const revisionInstructions = [
   'This is a revision round. An independent review blocked the current change set and listed findings in the feedback field.',
   'Resolve every finding by correcting the implementation, not by weakenings tests or widening scope. Keep changes inside the supplied paths.',
+  'focusFiles holds the complete current text of the files the findings name. Treat those line numbers as the only truth: build every hunk from them and skip further file requests when they already carry what you need.',
   'Read the current source before patching so the patch applies to the code as it exists now.',
   'If a finding contradicts the supplied rule, follow the rule and make the rule compliance explicit in the code.',
   'Return one JSON object only, exactly as in a normal round.'
@@ -97,7 +98,7 @@ async function workbuddy(messages) {
   return call.function.arguments
 }
 
-async function codebuddy(messages, [command = 'codebuddy', ...prefix], { finalRound, systemPrompt } = {}) {
+async function codebuddy(messages, [command = 'codebuddy', ...prefix], { finalRound, systemPrompt, timeout = 180000 } = {}) {
   const model = process.env.WORKFLOW_DEVELOPMENT_CODEBUDDY_MODEL
   const structured = !systemPrompt && process.env.WORKFLOW_DEVELOPMENT_CODEBUDDY_SCHEMA === '1'
   const system = systemPrompt || (finalRound
@@ -110,7 +111,7 @@ async function codebuddy(messages, [command = 'codebuddy', ...prefix], { finalRo
     '--system-prompt', system], {
     cwd: tmpdir(),
     input: JSON.stringify(messages.slice(1)),
-    timeout: 180000,
+    timeout,
     env: { ...process.env, CODEBUDDY_CODE_DISABLE_BACKGROUND_TASKS: '1' }
   }).catch(error => { throw modelFailure(error.stderr, error.killed || error.code === 'ETIMEDOUT') })
   if (!stdout) throw agentError('AGENT_PROVIDER', 'CodeBuddy returned no result. Check the CLI login.')
@@ -212,13 +213,31 @@ async function develop(task, complete, report = () => {}) {
   const feedback = Array.isArray(task.feedback)
     ? task.feedback.filter(item => typeof item === 'string' && item.trim()).slice(0, 8)
     : []
+  // A revision already knows which files are wrong, so hand over their full text up
+  // front. Spending rounds on search/files is what starved the patch turn before.
+  const focusFiles = []
+  if (feedback.length) {
+    const named = [...new Set([...feedback.join('\n').matchAll(/[\w./-]+\.py\b/g)].map(match => match[0]))]
+    for (const name of named) {
+      if (focusFiles.length >= 3) break
+      if (!task.paths.some(base => name === base || name.startsWith(base + '/'))) continue
+      const lines = await readTracked(name).catch(() => null)
+      if (!lines) continue
+      const text = lines.map(line => line.replace(/\r$/, '')).join('\n')
+      if (Buffer.byteLength(text) > 60000) continue
+      focusFiles.push({ path: name, text })
+    }
+  }
   const messages = [
     { role: 'system', content: instructions },
     ...(feedback.length ? [{ role: 'system', content: revisionInstructions }] : []),
     {
       role: 'user',
       content: JSON.stringify({
-        ...task, rule, titleMatches, entryMatches, entryExcerpts, files: suggestedFiles,
+        ...task, rule, titleMatches, entryMatches,
+        entryExcerpts: focusFiles.length ? [] : entryExcerpts,
+        ...(focusFiles.length ? { focusFiles } : {}),
+        files: suggestedFiles,
         ...(feedback.length ? { feedback } : {})
       })
     }
@@ -228,15 +247,19 @@ async function develop(task, complete, report = () => {}) {
   let contextBytes = entryExcerpts.reduce((total, file) => total + Buffer.byteLength(file.text), 0)
   let issue = 'AGENT_CONTEXT'
   let modelRetries = 0
-  for (let round = 0; round < 8; round++) {
-    const finalRound = round === 7
+  // One budget for both passes: the earlier "5 rounds on a revision" cut forced the
+  // model to guess line numbers on its final turn. Failed hunks now come back with
+  // the real file content, so extra rounds are useful rather than wasted.
+  const lastRound = 7
+  for (let round = 0; round <= lastRound; round++) {
+    const finalRound = round === lastRound
     if (finalRound) messages.push({ role: 'user', content: 'This is the final turn. Return the patch using the supplied context, or the applicable blocked reason. No more file or search requests can be served.' })
     report({ event: 'model_wait', round: round + 1 })
     let reply
     try {
       reply = await complete(messages, { finalRound })
     } catch (error) {
-      if (!['AGENT_TIMEOUT', 'AGENT_RATELIMIT'].includes(error.code) || modelRetries >= 2 || round === 7) throw error
+      if (!['AGENT_TIMEOUT', 'AGENT_RATELIMIT'].includes(error.code) || modelRetries >= 2 || finalRound) throw error
       modelRetries++
       report({ event: 'model_retry', round: round + 1 })
       await delay(modelRetries * 1000)
@@ -261,26 +284,47 @@ async function develop(task, complete, report = () => {}) {
         .replace(/^\n+/, '')
       const patch = diffText.endsWith('\n') ? diffText : diffText + '\n'
       try {
-        const diff = await git(['apply', '--numstat', '-z', '--recount', '-'], patch)
+        const diff = await git(['apply', '--numstat', '-z', '--recount', '--unidiff-zero', '-'], patch)
         const files = diff.split('\0').filter(Boolean).map(entry => entry.split('\t').slice(2).join('\t'))
         if (!files.length || files.some(file => !validPath(file) ||
           !task.paths.some(base => file === base || file.startsWith(base + '/')))) {
           throw agentError('AGENT_SCOPE', 'Patch targets unconfigured paths')
         }
-        await git(['apply', '--index', '--recount', '-'], patch)
+        await git(['apply', '--index', '--recount', '--unidiff-zero', '-'], patch)
         return
       } catch (error) {
         issue = error.code === 'AGENT_SCOPE' ? error.code : 'AGENT_PATCH'
         report({ event: 'patch_retry', round: round + 1 })
-        const reasons = String(error.stderr || '').split('\n').filter(line =>
+        const stderr = String(error.stderr || '')
+        const reasons = stderr.split('\n').filter(line =>
           /^(?:error: (?:corrupt patch|patch failed|unrecognized input)|error: [\w./-]+: patch does not apply)/i.test(line))
           .slice(0, 4).join('\n').slice(0, 550)
+        // Tell the model what the file really looks like where it failed. A bare
+        // "patch does not apply" leaves line offsets unfixable, which is why every
+        // revision round used to burn its whole budget on the same wrong hunk.
+        const anchors = []
+        for (const [, file, line] of [...stderr.matchAll(/error: patch failed: ([\w./-]+):(\d+)/g)].slice(0, 2)) {
+          const lines = await readTracked(file).catch(() => null)
+          if (!lines) continue
+          const from = Math.max(1, Number(line) - 12)
+          const to = Math.min(lines.length, Number(line) + 12)
+          anchors.push({
+            path: file, from, to,
+            text: lines.slice(from - 1, to).map(text => text.replace(/\r$/, '')).join('\n')
+          })
+        }
         messages.push({
           role: 'user',
           content: issue === 'AGENT_SCOPE'
             ? 'The patch targets files outside the configured paths. Return a patch restricted to the supplied paths.'
-            : 'Git could not apply the patch. Use the exact supplied source context and standard unified diff hunks. ' +
-              (reasons ? 'Git diagnostic: ' + reasons : '')
+            : JSON.stringify({
+              error: 'The patch did not apply.',
+              diagnostic: reasons || 'git apply rejected the hunks',
+              actual: anchors,
+              instruction: 'Each entry under "actual" is the real current content around the line where a hunk failed. ' +
+                'Rewrite those hunks with context copied verbatim from it and line numbers that match it, ' +
+                'then return the complete patch again.'
+            })
         })
         continue
       }
@@ -346,7 +390,7 @@ async function main() {
   if (task.mode === 'review') {
     if (provider !== 'codebuddy') throw new Error('Workflow review requires the configured CodeBuddy launcher')
     const reply = await codebuddy([{ role: 'system', content: reviewInstructions },
-      { role: 'user', content: JSON.stringify(task) }], args, { systemPrompt: reviewInstructions })
+      { role: 'user', content: JSON.stringify(task) }], args, { systemPrompt: reviewInstructions, timeout: 480000 })
     const verdict = parseStep(reply)
     if (!verdict) throw agentError('AGENT_RESPONSE', 'CodeBuddy did not return a review verdict')
     process.stdout.write(JSON.stringify(verdict) + '\n')

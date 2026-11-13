@@ -17,6 +17,7 @@ async function main() {
 
   const originalFetch = globalThis.fetch
   const originalEnv = {
+    APPROVAL_ATTACHMENT_DOCLING_URL: process.env.APPROVAL_ATTACHMENT_DOCLING_URL,
     DOCLING_URL: process.env.DOCLING_URL,
     DOCLING_API_KEY: process.env.DOCLING_API_KEY,
     KB_DOCLING_OCR_MODE: process.env.KB_DOCLING_OCR_MODE,
@@ -202,6 +203,32 @@ async function main() {
     assert.equal(rows.get(uploaded.id).status, 'ready')
     assert.match(rows.get(uploaded.id).extracted_text, /LOCAL OCR ACCEPTANCE 20261102/)
     assert.equal(requests.length, beforeUpload + 2)
+
+    delete process.env.DOCLING_URL
+    process.env.APPROVAL_ATTACHMENT_DOCLING_URL = 'http://docling.mock'
+    const approval = await store.ingestUpload(db, 'approval-request:test', {
+      fileName: '审批扫描件.png',
+      contentBase64: imageBytes.toString('base64'),
+      sourceKind: 'approval_request'
+    }, { waitExtract: true })
+    assert.equal(approval.status, 'ready', 'approval uploads wait for OCR before returning')
+    assert.match(approval.extractedText, /LOCAL OCR ACCEPTANCE 20261102/)
+    assert.equal(rows.get(approval.id).status, 'ready')
+    const failedApproval = await store.ingestUpload(db, 'approval-request:test', {
+      fileName: '识别失败.png',
+      contentBase64: imageBytes.toString('base64'),
+      sourceKind: 'approval_request'
+    }, { waitExtract: true })
+    assert.equal(failedApproval.status, 'failed')
+    assert.match(failedApproval.errorMessage, /mock OCR engine crashed/)
+    assert.equal(extract.shouldUseDocling('脑图附件.png', 'image/png'), false)
+    const disguisedNodeUpload = await store.ingestUpload(db, 'room-docling-test', {
+      fileName: '脑图附件.png',
+      contentBase64: imageBytes.toString('base64'),
+      sourceKind: 'approval_request'
+    }, { waitExtract: true })
+    assert.equal(disguisedNodeUpload.status, 'failed')
+    assert.match(disguisedNodeUpload.errorMessage, /OCR 服务未配置/)
 
     // Keep the pre-existing public submit(filePath, fileName, ext, signal, pass)
     // signature working for other File KB callers.

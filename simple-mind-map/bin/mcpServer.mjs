@@ -10,6 +10,7 @@ import { z } from 'zod'
 import { buildSopContext } from './sopContext.mjs'
 import { readAttachmentKnowledge, searchAttachmentKnowledge } from './mcpAttachmentKnowledge.mjs'
 import { registerLeaveTools, registerApprovalTools } from './leaveWorkflow/mcp.mjs'
+import wecomDisk from './leaveWorkflow/wecomDisk.js'
 import { registerHrmsTools } from './hrmsAgent/mcp.mjs'
 import mcpUserToken from './mcpUserToken.js'
 import requestErrorLog from './requestErrorLog.js'
@@ -249,7 +250,7 @@ async function apiRequest(pathName, options = {}) {
   return data
 }
 
-function createServer(authorization) {
+function createServer(authorization, { local = false } = {}) {
   const api = (pathName, options = {}) =>
     apiRequest(pathName, { ...options, authorization })
   const currentMapRevision = async roomKey => {
@@ -542,7 +543,10 @@ function createServer(authorization) {
   )
 
   registerLeaveTools(server, { api, z, ok, fail })
-  registerApprovalTools(server, { api, z, ok, fail })
+  registerApprovalTools(server, {
+    api, z, ok, fail,
+    downloadWecomFile: local ? wecomDisk.downloadWecomDiskFile : undefined
+  })
   registerHrmsTools(server, { api, z, ok, fail })
 
   server.tool(
@@ -2551,7 +2555,7 @@ async function startHttp() {
 }
 
 async function startStdio() {
-  const server = createServer()
+  const server = createServer(undefined, { local: true })
   const transport = new StdioServerTransport()
   await server.connect(transport)
 }
