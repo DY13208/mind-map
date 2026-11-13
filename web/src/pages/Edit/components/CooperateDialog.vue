@@ -894,6 +894,7 @@ export default {
               err.code === 'NODE_DELETED' ||
               err.code === 'PARENT_DELETED' ||
               err.code === 'MOVE_CONFLICT' ||
+              err.code === 'BLOCKED_BY_TERMINAL_CREATE' ||
               err.code === 'DROPPED_DELETED' ||
               err.code === 'SOP_CONFIRM_REQUIRED' ||
               err.code === 'FORBIDDEN')

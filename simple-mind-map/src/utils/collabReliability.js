@@ -18,6 +18,8 @@ const TERMINAL_ERROR_SET = {
   PRECONDITION_INVALID: true,
   PRECONDITION_UNSUPPORTED: true,
   REPLACE_CONFLICT: true,
+  ANCHOR_CONFLICT: true,
+  BLOCKED_BY_TERMINAL_CREATE: true,
   TARGET_DELETED: true,
   NODE_DELETED: true,
   PARENT_DELETED: true,
@@ -61,6 +63,15 @@ function hasProtectedContentMutation(op) {
     .some(key => Object.prototype.hasOwnProperty.call(patch, key))
 }
 
+function canFallbackStaleInsertAnchor(payload, resolvedParentUid) {
+  const requestedParentUid = payload && (payload.parentUid || payload.parent_uid || payload.parent)
+  return !!requestedParentUid && requestedParentUid === resolvedParentUid &&
+    payload.allowStaleAnchorFallback === true &&
+    Number.isSafeInteger(payload.index) && payload.index >= 0 &&
+    !Object.prototype.hasOwnProperty.call(payload.expected || {}, 'anchor_uid') &&
+    !Object.prototype.hasOwnProperty.call(payload.expectedValue || {}, 'anchor_uid')
+}
+
 function collectOpUids(op, includeParents = true) {
   const payload = (op && op.payload) || {}
   const uids = []
@@ -68,6 +79,15 @@ function collectOpUids(op, includeParents = true) {
   if (includeParents && payload.parent) uids.push(String(payload.parent))
   if (includeParents && payload.parentUid) uids.push(String(payload.parentUid))
   if (includeParents && payload.parent_uid) uids.push(String(payload.parent_uid))
+  const expectedAnchor = (payload.expected && payload.expected.anchor_uid) ||
+    (payload.expectedValue && payload.expectedValue.anchor_uid)
+  if (expectedAnchor) uids.push(String(expectedAnchor).trim())
+  if (isCreateOpType(op && op.type)) {
+    const anchor = payload.anchorUid || payload.anchor_uid
+    const requestedParentUid = payload.parentUid || payload.parent_uid || payload.parent
+    const fallback = requestedParentUid !== 'root' && canFallbackStaleInsertAnchor(payload, requestedParentUid)
+    if (anchor && !fallback) uids.push(String(anchor).trim())
+  }
   ;(payload.ops || []).forEach(inner => {
     collectOpUids(inner, includeParents).forEach(id => uids.push(id))
   })
@@ -160,6 +180,7 @@ const api = {
   isTerminalError,
   hasProtectedContentMutation,
   isRetryableError,
+  canFallbackStaleInsertAnchor,
   collectOpUids,
   dependsOnBlockedOp,
   collectCreatedUids,

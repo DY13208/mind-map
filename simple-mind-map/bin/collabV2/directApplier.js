@@ -12,6 +12,7 @@ const { createUid } = require('../mindDoc')
 const { inspectSopChange, sopConfirmError } = require('../collabSopGuard')
 const { normalizeOperation, normalizeType, BATCH_MAX } = require('./protocol')
 const { collabTrace } = require('./trace')
+const { canFallbackStaleInsertAnchor } = require('../collabReliability')
 const { stripSearchHtml } = require('../roomNodes')
 const {
   assertNodeWritePreconditions,
@@ -58,6 +59,7 @@ const DATA_META_KEYS = [
   'parent_uid',
   'index',
   'position',
+  'allowStaleAnchorFallback',
   'operationId',
   'operation_id',
   'actorId',
@@ -165,26 +167,25 @@ async function resolveParent(store, raw) {
   return live
 }
 
-function anchorUidOf(payload) {
-  const raw =
-    payload &&
-    (payload.anchorUid ||
-      payload.anchor_uid ||
-      (payload.expected && payload.expected.anchor_uid))
-  return String(raw || '').trim()
+function anchorUidOf(payload = {}) {
+  return String((payload.expected && payload.expected.anchor_uid) || '').trim() ||
+    String((payload.expectedValue && payload.expectedValue.anchor_uid) || '').trim() ||
+    String(payload.anchorUid || payload.anchor_uid || '').trim()
 }
 
 async function resolveInsertIndex(store, parentUid, payload) {
   const anchorUid = anchorUidOf(payload)
-  if (!anchorUid) return payload && payload.index
+  if (!anchorUid) return payload.index
   const kids = (await store.listChildren(parentUid)).filter(
-    item => String(item.uid) !== String((payload && payload.uid) || '')
+    item => String(item.uid) !== String(payload.uid || '')
   )
   const anchorIndex = kids.findIndex(item => String(item.uid) === anchorUid)
-  if (anchorIndex < 0) {
-    throw commandError('插入锚点已不在该父节点下', 'ANCHOR_CONFLICT', 409)
-  }
-  return anchorIndex + 1
+  if (anchorIndex >= 0) return anchorIndex + 1
+
+  // The UI can opt into its original index when the same parent still exists.
+  // A caller-supplied anchor precondition must continue to reject a stale write.
+  if (canFallbackStaleInsertAnchor(payload, parentUid)) return payload.index
+  throw commandError('插入锚点已不在该父节点下', 'ANCHOR_CONFLICT', 409)
 }
 
 async function placeAmongSiblings(store, parentUid, uid, index, version) {
@@ -283,6 +284,8 @@ async function applyInsert(store, op, version) {
         ...Object.keys(stamp.siblingPositions || {})
       ])
     : [uid, parent.uid]
+  const eventPayload = { ...payload }
+  delete eventPayload.allowStaleAnchorFallback
   return {
     result: { uid, parent_uid: parent.uid, position: stamp.position, index: stamp.index },
     inversePayload: { type: 'node.delete', payload: { uid } },
@@ -290,7 +293,7 @@ async function applyInsert(store, op, version) {
       {
         type: 'node.inserted',
         payload: {
-          ...payload,
+          ...eventPayload,
           uid,
           parentUid: parent.uid,
           data: merged.data,

@@ -1118,7 +1118,7 @@ export default {
       const d = this.collabDiag || {}
       const code = (d.currentError && d.currentError.code) || d.errorCode || (d.lastError && d.lastError.code)
       return this.$t(code === 'PRECONDITION_REQUIRED' ? 'editConflict.syncInternalError'
-        : code === 'REPLACE_CONFLICT' ? 'editConflict.message' : 'editConflict.saveFailed')
+        : code === 'REPLACE_CONFLICT' ? 'editConflict.message' : 'cooperate.saveError')
     },
     collabDiagRows() {
       const d = this.collabDiag || {}
@@ -1236,6 +1236,7 @@ export default {
       actions.push({ key: 'export', label: this.$t('toolbar.export'), icon: 'iconfont iconexport' })
       if (this.$route.query.room) {
         actions.push({ key: 'history', label: '历史版本', icon: 'el-icon-time', testId: 'history-versions' })
+        actions.push({ key: 'unsavedContent', label: this.$t('editConflict.inbox'), icon: 'el-icon-document', testId: 'open-unsaved-content' })
       }
       if (!this.isMobile) {
         actions.push(
@@ -1271,6 +1272,7 @@ export default {
       return this.fileActionsByKey([
         'export',
         'history',
+        'unsavedContent',
         'new',
         'saveAs'
       ])
@@ -1287,6 +1289,7 @@ export default {
         'maps',
         'export',
         'history',
+        'unsavedContent',
         'new',
         'saveAs'
       ])
@@ -5040,6 +5043,7 @@ export default {
         case 'copyInvite': return this.$bus.$emit('copyInviteLink')
         case 'share': return this.$bus.$emit('showShareAcl')
         case 'history': return this.$emit('open-history')
+        case 'unsavedContent': return this.$bus.$emit('open_conflict_draft_inbox')
         case 'maps': return this.goToMyMaps()
         case 'refresh': return this.refreshPage()
         case 'check': return this.openCpdCheck()

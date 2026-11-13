@@ -1,12 +1,8 @@
 <template>
-  <div v-if="room && drafts.length" class="conflictDraftInbox">
-    <el-button class="draftInboxTrigger" round size="small" @mousedown.native.stop @click.stop="openInbox">
-      <i class="el-icon-warning-outline"></i>
-      {{ $t(actionableDrafts.length ? 'editConflict.inbox' : 'editConflict.syncRecords') }} · {{ actionableDrafts.length || diagnosticDrafts.length }}
-    </el-button>
+  <div v-if="room">
     <el-dialog
       :visible.sync="visible"
-      :title="$t(actionableDrafts.length ? 'editConflict.inboxTitle' : 'editConflict.syncRecords')"
+      :title="$t(!actionableDrafts.length && diagnosticDrafts.length ? 'editConflict.syncRecords' : 'editConflict.inboxTitle')"
       width="600px"
       custom-class="conflictDraftDialog"
       append-to-body
@@ -14,7 +10,7 @@
       @click.native.stop
     >
       <p v-if="!drafts.length">{{ $t('editConflict.empty') }}</p>
-      <p class="inboxExplanation">{{ $t('editConflict.inboxExplanation') }}</p>
+      <p v-if="actionableDrafts.length" class="inboxExplanation">{{ $t('editConflict.inboxExplanation') }}</p>
       <div v-for="item in actionableDrafts" :key="item.key" class="conflictDraftItem">
         <div class="itemHead">
           <div class="itemIdentity">
@@ -107,6 +103,7 @@ export default {
     }
   },
   created() {
+    this.$bus.$on('open_conflict_draft_inbox', this.openInbox)
     this.$bus.$on('conflict_draft_saved', this.loadDrafts)
     this.$bus.$on('collab_identity_changed', this.onIdentityChanged)
   },
@@ -127,6 +124,7 @@ export default {
     }
   },
   beforeDestroy() {
+    this.$bus.$off('open_conflict_draft_inbox', this.openInbox)
     this.$bus.$off('conflict_draft_saved', this.loadDrafts)
     this.$bus.$off('collab_identity_changed', this.onIdentityChanged)
     this.unbindMindMapEvents(this.mindMap)
@@ -268,7 +266,7 @@ export default {
       if (!this.room) return
       const message = String((error && error.message) || '')
       if (!error || !error.code || ['REPLACE_CONFLICT', 'STRUCTURE_CONFLICT'].includes(error.code)) this.$message.warning(message || this.$t('editConflict.message'))
-      else this.$message.error(this.$t(error && error.code === 'PRECONDITION_REQUIRED' ? 'editConflict.syncInternalError' : 'editConflict.saveFailed'))
+      else this.$message.error(this.$t(error.code === 'PRECONDITION_REQUIRED' ? 'editConflict.syncInternalError' : 'cooperate.saveError'))
     },
     async onSessionFinished(session) {
       const id = String((session && session.id) || '')
@@ -367,8 +365,11 @@ export default {
     },
     resetScopeView() {
       this.visible = false
+      this.drafts = []
       this.selectedKey = ''
       this.latestByKey = {}
+      this.draftKeysBySession = {}
+      this.persistentSessionIds = []
     },
     onIdentityChanged() {
       this.resetScopeView()
@@ -385,8 +386,8 @@ export default {
       try {
         const drafts = await listConflictDrafts(currentEditPrincipal(), room)
         if (token !== this.loadToken || room !== this.room) return
+        if (this.drafts.length && !drafts.length) this.visible = false
         this.drafts = drafts
-        if (!drafts.length) this.visible = false
         const keysBySession = {}
         drafts.forEach(item => {
           const id = item.session && String(item.session.id || '')
@@ -404,6 +405,7 @@ export default {
       }
     },
     openInbox() {
+      if (!this.room) return
       this.visible = true
       if (!this.selectedKey && this.actionableDrafts.length) {
         this.toggleItem(this.actionableDrafts[0])
@@ -471,13 +473,6 @@ export default {
 </script>
 
 <style lang="less" scoped>
-.conflictDraftInbox {
-  position: fixed;
-  right: 24px;
-  bottom: 24px;
-  z-index: 1000;
-}
-
 .conflictDraftItem {
   padding: 8px 0 12px;
   border-bottom: 1px solid #e2e9e4;
@@ -513,7 +508,6 @@ export default {
   span { overflow-wrap: anywhere; min-width: 0; }
 }
 .discardButton { color: #b8433a; }
-.draftInboxTrigger { color: #72501d; border-color: #ddcaa6; background: #fff; box-shadow: 0 3px 12px rgba(23, 38, 31, .08); }
 </style>
 
 <style lang="less">
@@ -531,7 +525,6 @@ export default {
   .el-button:focus-visible { outline: 2px solid #087854; outline-offset: 3px; }
   .discardButton { color: #b8433a; }
 }
-body.isDark .conflictDraftInbox .draftInboxTrigger { background: #25332c; border-color: #655432; color: #dfb66b; }
 body.isDark .conflictDraftDialog {
   background: #25332c;
   .el-dialog__header { border-color: #3e5046; }
@@ -544,7 +537,6 @@ body.isDark .conflictDraftDialog {
   .itemState { color: #dfb66b; }
 }
 @media (max-width: 600px) {
-  .conflictDraftInbox { right: 16px; bottom: max(16px, env(safe-area-inset-bottom)); }
   .conflictDraftDialog {
     margin-top: 8vh !important;
     .el-dialog__header { padding: 18px 16px 14px; }

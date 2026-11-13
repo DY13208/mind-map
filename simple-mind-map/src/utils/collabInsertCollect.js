@@ -33,18 +33,20 @@ function findInsertPlacement(root, uid) {
       const child = kids[i]
       const id = child && child.data && child.data.uid
       if (String(id || '') === target) {
+        const parentUid = String((node.data && node.data.uid) || '')
         const explicit = child && child._insertAnchorUid ? String(child._insertAnchorUid) : ''
         if (explicit) {
           const anchorIndex = kids.findIndex(
             item => item && item.data && String(item.data.uid || '') === explicit
           )
           if (anchorIndex >= 0) {
-            found = { index: anchorIndex + 1, anchorUid: explicit }
+            found = { parentUid, index: anchorIndex + 1, anchorUid: explicit }
             return
           }
         }
         const prev = i > 0 ? kids[i - 1] : null
         found = {
+          parentUid,
           index: i,
           anchorUid: prev && prev.data && prev.data.uid ? String(prev.data.uid) : ''
         }

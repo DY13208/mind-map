@@ -129,6 +129,7 @@ function testEnterAnchorSurvivesAShiftBeforeSubmit() {
   created._insertAnchorUid = 'selected'
   const shifted = node('p', 'P', [created, node('selected', '选中'), node('last', '后')])
   const place = findInsertPlacement(shifted, 'created')
+  assert.strictEqual(place.parentUid, 'p')
   assert.strictEqual(place.anchorUid, 'selected')
   assert.strictEqual(place.index, 2)
   const rows = collectNewNodeDataInserts([

@@ -211,6 +211,67 @@ test('a missing anchor conflicts and does not insert at another index', async ()
   assert.deepEqual(store.graph.parent.children, ['first', 'selected', 'last'])
 })
 
+test('an opted-in insert keeps its parent and index when its sibling anchor moves', async () => {
+  const graph = storedSiblings(['first', 'selected', 'last', 'destination'])
+  const store = createMemoryStore(graph)
+  await store.updateLocation('selected', { parent_uid: 'destination' }, 1)
+  const before = structuredClone(store.graph)
+  const applied = await applyDirect(store, {
+    type: 'node.insert',
+    payload: {
+      uid: 'created', parent: 'parent', index: 1, anchorUid: 'selected',
+      allowStaleAnchorFallback: true, text: 'created'
+    }
+  }, { version: 2 })
+  assert.deepEqual(store.graph.parent.children, ['first', 'created', 'last', 'destination'])
+  assert.deepEqual(store.graph.destination.children, ['selected'])
+  assert.equal(applied.event.payload.index, 1)
+  assert.equal(applied.event.payload.parentUid, 'parent')
+  assert.equal(applied.event.payload.allowStaleAnchorFallback, undefined)
+  assert.equal(store.graph.created.data.allowStaleAnchorFallback, undefined)
+  assert.deepEqual(applyServerCollabEvent(before, applied.event).parent.children, store.graph.parent.children)
+})
+
+test('an opted-in batch clamps a deleted sibling anchor fallback and uses subsequent live anchors', async () => {
+  const store = createMemoryStore(storedSiblings(['first', 'last', 'deleted']))
+  await store.tombstone(['deleted'], 1)
+  const applied = await applyDirect(store, {
+    type: 'node.batch',
+    payload: { ops: [
+      { type: 'node.insert', payload: {
+        uid: 'n1', parent: 'parent', index: 3, anchorUid: 'deleted', allowStaleAnchorFallback: true
+      } },
+      { type: 'node.insert', payload: {
+        uid: 'n2', parent: 'parent', index: 0, anchorUid: 'n1', allowStaleAnchorFallback: true
+      } }
+    ] }
+  }, { version: 2 })
+  assert.deepEqual(store.graph.parent.children, ['first', 'last', 'n1', 'n2'])
+  assert.deepEqual(applied.event.payload.events.map(event => event.payload.index), [2, 3])
+})
+
+test('opt-in does not bypass an explicit anchor or allow an invalid placement', async () => {
+  const store = createMemoryStore(storedSiblings(['first', 'last']))
+  const payload = {
+    uid: 'created', parent: 'parent', index: 1, anchorUid: 'gone', allowStaleAnchorFallback: true
+  }
+  for (const invalid of [
+    { anchorUid: 'first', expected: { anchor_uid: 'gone' } },
+    { expectedValue: { anchor_uid: 'gone' } },
+    { index: undefined }, { index: -1 }, { index: 1.5 }, { index: '1' },
+    { parent: undefined }, { parent: 'root' }
+  ]) {
+    await assert.rejects(applyDirect(store, {
+      type: 'node.insert', payload: { ...payload, ...invalid }
+    }, { version: 1 }), error => error && error.code === 'ANCHOR_CONFLICT')
+  }
+  await store.tombstone(['last'], 1)
+  await assert.rejects(applyDirect(store, {
+    type: 'node.insert', payload: { ...payload, parent: 'last' }
+  }, { version: 2 }), error => error && error.code === 'PARENT_DELETED')
+  assert.equal(store.graph.created, undefined)
+})
+
 test('two clients inserting after the same anchor both remain below that anchor', async () => {
   const store = createMemoryStore(storedSiblings(['first', 'selected', 'last']))
   await applyDirect(store, {

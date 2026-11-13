@@ -8817,7 +8817,13 @@ class Cooperate {
       index: row.index,
       data: row.data || undefined
     }
-    if (row.anchorUid) payload.anchorUid = row.anchorUid
+    if (row.anchorUid) {
+      payload.anchorUid = row.anchorUid
+      // The canvas supplies a placement hint for a new node under this parent.
+      if (this.collabV2Adapter && Number.isSafeInteger(row.index) && row.index >= 0) {
+        payload.allowStaleAnchorFallback = true
+      }
+    }
     return payload
   }
 
@@ -8828,7 +8834,7 @@ class Cooperate {
     return records.map(row => {
       if (!row || !row.uid) return row
       const place = collabInsertCollect.findInsertPlacement(root, row.uid)
-      if (!place) return row
+      if (!place || place.parentUid !== row.parent) return row
       const next = { ...row, index: place.index }
       if (place.anchorUid) next.anchorUid = place.anchorUid
       else delete next.anchorUid
@@ -8953,7 +8959,7 @@ class Cooperate {
         this._lastPastedUids = null
         return
       } catch (err) {
-        if (err && err.code === 'ANCHOR_CONFLICT') {
+        if (err && ['ANCHOR_CONFLICT', 'BLOCKED_BY_TERMINAL_CREATE'].includes(err.code)) {
           records.forEach(row => {
             if (this.pendingUids) this.pendingUids.delete(row.uid)
           })
@@ -8985,7 +8991,7 @@ class Cooperate {
         this.acknowledgeInsertedNode(row)
       } catch (err) {
         const msg = String((err && err.message) || err)
-        if (err && err.code === 'ANCHOR_CONFLICT') {
+        if (err && ['ANCHOR_CONFLICT', 'BLOCKED_BY_TERMINAL_CREATE'].includes(err.code)) {
           if (this.pendingUids) this.pendingUids.delete(uid)
           this.mindMap.emit('collab_write_conflict', err)
           continue

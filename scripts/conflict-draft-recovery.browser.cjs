@@ -8,7 +8,11 @@ source = source.replace("for (const actor of ['owner', 'editor-a', 'editor-b'])"
 const start = source.indexOf('  const converge = async revision => {'), end = source.indexOf('\nmain().catch(error =>')
 const focused = async function () {
   const {page} = clients[0]
-  report.scope = 'Compiled native App + real IndexedDB/PG/MCP; one injected NETWORK_ERROR before transport; real guarded retry ACK and real MCP field conflict. No production writes.'
+  report.scope = 'Compiled native App + real IndexedDB/PG/MCP; stale insertion anchor, guarded retry, and real MCP field conflict. No production writes.'
+  const openInbox = async () => {
+    await page.getByRole('button', { name: '文件菜单', exact: true }).click()
+    await page.getByTestId('open-unsaved-content').click()
+  }
   const bind = async () => {
     await page.waitForFunction(`(() => {const mm=(${mapInBrowser.toString()})();if(mm)window.__guardMM=mm;return mm&&mm.renderer.root&&!mm.renderer.isRendering&&mm.cooperate.collabV2Adapter.getStatus().phase==='LIVE'})()`)
     await page.evaluate(() => {
@@ -26,7 +30,28 @@ const focused = async function () {
     return page.evaluate(() => __guardMM.richText?.showTextEdit ? '.smm-richtext-node-edit-wrap .ql-editor' : '.smm-node-edit-wrap')
   }
   await bind()
+  await check('an editor insert with a stale placement anchor commits under the same parent', async () => {
+    const uid = randomUUID()
+    const saved = await page.evaluate(async uid => {
+      const cooperate = __guardMM.cooperate
+      const parent = __guardMM.renderer.root.getData('uid')
+      const payload = cooperate.v2InsertPayload({
+        uid, parent, anchorUid: 'missing-sibling', index: 0, text: 'Anchor fallback fixture'
+      })
+      const result = await cooperate.httpAddNode(payload)
+      return { parent, optedIn: payload.allowStaleAnchorFallback, opId: result.operationId }
+    }, uid)
+    assert.equal(saved.optedIn, true)
+    assert.ok(saved.opId, 'the insert must receive a successful ACK')
+    assert.equal((await serverChildren(saved.parent))[0].uid, uid)
+    assert.equal(await page.locator('.draftInboxTrigger').count(), 0)
+    return { persisted: true }
+  })
   await page.waitForTimeout(500)
+  await openInbox()
+  await page.getByText('没有需要恢复的未保存内容。', { exact: true }).waitFor({ state: 'visible' })
+  await page.locator('.conflictDraftDialog .el-dialog__headerbtn').click()
+  await page.locator('.conflictDraftDialog').waitFor({ state: 'hidden' })
   const selector = await openEdit('other')
   const retryText = '网络恢复后保存的真实输入'
   await page.locator(selector).fill(retryText)
@@ -43,7 +68,8 @@ const focused = async function () {
   assert.equal(await page.evaluate(() => __guardMM.renderer.textEdit.hideEditTextBox()),false)
   await page.waitForFunction(() => __inbox.actionableDrafts.length===1)
   assert.equal(await page.evaluate(() => __inbox.visible),false,'a failed save must not force a modal open')
-  await page.locator('.draftInboxTrigger').click()
+  assert.equal(await page.locator('.draftInboxTrigger').count(), 0, 'a failed save must not show a floating draft action')
+  await openInbox()
   await page.getByRole('button',{name:'重试保存',exact:true}).waitFor({state:'visible'})
   await page.screenshot({path:path.join(OUT,'retry-before.png')})
   const originalBaseline = await page.evaluate(() => __inbox.actionableDrafts[0].session.baseVersions)
@@ -86,7 +112,8 @@ const focused = async function () {
   await page.reload();await bind()
   await page.waitForFunction(() => __inbox.drafts.length===2)
   assert.equal(await page.evaluate(() => __inbox.diagnosticDrafts[0].session.draft.text),'没有改动的旧记录')
-  await page.locator('.draftInboxTrigger').click()
+  assert.equal(await page.locator('.draftInboxTrigger').count(), 0, 'restored drafts must not show a floating draft action')
+  await openInbox()
   assert.equal(await page.getByRole('button',{name:'重试保存',exact:true}).count(),0,'real conflict must not offer an automatic overwrite/rebase')
   await page.getByRole('button',{name:'查看服务器最新内容',exact:true}).click()
   await page.locator('.conflictDraftDialog .latestSection pre').waitFor({state:'visible'})
@@ -95,10 +122,16 @@ const focused = async function () {
   await clients[0].context.grantPermissions(['clipboard-read','clipboard-write'],{origin})
   await page.getByRole('button',{name:'复制我的内容',exact:true}).click()
   assert.equal(await page.evaluate(()=>navigator.clipboard.readText()),localText,'copy must contain only the input, not metadata placeholders')
-  assert.ok((await page.locator('.draftInboxTrigger').innerText()).includes('1'),'technical record must not inflate the unsaved-content count')
+  assert.equal(await page.locator('.conflictDraftDialog .conflictDraftItem').count(), 1, 'technical records are not actionable drafts')
+  assert.equal(await page.locator('.conflictDraftDialog .syncRecord').count(), 1, 'technical records remain accessible in the inbox')
   await page.screenshot({path:path.join(OUT,'conflict-desktop.png')})
+  await page.locator('.conflictDraftDialog .el-dialog__headerbtn').click()
+  await page.locator('.conflictDraftDialog').waitFor({ state: 'hidden' })
   await page.setViewportSize({width:390,height:844})
-  await page.waitForTimeout(150)
+  await page.getByRole('button', { name: '打开脑图菜单', exact: true }).click()
+  await page.getByRole('button', { name: '导航', exact: true }).click()
+  await page.getByRole('button', { name: '未保存内容', exact: true }).click()
+  await page.locator('.conflictDraftDialog').waitFor({ state: 'visible' })
   const layout=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth,
     dialog:document.querySelector('.conflictDraftDialog').getBoundingClientRect().toJSON()}))
   assert.ok(layout.dialog.left>=0&&layout.dialog.right<=390,'mobile dialog fits the viewport')

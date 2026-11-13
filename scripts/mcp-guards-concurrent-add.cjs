@@ -698,7 +698,8 @@ module.exports = async function runConcurrentAddRepro({ clients, call, batch, qu
     await a.page.screenshot({ path: path.join(OUT, 'conflict-editor.png') })
     if (draftDisplayCheck) {
       assert.match(conflictView.session.draft.text, /<p>/, 'The original rich-text draft must remain intact')
-      await a.page.locator('.conflictDraftInbox > button').click()
+      await a.page.getByRole('button', { name: '文件菜单', exact: true }).click()
+      await a.page.getByTestId('open-unsaved-content').click()
       const item = a.page.locator('.conflictDraftItem').filter({ hasText: targetUid }).first()
       await item.waitFor({ state: 'visible' })
       if (!(await item.locator('.conflictDraftPanel').count())) await item.locator('.itemHead button').click()

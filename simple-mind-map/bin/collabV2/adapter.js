@@ -9,6 +9,7 @@ const {
   isTerminalError,
   hasProtectedContentMutation,
   isRetryableError,
+  collectOpUids,
   dependsOnBlockedOp,
   collectCreatedUids,
   shouldQuarantineError,
@@ -924,6 +925,19 @@ function createCollaborationAdapter(options = {}) {
     if (!wait) return
     if (err) wait.reject(err)
     else wait.resolve(result)
+  }
+
+  async function notifyRejected(op, error) {
+    if (!options.onRejected) return
+    try {
+      await options.onRejected(op, error)
+    } catch (err) {
+      adapterTrace('OUTBOX_REJECTION_NOTIFICATION_FAILED', {
+        opId: op.opId,
+        code: error.code,
+        message: (err && err.message) || 'rejection notification failed'
+      })
+    }
   }
 
   async function applyRemoteOperation(op, meta = {}) {
@@ -1922,39 +1936,55 @@ function createCollaborationAdapter(options = {}) {
     return isTerminalError(item.errorCode || item.code)
   }
 
-  async function quarantineTerminalCreateDependents(rows) {
-    const blockedCreates = (rows || []).filter(isTerminalBlockedCreate)
-    if (!blockedCreates.length) return false
-    let changed = false
-    for (const item of rows || []) {
-      if (!item) continue
-      if (
-        item.status === 'acked' ||
-        item.status === 'acknowledged' ||
-        item.status === 'quarantined' ||
-        item.status === 'failed' ||
-        item.status === 'sending'
-      ) {
-        continue
+  async function quarantineTerminalCreateDependents(scope, rows) {
+    const blockedUids = new Set(rows.filter(isTerminalBlockedCreate).flatMap(collectCreatedUids))
+    if (!blockedUids.size) return false
+    const dependentsByUid = new Map()
+    for (const item of rows) {
+      if (!item || !['pending', 'retryable', 'sending'].includes(item.status)) continue
+      for (const uid of collectOpUids(item)) {
+        if (!dependentsByUid.has(uid)) dependentsByUid.set(uid, [])
+        dependentsByUid.get(uid).push(item)
       }
-      if (!blockedCreates.some(fail => dependsOnBlockedOp(item, fail))) continue
-      await outbox.update(item.opId, {
+    }
+    const dependents = new Set()
+    for (const uid of blockedUids) {
+      for (const item of dependentsByUid.get(uid) || []) {
+        if (dependents.has(item)) continue
+        dependents.add(item)
+        collectCreatedUids(item).forEach(createdUid => blockedUids.add(createdUid))
+      }
+    }
+    if (!dependents.size) return false
+    for (const item of dependents) {
+      const updated = await writeOutboxInScope(scope, 'update', item.opId, {
         status: 'quarantined',
         error: 'blocked by terminal create',
         errorCode: 'BLOCKED_BY_TERMINAL_CREATE'
       })
+      if (!updated) continue
+      bumpOutboxPending(-1)
       const err = new Error('blocked by terminal create')
       err.code = 'BLOCKED_BY_TERMINAL_CREATE'
+      err.statusCode = 409
       settleAck(item.opId, err)
-      changed = true
+      if (!state.currentError) {
+        recordError({ code: err.code, message: err.message, stage: STAGES.SERVER_APPLY, opId: item.opId })
+      }
+      notifyRejected(item, err)
     }
-    return changed
+    return true
   }
 
-  async function pickDrainHead() {
-    let pending = await outbox.list(state.clientId, state.roomKey)
-    if (await quarantineTerminalCreateDependents(pending)) {
-      pending = await outbox.list(state.clientId, state.roomKey)
+  async function pickDrainHead(scope) {
+    if (!scopeIsCurrent(scope)) throw roomLeftError()
+    let pending = await outbox.list(scope.clientId, scope.roomKey)
+    if (!scopeIsCurrent(scope)) throw roomLeftError()
+    if (await quarantineTerminalCreateDependents(scope, pending)) {
+      pending = await outbox.list(scope.clientId, scope.roomKey)
+      if (!scopeIsCurrent(scope)) throw roomLeftError()
+      state.outboxInspect = summarizeOutbox(pending)
+      emit('outbox.quarantine-dependents')
     }
     const active = pending.filter(
       item =>
@@ -1967,7 +1997,7 @@ function createCollaborationAdapter(options = {}) {
     const sending = active.filter(item => item.status === 'sending')
     if (sending.length > 1) {
       for (let i = 1; i < sending.length; i++) {
-        await outbox.update(sending[i].opId, { status: 'pending' })
+        await writeOutboxInScope(scope, 'update', sending[i].opId, { status: 'pending' })
       }
     }
     const blocked = pending.filter(
@@ -2244,7 +2274,7 @@ function createCollaborationAdapter(options = {}) {
           ...(err.details || {})
         }
       })
-      if (options.onRejected) options.onRejected(op, err)
+      notifyRejected(op, err)
       await refreshOutboxCounts()
       return { terminal: true, stopDrain: err.code === 'FORBIDDEN', err }
     }
@@ -2326,7 +2356,7 @@ function createCollaborationAdapter(options = {}) {
         if (stopDrain || !socket || !socket.connected || !isLive() || state.drainPaused) return
         // Use the same eligibility rules as runDrain. Pending-but-blocked rows
         // must not recursively schedule empty drains and starve the event loop.
-        pickDrainHead()
+        withEnqueueLock(() => pickDrainHead(scope))
           .then(({ head }) => {
             if (
               head &&
@@ -2346,7 +2376,7 @@ function createCollaborationAdapter(options = {}) {
 
   async function runDrain(scope) {
     while (scopeIsCurrent(scope) && !state.drainPaused) {
-      const picked = await pickDrainHead()
+      const picked = await withEnqueueLock(() => pickDrainHead(scope))
       if (!scopeIsCurrent(scope)) break
       const head = picked.head
       if (!head) {
