@@ -125,6 +125,7 @@ const server = http.createServer(async (request, response) => {
       pathname.startsWith('/api/') &&
       pathname !== '/api/health' &&
       pathname !== '/api/knowledge/wiki-page-saved' &&
+      !require('./leaveWorkflow/hrmsBridge').isCallback(request.method, pathname) &&
       !pathname.startsWith('/api/wiki-compiler/') &&
       !(tusRequest && request.method === 'OPTIONS')
     ) {

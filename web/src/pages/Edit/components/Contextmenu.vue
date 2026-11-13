@@ -33,6 +33,10 @@
       </div>
       <div class="item" @click="exec('UNEXPAND_ALL')"><MenuIcon name="collapse" /><span class="name">{{ $t('contextmenu.unExpandNodeChild') }}</span></div>
       <div class="item" @click="copyNodeForAi"><MenuIcon name="clipboard" /><span class="name">复制给 AI（SOP）</span></div>
+      <div class="item" @click="openDevelopmentTask(false)">
+        <MenuIcon name="clipboard" />
+        <span class="name">查看开发任务</span>
+      </div>
       <div
         v-if="canPublishApproval"
         class="item disabled"
@@ -100,6 +104,14 @@
       <div v-if="canPublishApproval" class="item" data-testid="publish-node-approval" @click="publishNodeApproval">
         <MenuIcon name="network" />
         <span class="name">发布这个审批流</span>
+      </div>
+      <div class="item" data-testid="generate-development-task" @click="openDevelopmentTask(true)">
+        <MenuIcon name="clipboard" />
+        <span class="name">生成开发任务</span>
+      </div>
+      <div class="item" @click="openDevelopmentTask(false)">
+        <MenuIcon name="clipboard" />
+        <span class="name">查看开发任务</span>
       </div>
       <div class="splitLine"></div>
       <div
@@ -880,6 +892,16 @@ export default {
       } catch (error) { this.$message.error(error.message || '读取挂载文件正文失败，未复制') }
     },
 
+    openDevelopmentTask(create) {
+      const roomId = roomFromLocation(this.$route)
+      const nodeId = this.nodeUid(this.node)
+      if (!roomId || !nodeId) {
+        this.$message.warning('请先打开已保存的脑图')
+        return
+      }
+      this.hide()
+      this.$bus.$emit('openWorkflowDevelopmentTask', { roomId, nodeId, create })
+    },
     publishNodeApproval() {
       if (this.submenuClickGate || !this.node || !this.canPublishApproval) return
       if (!this.editable) {

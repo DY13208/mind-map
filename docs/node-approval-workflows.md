@@ -153,6 +153,14 @@ HRMS接口源码在 `scripts/hrms/approval_import.py`，专用身份初始化在
 - 只接受本企业申请人的个人 MCP 身份，申请须为 Agent 材料模式且状态为草稿或退回，保留模板查看权限与已发布版本检查。正式提交后禁止追加、修改材料；退回或撤回后再补充。
 - 存储复用二进制存储底层，但按 `approval-request:<request UUID>` 隔离，`node_uid` 留空。该命名空间包含普通脑图房间号不允许的冒号，不能通过房间附件接口访问；不写入共享模板房间的文件库。引用其他申请或普通脑图附件时返回 `ATTACHMENT_NOT_BOUND`。
 - 下载沿用 `/api/workflow-requests/:requestId/attachments/:attachmentId` 的审批身份权限：申请人、有权查看该申请的实际审批人、办结后的抄送人；历史审核人仍按既有审批快照授权。正式材料下载和人事同步重新核验快照内容哈希。既有节点模式审批与历史附件下载保持兼容；旧 Agent 草稿若引用节点附件，补充材料时应重新上传为申请专属附件。
+
+### 人事系统待办和企微通知
+
+启用审批流转同步后，Agent 提交和后续人工流转会在人事系统审批工作台同步当前待办，并通过人事系统的企微发送队列通知对应人员。审批人登录人事系统后可核验要点、同意、退回或驳回。决定由 WCPD 校验并记录，下一步仍按已发布的 WCPD 流程执行。
+
+两个服务端设置同一个至少 32 字节的随机 `WCPD_HRMS_APPROVAL_BRIDGE_KEY`。WCPD 使用 `HRMS_API_BASE` 和 `WCPD_HRMS_APPROVAL_BRIDGE_CORP_ID`（也可沿用 `HRMS_SYNC_CORP_ID`）。YR-HRMS 设置 `HRMS_WCPD_API_BASE` 为 WCPD 服务地址，并使用同一企业的人事公司与企微配置。企微投递沿用 `HRMS_WECOM_NOTIFICATIONS_ENABLED=true` 和现有应用权限。先部署人事接收及回写端，再启用 WCPD 同步。启用后只补齐仍待审的申请。
+
+WCPD 的 `approval_hrms_outbox` 记录流转同步和重试状态。人事通知的 `wecom_delivery_state` 记录企微发送结果。收件人账号未绑定时，其他已匹配人员仍会收到通知，缺失绑定会在 WCPD 队列中重试。现有转正、录用办结归档继续走原接口。
 - 上传写入审批审计事件（附件 ID、字段、版本，不含文件字节）。同一 `operation_id` 和相同内容重放不重复上传；相同编号不同参数或过期 revision 被拒绝。超时结果未知先查询 status，确认附件、字段及版本；直传票据在成功登记后释放，失败时保留至过期以便核对重试。
 
 验证：`node --test simple-mind-map/test/approvalAttachments.test.cjs simple-mind-map/test/approvalAttachments.mcp.test.mjs`。隔离 PostgreSQL 集成测试使用 `APPROVAL_ATTACHMENT_TEST_DB_URL` 指向本机专用测试数据库，再执行 `node --test simple-mind-map/test/approvalAttachments.pg.integration.test.cjs`；测试会创建并清理独立 schema，仅替换外部对象存储和提取服务，使用真实数据库事务、ACL、审批模板、上传/下载入口和提交校验，并断言脑图节点没有变化。

@@ -1,13 +1,12 @@
 /**
- * 人事系统（Frappe）程序调用。
+ * 人事系统（FastAPI / YR-HRMS）程序调用。
  * 用当前登录人的企业微信 userid 向人事系统换本人的 hrms_ext_ 令牌。
  * 换票只带 X-API-Exchange-Key 和 hr_wecom_id，不转发 Cookie / Authorization。
  * 明文令牌只留在进程缓存里；落库只存 SHA-256。缓存丢失就重新换票。
  */
 const crypto = require('crypto')
 
-const ISSUE_PATH =
-  '/api/method/employee_roster.integrations.external_api.issue_token'
+const ISSUE_PATH = '/api/v1/hrms/external/issue-token'
 const ROUTE = '/api/integrations/hrms/token'
 const TOKEN_PREFIX = 'hrms_ext_'
 const WECOM_ACCOUNT_DOMAIN = 'wecom.local'
@@ -360,6 +359,7 @@ function upstreamMessage(payload, secrets) {
   if (!payload || typeof payload !== 'object') return ''
   let text = ''
   if (typeof payload.message === 'string') text = payload.message
+  else if (typeof payload.msg === 'string') text = payload.msg
   else if (payload.exception) text = String(payload.exception).split('\n').pop()
   else if (payload.exc_type) text = String(payload.exc_type)
   return redact(text, secrets)
@@ -367,6 +367,10 @@ function upstreamMessage(payload, secrets) {
 
 function unwrapIssued(payload) {
   if (!payload || typeof payload !== 'object') return null
+  // 新系统统一封装 {code, success, msg, data}
+  if (payload.data && typeof payload.data === 'object' && payload.data.access_token) {
+    return payload.data
+  }
   if (payload.access_token) return payload
   if (payload.message && typeof payload.message === 'object') return payload.message
   return null
@@ -386,7 +390,8 @@ function assertIssued(data) {
     throw fail(502, 'hrms_bad_response', '人事系统返回的令牌类型无效')
   }
   const tokenId = String(data.token_id || '').trim()
-  if (!/^[A-Za-z0-9_-]{4,128}$/.test(tokenId)) {
+  // 新系统 token_id 是数据库自增整数，可能只有 1 位；老 Frappe 是较长的字符串。
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(tokenId)) {
     throw fail(502, 'hrms_bad_response', '人事系统返回的 token_id 无效')
   }
   const user = String(data.user || '').trim()
@@ -456,9 +461,8 @@ function tokenHash(accessToken) {
 }
 
 async function issueToken({ cfg, clientName, hrWecomId, fetchImpl }) {
-  const body = new URLSearchParams()
-  body.set('client_name', clientName)
-  body.set('hr_wecom_id', hrWecomId)
+  // 新系统用 JSON body（Pydantic 模型），form-urlencoded 会被 422 拒绝。
+  const body = JSON.stringify({ client_name: clientName, hr_wecom_id: hrWecomId })
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 15000)
   let response
@@ -470,9 +474,9 @@ async function issueToken({ cfg, clientName, hrWecomId, fetchImpl }) {
       headers: {
         'X-API-Exchange-Key': cfg.exchangeKey,
         Accept: 'application/json',
-        'Content-Type': 'application/x-www-form-urlencoded'
+        'Content-Type': 'application/json'
       },
-      body: body.toString()
+      body
     })
   } catch (err) {
     throw fail(502, 'hrms_unreachable', '无法连接人事系统换取令牌')
@@ -690,7 +694,8 @@ async function callApi(pathname, options = {}) {
     body = JSON.stringify(options.json)
   }
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), 20000)
+  // 默认 20 秒；录用建档这类重接口可由调用方放宽（历史实现给到 120 秒）。
+  const timer = setTimeout(() => controller.abort(), Number(options.timeoutMs) || 20000)
   let response
   try {
     response = await fetchImplFor(cfg, options.fetchImpl)(url, {

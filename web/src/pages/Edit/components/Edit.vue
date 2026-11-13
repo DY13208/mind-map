@@ -72,6 +72,7 @@
     <NodeCommentCard v-if="mindMap"></NodeCommentCard>
     <NodeTextMention v-if="mindMap" :mind-map="mindMap" :readonly="isReadonly" />
     <LeaveIntentTrigger v-if="mindMap" :mindMap="mindMap" />
+    <WorkflowDevelopmentTask v-if="mindMap" :mindMap="mindMap" />
     <CooperateDialog :mindMap="mindMap"></CooperateDialog>
     <ConflictDraftInbox v-if="mindMap" :mindMap="mindMap"></ConflictDraftInbox>
     <!-- 保留旧分享弹窗，节点分享目前直接复制链接并继承文件权限。 -->
@@ -187,6 +188,7 @@ import NodeTag from './NodeTag.vue'
 import NodeCommentCard from './NodeCommentCard.vue'
 import NodeTextMention from './NodeTextMention.vue'
 import LeaveIntentTrigger from './LeaveIntentTrigger.vue'
+import WorkflowDevelopmentTask from './WorkflowDevelopmentTask.vue'
 import { isNodeCommentUnread } from '@/utils/commentRead'
 import { currentCommentUser } from '@/utils/commentUser'
 import CooperateDialog from './CooperateDialog.vue'
@@ -274,6 +276,7 @@ export default {
     NodeCommentCard,
     NodeTextMention,
     LeaveIntentTrigger,
+    WorkflowDevelopmentTask,
     CooperateDialog,
     ConflictDraftInbox,
     NodeShareDialog,

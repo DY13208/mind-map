@@ -1,10 +1,11 @@
 const {createHash} = require('crypto')
 const organization = require('./hrmsOrganization')
+const external = require('../hrmsExternalApi')
 const workers = new WeakMap()
-// 脑图模板标题 → 人事系统入口。未列出的模板不同步。
+// 脑图模板标题 → 人事系统入口（新系统路径；老 Frappe 的 /api/method/... 已退役）。
 const SYNC_TARGETS = {
-  '转正申请表': 'approval_import.import_approved',
-  '录用': 'approval_import.import_hired'
+  '转正申请表': '/api/v1/hrms/external/approvals/import-approved',
+  '录用': '/api/v1/hrms/external/approvals/import-hired'
 }
 function config(env = process.env) {
   const cfg = organization.config({HRMS_ORG_API_BASE:env.HRMS_SYNC_API_BASE,HRMS_ORG_API_KEY:env.HRMS_SYNC_API_KEY,HRMS_ORG_API_SECRET:env.HRMS_SYNC_API_SECRET,HRMS_ORG_COMPANY:env.HRMS_SYNC_COMPANY,HRMS_ORG_CORP_ID:env.HRMS_SYNC_CORP_ID})
@@ -33,16 +34,73 @@ async function enqueue(db,row) {
 async function state(db,id,round) {
   return (await db.query('select status,attempts,last_error,result,synced_at from approval_hrms_sync where request_id=$1 and round=$2',[id,round])).rows[0] || null
 }
+// 新系统只接受 PDF/PNG/JPG（storage.validate_file 按内容签名校验），
+// 且要求每个附件带 contentBase64 与实际字节的 sha256。docx/xlsx 等暂不适配，
+// 这里跳过而不是整单失败——原件仍完整保存在 mind-map 的申请附件里。
+const HRMS_ALLOWED_EXT = new Set(['pdf', 'png', 'jpg', 'jpeg'])
+async function evidenceAttachments(payload, options = {}) {
+  const list = Array.isArray(payload.attachments) ? payload.attachments : []
+  if (!list.length) return []
+  const store = require('../nodeKnowledge/store')
+  const pool = options.pool || require('../storage').getPool()
+  const db = options.db || (await pool.connect())
+  const owned = !options.db
+  const roomKey = `approval-request:${payload.requestId}`
+  const out = []
+  try {
+    for (const item of list) {
+      const name = String((item && item.fileName) || '')
+      const suffix = name.includes('.') ? name.split('.').pop().toLowerCase() : ''
+      if (!HRMS_ALLOWED_EXT.has(suffix)) {
+        console.warn(`[hrms_sync] 跳过人事系统不支持的附件格式：${name}`)
+        continue
+      }
+      try {
+        const got = await store.getContentById(db, roomKey, item.id)
+        const body = got && got.buffer
+        if (!Buffer.isBuffer(body) || !body.length) continue
+        out.push({
+          fileName: name,
+          contentBase64: body.toString('base64'),
+          hash: createHash('sha256').update(body).digest('hex')
+        })
+      } catch (err) {
+        console.warn(`[hrms_sync] 读取附件失败，已跳过：${name}（${err.message}）`)
+      }
+    }
+  } finally {
+    if (owned && db.release) db.release()
+  }
+  return out
+}
 async function send(payload,options={}) {
   const cfg=config(options.env)
   if (!cfg.enabled || !cfg.ready || cfg.company !== payload.company || cfg.corpId !== payload.corpId) throw new Error('人事同步连接未配置或企业不匹配')
   const target = SYNC_TARGETS[payload.title]
   if (!target) throw new Error(`模板「${payload.title}」没有人事系统对接的同步接口`)
-  const response=await (options.fetchImpl || fetch)(new URL(`/api/method/employee_roster.integrations.${target}`,cfg.base),{
-    method:'POST',redirect:'error',signal:AbortSignal.timeout(payload.title === '录用' ? 120000 : 60000),headers:{'Content-Type':'application/json',Authorization:`token ${cfg.apiKey}:${cfg.apiSecret}`},body:JSON.stringify({payload})
-  })
-  if(!response.ok) throw new Error(`人事系统同步失败（HTTP ${response.status}）`)
-  const result=(await response.json()).message
+  // 新系统走 Bearer 换票：以发起人的企微账号换取本人 Token。
+  const requester = payload.requester || {}
+  const user = options.user || (requester.wecom_userid
+    ? {id: requester.wecom_userid, wecomUserId: requester.wecom_userid}
+    : null)
+  if (!user) throw new Error('人事同步缺少发起人的企业微信账号')
+  let body
+  try {
+    const response = await external.callApi(target, {
+      env: options.env,
+      user,
+      fetchImpl: options.fetchImpl,
+      method: 'POST',
+      timeoutMs: payload.title === '录用' ? 120000 : 60000,
+      json: {payload: {...payload, attachments: await evidenceAttachments(payload, options)}}
+    })
+    body = response && response.data
+  } catch (err) {
+    throw new Error(`人事系统同步失败：${err.message}`)
+  }
+  if (!body || body.success === false)
+    throw new Error(`人事系统同步失败：${(body && body.msg) || '未知错误'}`)
+  const result = body.data
   if(!result || result.sourceKey!==`${payload.requestId}:${payload.round}` || !result.name || result.status !== '已通过') throw new Error('人事系统未确认单据同步成功')
   // 录用会多返建档与开户结果，转正没有这些键。
   const extra = {}

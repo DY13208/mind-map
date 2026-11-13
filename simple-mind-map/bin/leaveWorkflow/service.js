@@ -64,6 +64,7 @@ async function initSchema(db) {
     "create index if not exists room_nodes_workflow_markers_idx on room_nodes(room_key,parent_uid,uid) where deleted_at is null and data->>'text' like '%流程标识%'"
   )
   await require('./hrmsSync').initSchema(db)
+  await require('./hrmsBridge').initSchema(db)
   await require('./roleBindings').initSchema(db)
 }
 async function identity(db, req, human = false) {
@@ -418,8 +419,11 @@ async function organizationMember(db,tpl,who,fields,dynamicRole){
     const local=(await db.query('select wecom_userid from wecom_users where corp_id=$1 and user_id=$2',[who.corp_id,employeeRef])).rows[0]
     employeeRef=local&&local.wecom_userid
   }
-  if(!employeeRef){const me=(await db.query('select wecom_userid from wecom_users where corp_id=$1 and user_id=$2',[who.corp_id,who.user_id])).rows[0];employeeRef=me&&me.wecom_userid}
-  const assignment=dynamicRole==='head'?await organization.resolveDepartmentHead(employeeRef,who.corp_id):await organization.resolveHrbp(employeeRef,who.corp_id)
+  // 换票需要「当前登录人」的企微账号：即使 employeeRef 已由表单给出也要查一次。
+  const me=(await db.query('select wecom_userid from wecom_users where corp_id=$1 and user_id=$2',[who.corp_id,who.user_id])).rows[0]
+  if(!employeeRef)employeeRef=me&&me.wecom_userid
+  const caller={id:who.user_id,wecomUserId:me&&me.wecom_userid}
+  const assignment=dynamicRole==='head'?await organization.resolveDepartmentHead(employeeRef,who.corp_id,{user:caller}):await organization.resolveHrbp(employeeRef,who.corp_id,{user:caller})
   const person=dynamicRole==='head'?assignment.head:assignment.hrbp
   const member=await ensureLocalMember(db,who,person)
   return {account:member.user_id,name:member.name,source:'人事组织架构',employee:assignment.employee,department:assignment.department,company:assignment.company}
@@ -570,7 +574,7 @@ async function routing(db, tpl, who, fields = {}) {
   for (const s of steps) {
     s.assigneeName =
       (users.find(u => u.user_id === s.assigneeId) || {}).name || ''
-    if (s.assigneeId === who.user_id)
+    if (tpl.kind !== 'generic' && s.assigneeId === who.user_id)
       missing.push(`${s.role}与申请人相同，须在脑图配置其他审核人`)
   }
   return { steps, cc: [...new Set(cc)], missing, resolved }
@@ -748,13 +752,15 @@ async function request(db, id, who, lock = false, replayOperation) {
   }
   return row
 }
-async function notify(db, row, recipients, kind) {
+async function notify(db, row, recipients, kind, options = {}) {
   for (const userId of [...new Set(recipients.filter(Boolean))])
     await db.query(
       `insert into leave_notifications(id,request_id,recipient_id,kind,revision) values($1,$2,$3,$4,$5) on conflict do nothing`,
       [randomUUID(), row.id, userId, kind, row.revision]
     )
   await events.publish(db, recipients)
+  if (options.sync !== false)
+    await require('./hrmsBridge').enqueue(db, row, recipients, kind, options.detail)
 }
 function operation(body) {
   if (!UUID.test(String(body.operationId || '')))
@@ -1067,16 +1073,20 @@ async function get(pool, req, id, options = {}) {
       row.steps[row.current_step].assigneeId === who.user_id
   }
 }
-async function mutate(pool, req, id, action, body) {
+async function mutate(pool, req, id, action, body, options = {}) {
   return transaction(pool, async db => {
     const who = await identity(db, req, action === 'decide'),
       row = await request(db, id, who, true, body.operationId)
+    if (options.hrms && (action !== 'decide' || row.corp_id !== options.hrms.corp ||
+        !require('./hrmsBridge').isAgent(row)))
+      throw fail('HRMS_BRIDGE_DENIED', '该申请不能从人事系统处理', 403)
     const replay = await duplicate(db, row, who, action, body)
     if (replay.exists)
       return row.historicalReplay
         ? { id: row.id, revision: replay.revision, duplicate: true }
         : { ...row, duplicate: true }
     expectRevision(row, body.expectedRevision)
+    const previousStatus = row.status
     const owner = row.requester_id === who.user_id
     // jsonb may reorder object keys; compare canonical data rather than serialization order.
     const materialHash = value =>
@@ -1193,6 +1203,7 @@ async function mutate(pool, req, id, action, body) {
         )
       row.report = {
         ...workflow.evaluate(row.template, row.fields),
+        ...(row.report.submittedByMcp ? { submittedByMcp: true } : {}),
         nodeInputHash,
         configurationRequired: route.missing,
         ccResolved: route.resolved,
@@ -1211,6 +1222,7 @@ async function mutate(pool, req, id, action, body) {
       if (action === 'submit') {
         if (body.confirmSubmission !== true)
           throw fail('CONFIRM_REQUIRED', '请先核对本次材料后确认提交')
+        if (req.authUser.mcp || req.verifiedMcpSource) row.report.submittedByMcp = true
         const blocked = [...row.report.blockers, ...route.missing]
         if (!row.report.publication.valid && row.template.kind === 'generic') {
           if (body.confirmRules !== true || body.expectedPolicyFingerprint !== row.template.fingerprint)
@@ -1273,6 +1285,8 @@ async function mutate(pool, req, id, action, body) {
     } else if (action === 'decide') {
       if (row.status !== 'pending')
         throw fail('NOT_PENDING', '申请已经处理', 409)
+      if (options.hrms && row.current_step !== options.hrms.step)
+        throw fail('REVISION_CHANGED', '当前审批步骤已变化，请刷新', 409)
       const step = row.steps[row.current_step]
       if (step.assigneeId !== who.user_id)
         throw fail('NOT_ASSIGNEE', '只有当前指定审核人可以办理', 403)
@@ -1368,22 +1382,25 @@ async function mutate(pool, req, id, action, body) {
         db,
         saved,
         [saved.steps[saved.current_step].assigneeId],
-        'todo'
+        'todo',
+        { detail }
       )
     if ((action === 'decide' && saved.status !== 'pending') ||
-        (action === 'submit' && saved.status === 'approved'))
+        (action === 'submit' && ['approved', 'rejected'].includes(saved.status)))
       await notify(
         db,
         saved,
         [saved.requester_id, ...(saved.status === 'approved' ? saved.cc : [])],
-        saved.template.notificationOnly ? 'notification' : saved.status
+        saved.template.notificationOnly ? 'notification' : saved.status,
+        { detail }
       )
     if (action === 'withdraw')
       await notify(
         db,
         saved,
         saved.steps.map(s => s.assigneeId),
-        'withdrawn'
+        'withdrawn',
+        { sync: previousStatus !== 'draft', detail: { fromReturned: previousStatus === 'returned' } }
       )
     return saved
   })
@@ -1495,8 +1512,11 @@ async function uploadAttachment(pool, req, id, body) {
     return saved
   })
 }
-async function attachment(pool, req, id, attachmentId) {
+async function attachment(pool, req, id, attachmentId, options = {}) {
   const row = await get(pool, req, id)
+  if (options.hrms && (!require('./hrmsBridge').isAgent(row) || row.corp_id !== options.hrms.corp ||
+      row.round !== options.hrms.round || !['pending', 'approved', 'rejected', 'withdrawn'].includes(row.status)))
+    throw fail('NOT_FOUND', '该轮审批材料已不可查看', 404)
   if (!(row.fields.attachmentIds || []).includes(attachmentId))
     throw fail('NOT_FOUND', '附件不属于当前申请', 404)
   const bound = (row.report.attachments || []).find(a => a.id === attachmentId)
