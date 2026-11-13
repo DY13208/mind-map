@@ -22,11 +22,43 @@ function tree(uid, extra = {}, children = []) {
   }
 }
 
+async function deleteNode(store, uid, version) {
+  const subtree_token = await store.subtreeToken(uid)
+  return applyDirect(store, {
+    type: 'node.delete', payload: { uid, expected: { uid, subtree_token } }
+  }, { version })
+}
+
 ;(async () => {
-  const leaf = tree('A1', { text: 'plain' })
+  const leaf = tree('A1', { text: 'plain', __fv: { text: 42, textMentions: 41 } })
   const pastedLeaf = preparePasteTrees([leaf])
   assert.notStrictEqual(pastedLeaf.pastedUids[0], 'A1', '1. copy leaf uid fresh')
   assert.ok(identityInvariant(['A1'], pastedLeaf.pastedUids))
+  assert.strictEqual(pastedLeaf.trees[0].data.__fv, undefined)
+  assert.deepStrictEqual(leaf.data.__fv, { text: 42, textMentions: 41 })
+
+  const { createEditSessionManager } = await import('../src/utils/collabEditSession.js')
+  const sessions = createEditSessionManager()
+  const pastedData = preparePasteTrees([tree('rich-source', {
+    text: '<p>copied</p>', richText: true, __fv: { text: 316 }
+  })]).trees[0].data
+  const pasteStore = createMemoryStore({ root: { isRoot: true, data: { uid: 'root' }, children: [] } })
+  const fields = ['text', 'richText', 'textMentions']
+  const edit = sessions.begin({ uid: pastedData.uid, fields, snapshot: { data: pastedData } })
+  const draft = { text: '<p>edited</p>', richText: true, textMentions: [] }
+  sessions.updateDraft(edit.id, draft)
+  await applyDirect(pasteStore, { type: 'node.batch', payload: { ops: [
+    { type: 'node.insert', payload: { uid: pastedData.uid, parent: 'root', data: pastedData } }
+  ] } }, { version: 351 })
+  const inserted = await pasteStore.getLive(pastedData.uid)
+  const initialized = sessions.acknowledgeCreation(edit.id, inserted, 351)
+  assert.deepStrictEqual(initialized.draft, draft)
+  const expected = sessions.buildExpected(edit.id, fields)
+  assert.deepStrictEqual(expected, { uid: pastedData.uid, '__fv.text': 351, '__fv.textMentions': 0 })
+  const update = { type: 'node.update', payload: { uid: pastedData.uid, patch: draft, expected } }
+  await applyDirect(pasteStore, update, { version: 352 })
+  assert.equal((await pasteStore.getLive(pastedData.uid)).data.text, draft.text)
+  await assert.rejects(applyDirect(pasteStore, update, { version: 353 }), { code: 'REPLACE_CONFLICT' })
 
   const sub = tree('A1', { text: 'P' }, [
     tree('A2', { text: 'c1' }),
@@ -68,7 +100,7 @@ function tree(uid, extra = {}, children = []) {
     },
     { version: 2 }
   )
-  await applyDirect(store, { type: 'node.delete', payload: { uid: pastedUid } }, { version: 3 })
+  await deleteNode(store, pastedUid, 3)
   assert.ok(await store.getLive('A1'), '4. delete pasted → original survives')
   assert.ok(!(await store.getLive(pastedUid)))
 
@@ -92,11 +124,15 @@ function tree(uid, extra = {}, children = []) {
     },
     { version: 4 }
   )
+  const movedNode = await store.getLive(moved.pastedUids[0])
   await applyDirect(
     store,
     {
       type: 'node.move',
-      payload: { uid: moved.pastedUids[0], parent: 'A1', index: 0 }
+      payload: {
+        uid: movedNode.uid, parent: 'A1', index: 0,
+        expected: { uid: movedNode.uid, parent_uid: movedNode.parent_uid, position: movedNode.position, target_empty: true }
+      }
     },
     { version: 5 }
   )
@@ -123,16 +159,12 @@ function tree(uid, extra = {}, children = []) {
     position: 'a3',
     data: pastedImg.trees[0].data
   })
-  await applyDirect(store, { type: 'node.delete', payload: { uid: 'img-orig' } }, { version: 6 })
+  await deleteNode(store, 'img-orig', 6)
   assert.ok(
     (await store.getLive(pastedImg.pastedUids[0])).data.image,
     '8. delete original image node → pasted image survives'
   )
-  await applyDirect(
-    store,
-    { type: 'node.delete', payload: { uid: pastedImg.pastedUids[0] } },
-    { version: 7 }
-  )
+  await deleteNode(store, pastedImg.pastedUids[0], 7)
   await store.insert({
     uid: 'img-live',
     parent_uid: 'root',
@@ -150,11 +182,7 @@ function tree(uid, extra = {}, children = []) {
     },
     { version: 8 }
   )
-  await applyDirect(
-    store,
-    { type: 'node.delete', payload: { uid: extraPaste.pastedUids[0] } },
-    { version: 9 }
-  )
+  await deleteNode(store, extraPaste.pastedUids[0], 9)
   assert.strictEqual(
     (await store.getLive('img-live')).data.image,
     'data:image/png;base64,BBB',
@@ -209,7 +237,7 @@ function tree(uid, extra = {}, children = []) {
     '13. server rejects insert existing LIVE uid'
   )
 
-  await applyDirect(store, { type: 'node.delete', payload: { uid: 'keep' } }, { version: 21 })
+  await deleteNode(store, 'keep', 21)
   await assert.rejects(
     () =>
       applyDirect(

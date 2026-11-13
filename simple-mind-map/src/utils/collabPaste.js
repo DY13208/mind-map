@@ -185,6 +185,9 @@ function assignTreeUids(node, uidMap, imgMap) {
   const newUid = createUid()
   if (oldUid) uidMap[oldUid] = newUid
   next.data.uid = newUid
+  // Field versions belong to the source UID. The new UID starts without a
+  // baseline until its own insert is acknowledged.
+  delete next.data.__fv
   // Parent/root identity belongs to the destination tree, not the copied source.
   delete next.data.isRoot
   delete next.data.parent_uid
@@ -201,6 +204,7 @@ function assignTreeUids(node, uidMap, imgMap) {
       const gen = clonePlain(item) || {}
       const oldGenUid = gen.uid
       gen.uid = createUid()
+      delete gen.__fv
       delete gen.isRoot
       delete gen.parent_uid
       delete gen.parentUid
