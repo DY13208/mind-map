@@ -71,9 +71,11 @@ test('approval-only upload, ACL, replay, material snapshots and downloads in Pos
       let meta = (await db.query('select * from node_attachments where room_key=$1 and content_hash=$2', [scope, hash])).rows[0]
       if (!meta) {
         const id = randomUUID().replace(/-/g, '')
+        const failed = body.fileName === 'unreadable.pdf'
         meta = (await db.query(`insert into node_attachments(id,room_key,node_uid,content_hash,file_name,mime_type,byte_size,cos_key,status,extracted_text,extracted_chars,source_kind,created_by)
-          values($1,$2,'',$3,$4,'text/plain',$5,'test-object','ready','测试材料',4,'approval_request',$6) returning *`,
-        [id, scope, hash, body.fileName, buffer.length, actor.id])).rows[0]
+          values($1,$2,'',$3,$4,'text/plain',$5,'test-object',$7,$8,$9,'approval_request',$6) returning *`,
+        [id, scope, hash, body.fileName, buffer.length, actor.id,
+          failed ? 'failed' : 'ready', failed ? '' : '测试材料', failed ? 0 : 4])).rows[0]
         binaries.set(id, buffer)
       }
       return store.rowToDto(meta)
@@ -83,6 +85,15 @@ test('approval-only upload, ACL, replay, material snapshots and downloads in Pos
       return meta && { attachment: store.rowToDto(meta), buffer: binaries.get(id) }
     }
     const body = { expectedRevision: initial.revision, operationId: randomUUID(), fieldKey, fileName: 'resume.txt', contentBase64: Buffer.from('resume').toString('base64') }
+    await assert.rejects(service.uploadAttachment(pool, req('applicant'), initial.id, {
+      ...body, fileName: 'unreadable.pdf', operationId: randomUUID()
+    }), e => e.code === 'ATTACHMENT_NOT_READY')
+    const afterFailure = await service.get(pool, req('applicant'), initial.id)
+    assert.equal(afterFailure.revision, initial.revision)
+    assert.deepEqual(afterFailure.fields.attachmentIds, [])
+    const rolledBack = await pool.query('select id from node_attachments where room_key=$1', [authorized.storageScope])
+    assert.equal(rolledBack.rowCount, 0)
+
     const uploaded = await service.uploadAttachment(pool, req('applicant'), initial.id, body)
     assert.equal(uploaded.revision, initial.revision + 1)
     assert.equal(uploaded.fields[fieldKey].length, 1)
@@ -92,7 +103,7 @@ test('approval-only upload, ACL, replay, material snapshots and downloads in Pos
     assert.ok(uploaded.report.blockers.includes('请补充待入职人员评分'))
     const replay = await service.uploadAttachment(pool, req('applicant'), initial.id, body)
     assert.equal(replay.duplicate, true)
-    assert.equal(stores, 1, 'operation replay does not upload a second object')
+    assert.equal(stores, 2, 'operation replay does not upload a second object')
     await assert.rejects(service.uploadAttachment(pool, req('applicant'), initial.id, { ...body, fileName: 'changed.txt' }), e => e.code === 'OPERATION_CONFLICT')
     await assert.rejects(service.uploadAttachment(pool, req('applicant'), initial.id, { ...body, operationId: randomUUID() }), e => e.code === 'REVISION_CONFLICT')
     const id = uploaded.fields[fieldKey][0]

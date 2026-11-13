@@ -847,7 +847,19 @@ async function main() {
     await rejects(()=>service.mutate(pool,agentWho,ar.id,'submit',body(ar,{nodeSource:true,expectedNodeHash:ar.report.nodeInputHash,expectedDefinitionVersion:String(pub1.id),confirmSubmission:true})),'NODE_DATA_CHANGED')
     await pool.query("update room_nodes set data=jsonb_build_object('text','55') where room_key='channels' and uid=$1",[material.uid])
     const ruleNode=agentFixture.truth
+    const checkLegacyInvalidation = () => service.invalidateDefinition(pool, who('owner'), {
+      ...agentSource, version: String(pub1.id)
+    })
+    for (const expanded of [true, false]) {
+      await pool.query(
+        "update room_nodes set data=jsonb_set(data,'{expand}',to_jsonb($2::boolean)) where room_key='channels' and uid=$1",
+        [ruleNode, expanded]
+      )
+      check((await checkLegacyInvalidation()).state, 'published',
+        'expansion or collapse cannot invalidate a published definition, even from an older editor')
+    }
     await pool.query("update room_nodes set data=jsonb_build_object('text','核对加班真实性') where room_key='channels' and uid=$1",[ruleNode])
+    check((await checkLegacyInvalidation()).state, 'draft', 'saved rule edits invalidate the published definition')
     agentTpl=await service.template(pool,who('owner'),agentSource)
     check((await service.publication(pool,agentTpl,{corp_id:'corp'})).state,'draft','editing approval rules invalidates the published definition')
     await rejects(()=>service.mutate(pool,agentWho,chatNext.id,'save',body(chatNext,{fields:chatFields})),'DEFINITION_DRAFT')

@@ -49,6 +49,10 @@ function attachmentCosKey(roomKey, contentHash) {
   return `${location}/attachments/${roomKey}/${contentHash}`
 }
 
+function isApprovalAttachment(roomKey, sourceKind) {
+  return sourceKind === 'approval_request' && roomKey.startsWith('approval-request:')
+}
+
 function hashBuffer(buffer) {
   return crypto.createHash('sha256').update(buffer).digest('hex')
 }
@@ -521,20 +525,25 @@ async function performExtraction(db, id, source = {}) {
             ...source,
             buffer: content.buffer,
             fileName: content.attachment.fileName,
-            mimeType: content.attachment.mimeType
+            mimeType: content.attachment.mimeType,
+            sourceKind: isApprovalAttachment(source.roomKey, content.attachment.sourceKind)
+              ? 'approval_request'
+              : undefined
           }
         }
       }
       if (!extracted && currentSource.filePath) {
         extracted = await extractFile(currentSource.filePath, {
           fileName: currentSource.fileName,
-          mimeType: currentSource.mimeType
+          mimeType: currentSource.mimeType,
+          sourceKind: currentSource.sourceKind
         })
       } else if (!extracted) {
         const buffer = Buffer.isBuffer(currentSource.buffer) ? currentSource.buffer : await loadBuffer(currentSource)
         extracted = await extractBuffer(buffer, {
           fileName: currentSource.fileName,
-          mimeType: currentSource.mimeType
+          mimeType: currentSource.mimeType,
+          sourceKind: currentSource.sourceKind
         })
       }
     } catch (err) {
@@ -621,6 +630,16 @@ async function createFromBuffer(db, options = {}) {
   const contentHash = hasBuffer
     ? hashBuffer(options.buffer)
     : await hashFile(filePath)
+  const approvalAttachment = isApprovalAttachment(roomKey, options.sourceKind)
+  const waitForApproval = approvalAttachment && options.waitExtract === true
+  const extractionSource = {
+    buffer: options.buffer,
+    filePath,
+    fileName,
+    mimeType,
+    sourceKind: approvalAttachment ? 'approval_request' : undefined,
+    cleanupFile: options.cleanupFile
+  }
   let existing = await getByHash(db, roomKey, contentHash)
   if (existing) {
     existing = await repairDedupedFileName(
@@ -634,6 +653,10 @@ async function createFromBuffer(db, options = {}) {
       const ready = await markArchiveReady(db, existing)
       if (options.cleanupFile) await binary.unlinkQuiet(filePath)
       return { ...ready, deduped: true, kind: 'archive' }
+    }
+    if (waitForApproval && existing.status !== 'ready') {
+      const saved = await extractLimit(() => performExtraction(db, existing.id, extractionSource))
+      return { ...saved, deduped: true, kind: kindOf(fileName, mimeType) }
     }
     if (options.forceExtract && existing.status === 'failed') {
       if (shouldUseDocling(existing.fileName, existing.mimeType)) {
@@ -733,21 +756,15 @@ async function createFromBuffer(db, options = {}) {
     }
   }
 
-  const useDocling = shouldUseDocling(fileName, mimeType)
-  const waitExtract = !useDocling && (
+  const useDocling = shouldUseDocling(fileName, mimeType, extractionSource.sourceKind)
+  const waitExtract = waitForApproval || (!useDocling && (
     options.waitExtract != null
       ? !!options.waitExtract
       : byteSize <= EXTRACT_WAIT_MAX_BYTES
-  )
+  ))
 
   if (waitExtract) {
-    const saved = await extractLimit(() => performExtraction(db, id, {
-      buffer: options.buffer,
-      filePath: options.filePath,
-      fileName,
-      mimeType,
-      cleanupFile: options.cleanupFile
-    }))
+    const saved = await extractLimit(() => performExtraction(db, id, extractionSource))
     return {
       ...saved,
       deduped: false,
@@ -755,13 +772,7 @@ async function createFromBuffer(db, options = {}) {
     }
   }
 
-  scheduleExtraction(db, id, {
-    buffer: options.buffer,
-    filePath: options.filePath,
-    fileName,
-    mimeType,
-    cleanupFile: options.cleanupFile
-  })
+  scheduleExtraction(db, id, extractionSource)
   return {
     id,
     roomKey,
@@ -909,12 +920,20 @@ function decodeContentBase64(value) {
 
 async function ingestUpload(db, roomKey, body, actor = {}) {
   const maxBytes = Math.min(MAX_BYTES, Number(actor.maxBytes) > 0 ? Number(actor.maxBytes) : MAX_BYTES)
+  const approvalAttachment = isApprovalAttachment(roomKey, body?.sourceKind)
   let buffer = decodeContentBase64(body && body.contentBase64)
   let mimeType = body && body.mimeType
   let fileName = (body && body.fileName) || 'file'
   if (!buffer && body && body.sourceUrl) {
     const downloaded = await fetchSafeUrl(body.sourceUrl, { maxBytes })
     buffer = downloaded.buffer
+    if (approvalAttachment && (downloaded.mimeType === 'text/html' ||
+        downloaded.mimeType === 'application/xhtml+xml' ||
+        /^\s*(?:<!doctype\s+html\b|<(?:html|head|body|title|meta|script)\b)/i.test(buffer.toString('utf8', 0, 1024)))) {
+      throw Object.assign(new Error('附件链接返回了网页，请下载原文件后上传，或提供可直接下载文件的链接'), {
+        statusCode: 422, code: 'ATTACHMENT_URL_IS_WEBPAGE'
+      })
+    }
     mimeType = mimeType || downloaded.mimeType
     if (!body.fileName) {
       try {
@@ -932,6 +951,13 @@ async function ingestUpload(db, roomKey, body, actor = {}) {
     throw err
   }
   if (buffer.length > maxBytes) throw binary.fileTooLargeError(maxBytes)
+  if (approvalAttachment && (/\.pdf$/i.test(fileName) ||
+      /^application\/pdf(?:;|$)/i.test(String(mimeType || '').trim())) &&
+      (buffer.toString('ascii', 0, 5) !== '%PDF-' || !buffer.subarray(-2048).includes('%%EOF'))) {
+    throw Object.assign(new Error('审批附件的内容不是有效 PDF，请上传原始 PDF 文件'), {
+      statusCode: 422, code: 'INVALID_APPROVAL_PDF'
+    })
+  }
   return createFromBuffer(db, {
     roomKey,
     buffer,

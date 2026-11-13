@@ -15,6 +15,21 @@ const composeFiles = ['docker-compose.local-postgres.yaml', 'docker-compose.runt
 const terminal = ['deployed', 'closed', 'superseded', 'deploy_failed', 'rolled_back', 'rollback_failed']
 const backendRoots = ['backend/app/plugin/module_hrms/', 'backend/tests/hrms/']
 const sameRepo = (left, right) => typeof left === 'string' && left.toLowerCase() === right.toLowerCase()
+const agentEvents = new Set(['model_wait', 'search_done', 'context_read', 'patch_check', 'patch_retry', 'model_retry', 'response_retry'])
+
+// Mirrors agentProgress() in workflowDevelopmentWorker; the revision agent emits the
+// same progress lines and they must keep landing in the task's progress column.
+function progressEvent(line, phase) {
+  if (typeof line !== 'string' || line.length > 512) return null
+  let item
+  try { item = JSON.parse(line) } catch (_) { return null }
+  if (item?.type !== 'workflow_progress' || !agentEvents.has(item.event) ||
+    !Number.isInteger(item.round) || item.round < 1 || item.round > 100) return null
+  const { event, round, count } = item
+  const counted = event === 'context_read' || event === 'search_done'
+  if (counted && (!Number.isInteger(count) || count < 0 || count > 100)) return null
+  return { event, round, ...(counted ? { count } : {}), phase }
+}
 
 function deploymentSetting(raw) {
   if (!raw) return null
@@ -230,7 +245,7 @@ async function reconcileDeployment(db, task, config, {
   const checkoutGit = root => args => execute('git', [
     '-c', 'core.hooksPath=' + path.join(root, 'disabled-hooks'), ...args
   ], {
-    cwd: root, signal, timeout: 180000, env: {
+    cwd: root, signal, timeout: 300000, env: {
       ...projectEnv(root), GIT_CONFIG_COUNT: '2',
       GIT_CONFIG_KEY_0: 'http.https://github.com/.extraheader',
       GIT_CONFIG_VALUE_0: 'Authorization: Basic ' + Buffer.from('x-access-token:' + token).toString('base64'),
@@ -286,27 +301,59 @@ async function reconcileDeployment(db, task, config, {
                 await mkdir(dir, { recursive: true })
                 const git = checkoutGit(dir)
                 await git(['init', '-q'])
-                await git(['fetch', '--no-tags', 'https://github.com/' + config.repository + '.git',
+                await git(['fetch', '--no-tags', '--depth=50', 'https://github.com/' + config.repository + '.git',
                   'refs/pull/' + prNumber + '/head:refs/heads/revise'])
                 if (await git(['rev-parse', 'refs/heads/revise']) !== target) {
                   throw new Error('PR head changed before the revision')
                 }
                 await git(['checkout', 'refs/heads/revise'])
-                await execute(agent[0], agent.slice(1), {
-                  cwd: dir, env: agentProcessEnv(dir), signal, timeout: 15 * 60 * 1000,
-                  input: JSON.stringify({
-                    id: task.id, version: task.version, rule: task.snapshot,
-                    paths: task.route.paths, test: task.route.test,
-                    target: task.route.target, feedback: findings
-                  })
-                })
-                await git(['add', '-A', '--', '.'])
-                const staged = await git(['diff', '--cached', '--name-only', '--no-renames', '-z'])
-                if (!deploymentFiles(staged, task.route.paths)) {
-                  throw new Error('Revision touched files outside the HRMS backend scope')
+                let attempt = 0
+                let pending = findings
+                for (;;) {
+                  let writes = Promise.resolve()
+                  try {
+                    await execute(agent[0], agent.slice(1), {
+                      cwd: dir, env: agentProcessEnv(dir), signal, timeout: 20 * 60 * 1000,
+                      input: JSON.stringify({
+                        id: task.id, version: task.version, rule: task.snapshot,
+                        paths: task.route.paths, test: task.route.test,
+                        target: task.route.target, feedback: pending
+                      }),
+                      onOutputLine(line) {
+                        const event = progressEvent(line, 'revise')
+                        if (event) writes = writes.then(() => db.query(`update workflow_development_tasks
+                          set progress=coalesce(progress,'[]'::jsonb) || $2::jsonb,updated_at=now()
+                          where id=$1`, [task.id, JSON.stringify([event])])).catch(() => {})
+                      }
+                    })
+                  } finally {
+                    await writes
+                  }
+                  await git(['add', '-A', '--', '.'])
+                  const staged = await git(['diff', '--cached', '--name-only', '--no-renames', '-z'])
+                  if (!deploymentFiles(staged, task.route.paths)) {
+                    throw new Error('Revision touched files outside the HRMS backend scope')
+                  }
+                  const [runner, ...runnerArgs] = [...(testRunner || []), ...task.route.test]
+                  try {
+                    await execute(runner, runnerArgs, { cwd: dir, env: projectEnv(dir), signal, timeout: 15 * 60 * 1000 })
+                    break
+                  } catch (error) {
+                    if (signal.aborted) throw error
+                    // The revision writes its own regression tests; when they fail it
+                    // has found a real defect. Hand the failed assertions back once so
+                    // it can correct the implementation instead of abandoning the work.
+                    if (attempt >= 1) throw error
+                    attempt += 1
+                    const detail = String(error.stdout || error.stderr || '').split('\n')
+                      .filter(line => /^(?:FAILED |E\s{2,}|assert )/.test(line)).slice(0, 12)
+                      .join('\n').slice(0, 1800)
+                    pending = [...findings,
+                      '上一次修正后的回归测试未通过，请继续修实现（不得改弱断言或删用例）：\n'
+                      + (detail || '测试进程非零退出')]
+                    await git(['reset', '--hard', 'HEAD'])
+                  }
                 }
-                const [runner, ...runnerArgs] = [...(testRunner || []), ...task.route.test]
-                await execute(runner, runnerArgs, { cwd: dir, env: projectEnv(dir), signal, timeout: 15 * 60 * 1000 })
                 await git(['-c', 'user.name=Mind Map Workflow',
                   '-c', 'user.email=workflow@users.noreply.github.com', '-c', 'commit.gpgsign=false',
                   'commit', '-m', 'Revise per AI review ' + String(task.version || '').slice(0, 12)])
@@ -348,7 +395,7 @@ async function reconcileDeployment(db, task, config, {
     await save({ state: 'preview_building', commit })
     await removePreview(execute, name)
     await git(['init', '-q'])
-    await git(['fetch', '--no-tags', 'https://github.com/' + config.repository + '.git',
+    await git(['fetch', '--no-tags', '--depth=50', 'https://github.com/' + config.repository + '.git',
       'refs/heads/' + config.branch + ':refs/heads/target',
       ...(pr.merged ? [] : ['refs/pull/' + number + '/head:refs/heads/review'])])
     if (await git(['rev-parse', pr.merged ? 'refs/heads/target' : 'refs/heads/review']) !== commit) {
@@ -358,8 +405,13 @@ async function reconcileDeployment(db, task, config, {
     let base = pr.base.sha + '...' + commit
     if (pr.merged) {
       production = verifyProduction(await readObject(execute, 'container', 'yr-hrms-backend', signal), config)
-      const installed = production.Config.Labels[revisionLabel]
-      if (!/^[0-9a-f]{7,40}$/.test(installed || '')) throw new Error('Running image has no Git revision')
+      // This project records the commit in the image tag (yr-hrms-backend:main-<sha>)
+      // rather than in the OCI revision label, so accept either.
+      const labelled = production.Config.Labels?.[revisionLabel]
+      const installed = /^[0-9a-f]{7,40}$/.test(labelled || '')
+        ? labelled
+        : (/[-:]([0-9a-f]{7,40})$/.exec(production.Config.Image || '')?.[1] || '')
+      if (!/^[0-9a-f]{7,40}$/.test(installed)) throw new Error('Running image has no Git revision')
       await git(['merge-base', '--is-ancestor', installed, commit])
       base = installed + '..' + commit
     }

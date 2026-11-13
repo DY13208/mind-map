@@ -1,4 +1,5 @@
 const { failure } = require('./core')
+const { isWecomDiskShare, localDownloadRequired } = require('./wecomDisk')
 
 // This storage namespace is not a map and never has a room ACL or node.
 // All access goes through the owning approval request's personal identity checks.
@@ -50,6 +51,7 @@ async function ingest(db, row, who, body, store = require('../nodeKnowledge/stor
   if (!store.storeEnabled) throw failure('ATTACHMENT_STORAGE_UNAVAILABLE', '审批附件存储尚未配置', 503)
   const ids = new Set(row.fields.attachmentIds || [])
   if (ids.size >= 10) throw failure('INVALID_ATTACHMENTS', '本次申请证明附件已达到10份上限')
+  if (isWecomDiskShare(body.sourceUrl)) throw localDownloadRequired()
   // Never accept caller-controlled nodeUid, roomKey, sourceKind or actor identity.
   const saved = await store.ingestUpload(db, scope(row), {
     fileName: body.fileName,
@@ -58,6 +60,8 @@ async function ingest(db, row, who, body, store = require('../nodeKnowledge/stor
     sourceUrl: body.sourceUrl,
     sourceKind: 'approval_request'
   }, { id: who.user_id, waitExtract: true, maxBytes: 20 * 1024 * 1024 })
+  if (saved.status !== 'ready' || !(saved.extractedChars > 0))
+    throw failure('ATTACHMENT_NOT_READY', '审批附件未能提取正文，请重试或上传可读取的文件', 409)
   const fields = { ...row.fields, [f.key]: [...new Set([...(row.fields[f.key] || []), saved.id])] }
   ids.add(saved.id)
   fields.attachmentIds = [...ids].sort()

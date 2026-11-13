@@ -59,7 +59,6 @@
 <script>
 import service, { openLeaveRequest } from '@/services/leaveService'
 import { isApprovalPublicationRoom, roomFromLocation } from '@/utils/roomLocation'
-import { signature as definitionSignature } from '../../../../../simple-mind-map/src/utils/approvalDefinition'
 import {
   extractFields,
   isWorkflowIntent
@@ -129,7 +128,6 @@ export default {
     }
   },
   mounted() {
-    this.definitionMarks = new Map()
     this.$bus.$on('publishNodeApproval', this.publishDefinition)
     window.addEventListener('mindmap:approval-published', this.refreshDefinitions)
     this.definitionTimer = setInterval(this.refreshDefinitions, 5000)
@@ -182,7 +180,7 @@ export default {
       window.dispatchEvent(new CustomEvent('mindmap:leave-policy',{detail:{source,agentMode:true}}))
     },
     async refreshDefinitions() {
-      if (this.definitionRefreshBusy || !this.definitionMarks || !service.definitions) return
+      if (this.definitionRefreshBusy || this._isDestroyed || !service.definitions) return
       const room=roomFromLocation(this.$route)
       if (!room) return
       this.definitionRefreshBusy=true
@@ -193,38 +191,18 @@ export default {
           list.push(...page.list);cursor=page.hasMore?page.nextCursor:null
         }while(cursor && !this._isDestroyed && room===roomFromLocation(this.$route))
         if(this._isDestroyed || room!==roomFromLocation(this.$route))return
-        const marks=new Map()
         let layoutChanged=false
         for(const entry of list){
           const node=this.mindMap.renderer.findNodeByUid(entry.nodeUid)
           if(!node)continue
-          marks.set(entry.nodeUid,{...entry,room,signature:definitionSignature(node.getPureData())})
           if(JSON.stringify(node._approvalDefinitionState)!==JSON.stringify(entry)){
             node._approvalDefinitionState=entry
             layoutChanged=node.reRender(['tag']) || layoutChanged
           }
         }
-        this.definitionMarks=marks
         if(layoutChanged)this.mindMap.render()
       }catch(_){ /* Do not claim publication when the server cannot be reached. */ }
       finally{this.definitionRefreshBusy=false}
-    },
-    checkDefinitionEdits() {
-      if(!this.definitionMarks)return
-      let layoutChanged=false
-      for(const [uid,entry] of this.definitionMarks){
-        const node=this.mindMap.renderer.findNodeByUid(uid)
-        if(!node || entry.room!==roomFromLocation(this.$route))continue
-        if(entry.state==='published' && definitionSignature(node.getPureData())!==entry.signature){
-          entry.state='draft'
-          node._approvalDefinitionState={...node._approvalDefinitionState,state:'draft'}
-          layoutChanged=node.reRender(['tag']) || layoutChanged
-          service.invalidateDefinition({roomKey:entry.room,nodeUid:uid,version:entry.version}).catch(()=>{})
-        }
-      }
-      if(layoutChanged)this.mindMap.render()
-      clearTimeout(this.definitionRefreshTimer)
-      this.definitionRefreshTimer=setTimeout(this.refreshDefinitions,800)
     },
     openCurrent() {
       return this.canPublishApproval && !this.requestId ? this.publishDefinition(this.node) : this.open()
@@ -332,7 +310,9 @@ export default {
       this.update()
     },
     onDataChange() {
-      this.checkDefinitionEdits()
+      // A lazy-loaded branch can change the rendered tree without editing the saved definition.
+      clearTimeout(this.definitionRefreshTimer)
+      this.definitionRefreshTimer = setTimeout(this.refreshDefinitions, 800)
       this.update()
       this.scheduleCheck()
     },

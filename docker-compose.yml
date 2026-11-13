@@ -113,6 +113,7 @@ services:
       # Node attachment OCR shares File KB's Docling client and OCR settings.
       # Keep Docling opt-in for the app; local .env can point at docling-serve.
       DOCLING_URL: ${DOCLING_URL:-}
+      APPROVAL_ATTACHMENT_DOCLING_URL: ${APPROVAL_ATTACHMENT_DOCLING_URL:-}
       DOCLING_API_KEY: ${DOCLING_API_KEY:-}
       KB_DOCLING_OCR_MODE: ${KB_DOCLING_OCR_MODE:-auto}
       KB_DOCLING_OCR_ENGINE: ${KB_DOCLING_OCR_ENGINE:-rapidocr}

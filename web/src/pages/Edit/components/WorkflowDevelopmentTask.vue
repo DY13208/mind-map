@@ -2,46 +2,84 @@
   <el-dialog
     title="开发任务"
     :visible.sync="visible"
-    width="min(480px, 92vw)"
+    width="min(560px, 94vw)"
     append-to-body
     @close="cancel"
   >
-    <div aria-live="polite">
-      <p v-if="busy">{{ busyLabel }}</p>
-      <p v-if="error" role="alert">{{ error }}</p>
+    <div class="wt" aria-live="polite">
+      <div v-if="busy" class="wt-banner wt-banner--busy">
+        <span class="wt-spin" aria-hidden="true"></span>{{ busyLabel }}
+      </div>
+      <div v-if="error" class="wt-banner wt-banner--error" role="alert">{{ error }}</div>
+
       <template v-if="task">
-        <p><strong>{{ statuses[task.status] }}</strong> {{ runningDetail }}</p>
-        <p v-if="task.status === 'developing' && progressUpdatedAt" class="task-progress-time">
-          最后更新 {{ formatProgressTime(progressUpdatedAt) }}
-        </p>
-        <p v-if="task.failure">{{ task.failure }}</p>
-        <ul v-if="task.missing.length">
+        <header class="wt-head">
+          <div class="wt-head__main">
+            <span class="wt-dot" :class="'wt-dot--' + tone" aria-hidden="true"></span>
+            <div class="wt-head__text">
+              <h3 class="wt-title">
+                {{ statuses[task.status] }}<template v-if="runningDetail"> · {{ runningDetail }}</template>
+              </h3>
+              <p class="wt-sub">
+                规则版本 <code :title="task.version">{{ task.version.slice(0, 12) }}</code>
+                <template v-if="task.status === 'developing' && progressUpdatedAt">
+                  <span class="wt-sep">·</span>最后更新 {{ formatProgressTime(progressUpdatedAt) }}
+                </template>
+              </p>
+            </div>
+          </div>
+          <a v-if="pullRequest" class="wt-pill" :href="pullRequest" target="_blank" rel="noopener noreferrer">
+            打开 PR<span class="wt-pill__arrow">↗</span>
+          </a>
+        </header>
+
+        <p v-if="task.failure" class="wt-alert">{{ task.failure }}</p>
+        <ul v-if="task.missing.length" class="wt-missing">
           <li v-for="field in task.missing" :key="field">{{ field }}</li>
         </ul>
-        <p v-if="draftApplied">草稿已写回。请重新生成开发任务，使用更新后的规则。</p>
-        <p v-else-if="task.status === 'needs_input' && !draft">请补充规则后再次生成开发任务。</p>
-        <p>规则版本 <code :title="task.version">{{ task.version.slice(0, 12) }}</code></p>
-        <a v-if="pullRequest" :href="pullRequest" target="_blank" rel="noopener noreferrer">打开 PR</a>
-        <p v-if="mergeLabel"><strong>{{ mergeLabel }}</strong></p>
-        <ul v-if="task.merge_review && task.merge_review.findings">
-          <li v-for="(finding, index) in task.merge_review.findings" :key="index">{{ finding }}</li>
-        </ul>
-        <p v-if="deploymentLabel">
-          <strong>{{ deploymentLabel }}</strong>
-          <code v-if="task.deployment.commit">{{ task.deployment.commit.slice(0, 7) }}</code>
-        </p>
-        <a v-if="previewUrl" :href="previewUrl" target="_blank" rel="noopener noreferrer">打开本机预览 API</a>
-        <details v-if="recentProgress.length" class="task-progress" open>
-          <summary>执行记录</summary>
-          <ol>
+        <p v-if="draftApplied" class="wt-note">草稿已写回。请重新生成开发任务，使用更新后的规则。</p>
+        <p v-else-if="task.status === 'needs_input' && !draft" class="wt-note">请补充规则后再次生成开发任务。</p>
+
+        <section v-if="mergeLabel || findings.length" class="wt-card">
+          <div class="wt-card__head">
+            <span class="wt-card__title">合入审查</span>
+            <span v-if="mergeLabel" class="wt-tag" :class="'wt-tag--' + mergeTone">{{ mergeLabel }}</span>
+          </div>
+          <ol v-if="findings.length" class="wt-findings">
+            <li v-for="(finding, index) in findings" :key="index">
+              <span class="wt-findings__no" aria-hidden="true">{{ index + 1 }}</span>
+              <p>{{ finding }}</p>
+            </li>
+          </ol>
+        </section>
+
+        <section v-if="deploymentLabel" class="wt-card">
+          <div class="wt-card__head">
+            <span class="wt-card__title">预览与部署</span>
+            <span class="wt-tag" :class="'wt-tag--' + deployTone">{{ deploymentLabel }}</span>
+          </div>
+          <div class="wt-card__row">
+            <code v-if="task.deployment.commit" class="wt-hash">{{ task.deployment.commit.slice(0, 7) }}</code>
+            <a v-if="previewUrl" class="wt-link" :href="previewUrl" target="_blank" rel="noopener noreferrer">
+              打开本机预览 API<span class="wt-pill__arrow">↗</span>
+            </a>
+          </div>
+        </section>
+
+        <section v-if="recentProgress.length" class="wt-card">
+          <div class="wt-card__head">
+            <span class="wt-card__title">执行记录</span>
+            <span class="wt-card__hint">最近 {{ recentProgress.length }} 条</span>
+          </div>
+          <ol class="wt-timeline">
             <li v-for="(entry, index) in recentProgress" :key="entry.at + '-' + index">
               <time :datetime="entry.at">{{ formatProgressTime(entry.at) }}</time>
               <span>{{ progressLabel(entry) }}</span>
             </li>
           </ol>
-        </details>
+        </section>
       </template>
-      <p v-else-if="!busy && !error">这个节点暂无开发任务。</p>
+      <p v-else-if="!busy && !error" class="wt-empty">这个节点暂无开发任务。</p>
     </div>
     <div v-if="draft && draft.fields.length">
       <p>请核对并编辑草稿，确认后写回当前节点。</p>
@@ -142,6 +180,33 @@ export default {
     }
   },
   computed: {
+    findings() {
+      const list = this.task?.merge_review?.findings
+      return Array.isArray(list) ? list.filter(item => typeof item === 'string' && item.trim()) : []
+    },
+    mergeTone() {
+      const state = this.task?.merge_review?.state
+      if (['blocked', 'failed', 'checks_failed'].includes(state)) return 'danger'
+      if (['verified', 'merged'].includes(state)) return 'success'
+      if (['reviewing', 'revising', 'merging'].includes(state)) return 'info'
+      if (['waiting_checks', 'changed'].includes(state)) return 'warn'
+      return 'idle'
+    },
+    deployTone() {
+      const state = this.task?.deployment?.state
+      if (['preview_failed', 'deploy_failed', 'rolled_back', 'rollback_failed', 'closed', 'superseded'].includes(state)) return 'danger'
+      if (['preview_building', 'deploying', 'rolling_back'].includes(state)) return 'info'
+      if (state === 'preview_ready') return 'warn'
+      if (state === 'deployed') return 'success'
+      return 'idle'
+    },
+    tone() {
+      if (this.task?.status === 'failed') return 'danger'
+      if (['danger', 'success'].includes(this.mergeTone)) return this.mergeTone
+      if (this.task?.status === 'developing' || this.mergeTone === 'info') return 'info'
+      if (this.task?.status === 'queued') return 'warn'
+      return 'idle'
+    },
     mergeLabel() {
       if (!this.task || this.task.status !== 'pr_created') return ''
       if (this.task.deployment?.state === 'deployed') return 'PR 已合入'
@@ -356,28 +421,258 @@ export default {
 </script>
 
 <style scoped>
-.task-progress-time {
-  color: #606266;
+.wt {
+  font-size: 13px;
+  color: #1d2129;
+  line-height: 1.6;
+}
+.wt-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  border-radius: 6px;
+  font-size: 12.5px;
+}
+.wt-banner--busy {
+  background: #e8f0ff;
+  color: #165dff;
+}
+.wt-banner--error {
+  background: #ffece8;
+  color: #cb2634;
+}
+.wt-spin {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: wt-rotate 0.8s linear infinite;
+}
+@keyframes wt-rotate {
+  to { transform: rotate(360deg); }
+}
+.wt-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #f2f3f5;
+}
+.wt-head__main {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+.wt-head__text { min-width: 0; }
+.wt-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-top: 7px;
+  border-radius: 50%;
+  background: #c9cdd4;
+}
+.wt-dot--info { background: #165dff; box-shadow: 0 0 0 3px rgba(22, 93, 255, 0.12); }
+.wt-dot--success { background: #00b42a; box-shadow: 0 0 0 3px rgba(0, 180, 42, 0.12); }
+.wt-dot--danger { background: #f53f3f; box-shadow: 0 0 0 3px rgba(245, 63, 63, 0.12); }
+.wt-dot--warn { background: #ff7d00; box-shadow: 0 0 0 3px rgba(255, 125, 0, 0.12); }
+.wt-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #1d2129;
+}
+.wt-sub {
+  margin: 4px 0 0;
   font-size: 12px;
+  color: #86909c;
 }
-.task-progress {
+.wt-sub code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #f2f3f5;
+  color: #4e5969;
+  font-size: 11.5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.wt-sep { margin: 0 4px; }
+.wt-pill {
+  flex: none;
+  padding: 3px 10px;
+  border: 1px solid #e5e6eb;
+  border-radius: 999px;
+  background: #fff;
+  color: #165dff;
+  font-size: 12px;
+  text-decoration: none;
+  transition: border-color 0.15s, background 0.15s;
+}
+.wt-pill:hover {
+  border-color: #165dff;
+  background: #f5f8ff;
+}
+.wt-pill__arrow {
+  margin-left: 3px;
+  font-size: 10px;
+}
+.wt-alert {
+  margin: 12px 0 0;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: #ffece8;
+  color: #cb2634;
+  font-size: 12.5px;
+}
+.wt-missing {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  color: #ff7d00;
+  font-size: 12.5px;
+}
+.wt-note {
+  margin: 10px 0 0;
+  color: #4e5969;
+  font-size: 12.5px;
+}
+.wt-empty {
+  margin: 0;
+  padding: 20px 0;
+  color: #86909c;
+  text-align: center;
+}
+.wt-card {
   margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid #f2f3f5;
+  border-radius: 8px;
+  background: #fcfcfd;
 }
-.task-progress summary {
-  cursor: pointer;
+.wt-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
 }
-.task-progress ol {
-  padding-left: 0;
+.wt-card__title {
+  color: #4e5969;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.wt-card__hint {
+  color: #a9aeb8;
+  font-size: 11px;
+}
+.wt-card__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.wt-tag {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #f2f3f5;
+  color: #4e5969;
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+.wt-tag--info { background: #e8f0ff; color: #165dff; }
+.wt-tag--success { background: #e8ffea; color: #00a42a; }
+.wt-tag--danger { background: #ffece8; color: #cb2634; }
+.wt-tag--warn { background: #fff7e8; color: #ff7d00; }
+.wt-findings {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
   list-style: none;
 }
-.task-progress li {
+.wt-findings li {
   display: flex;
+  align-items: flex-start;
   gap: 8px;
-  margin: 4px 0;
 }
-.task-progress time {
-  flex-shrink: 0;
-  color: #606266;
+.wt-findings__no {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  border-radius: 50%;
+  background: #ffece8;
+  color: #cb2634;
+  font-size: 11px;
+  font-weight: 600;
+}
+.wt-findings p {
+  margin: 0;
+  color: #1d2129;
+  font-size: 12.5px;
+  word-break: break-word;
+}
+.wt-timeline {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.wt-timeline li {
+  position: relative;
+  display: flex;
+  gap: 10px;
+  padding: 0 0 8px 14px;
+  color: #4e5969;
+  font-size: 12px;
+}
+.wt-timeline li:last-child { padding-bottom: 0; }
+.wt-timeline li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #c9cdd4;
+}
+.wt-timeline li:last-child::before { background: #165dff; }
+.wt-timeline li:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  left: 2.5px;
+  top: 14px;
+  bottom: 0;
+  width: 1px;
+  background: #e5e6eb;
+}
+.wt-timeline time {
+  flex: none;
+  color: #86909c;
   font-variant-numeric: tabular-nums;
 }
+.wt-hash {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #f2f3f5;
+  color: #4e5969;
+  font-size: 11.5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.wt-link {
+  color: #165dff;
+  font-size: 12.5px;
+  text-decoration: none;
+}
+.wt-link:hover { text-decoration: underline; }
 </style>

@@ -1,6 +1,7 @@
 // Keep MCP responses within a bounded context; full audit history stays in the UI.
 import { createRequire } from 'module'
 import { resolveAttachmentUploadInput } from '../mcpAttachmentUpload.mjs'
+import wecomDisk from './wecomDisk.js'
 import { createUploadTicket, discardUploadTicket } from '../mcpUploadTickets.mjs'
 const requireCjs = createRequire(import.meta.url)
 const aiReview = requireCjs('./aiReview')
@@ -342,7 +343,7 @@ function compactTemplate(tpl) {
     next: '使用定向节点读取按source及步骤uid分页获取原文，不要读取整张脑图'
   }
 }
-export function registerApprovalTools(server, { api, z, ok, fail }) {
+export function registerApprovalTools(server, { api, z, ok, fail, downloadWecomFile }) {
   server.tool(
     'create_approval_upload_ticket',
     '为本次 Agent 审批申请签发附件直传票据，不挂到脑图节点。先 approval_request prepare(input_mode=agent) 取得 request_id；仅申请人、草稿或退回状态可用。指定模板附件字段 field_key，curl --data-binary @本地文件 POST upload_url 后，用 upload_approval_attachment 带 upload_id 完成登记。单文件上限20MiB，默认15分钟有效。',
@@ -378,7 +379,7 @@ export function registerApprovalTools(server, { api, z, ok, fail }) {
       mime_type: z.string().optional(),
       file_path: z.string().optional(),
       content_base64: z.string().optional(),
-      source_url: z.string().optional(),
+      source_url: z.string().optional().describe('文件直链。微盘分享链接由本机 MCP 使用已授权的 wecom-cli 下载。若使用远程 MCP，请在 Agent 本机运行 wecom-cli disk files download --json \'{"url":"<分享链接>"}\'，将返回 file_path 的原文件用 create_approval_upload_ticket 直传；无法下载时请用户提供原文件。'),
       upload_id: z.string().optional()
     },
     async input => {
@@ -390,9 +391,16 @@ export function registerApprovalTools(server, { api, z, ok, fail }) {
           method: 'POST', body: JSON.stringify({ fieldKey: input.field_key })
         })
         const target = authorized.item || authorized
-        const resolved = await resolveAttachmentUploadInput({
-          ...input, room_key: target.storageScope, node: target.fieldKey
-        })
+        let resolved
+        if (wecomDisk.isWecomDiskShare(input.source_url)) {
+          if (!downloadWecomFile) throw wecomDisk.localDownloadRequired()
+          resolved = await downloadWecomFile(input.source_url)
+          if (input.file_name?.trim()) resolved.fileName = input.file_name.trim()
+        } else {
+          resolved = await resolveAttachmentUploadInput({
+            ...input, room_key: target.storageScope, node: target.fieldKey
+          })
+        }
         const result = await api(base + '/attachments', {
           method: 'POST', timeoutMs: 180000,
           body: JSON.stringify({
