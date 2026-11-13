@@ -345,6 +345,29 @@ function compactTemplate(tpl) {
 }
 export function registerApprovalTools(server, { api, z, ok, fail, downloadWecomFile }) {
   server.tool(
+    'check_hr_sop',
+    '读取「季翔：人事流程」并核对提交文字和文件内容。仅返回 true 或 false。false 包括不符合、资料不足、无法匹配流程或无法核验。',
+    {
+      text: z.string().max(16000).optional(),
+      files: z.array(z.object({
+        name: z.string().min(1).max(255),
+        base64: z.string().max(6990508)
+      })).max(5).optional().describe('文件原始字节的标准 Base64，最多 5 个，解码后合计不超过 5 MiB')
+    },
+    async input => {
+      let pass = false
+      try {
+        pass = await api('/api/workflow-hr-sop-check', {
+          method: 'POST',
+          body: JSON.stringify(input)
+        }) === true
+      } catch {
+        // The checker only returns true when compliance is verified.
+      }
+      return { content: [{ type: 'text', text: String(pass) }] }
+    }
+  )
+  server.tool(
     'create_approval_upload_ticket',
     '为本次 Agent 审批申请签发附件直传票据，不挂到脑图节点。先 approval_request prepare(input_mode=agent) 取得 request_id；仅申请人、草稿或退回状态可用。指定模板附件字段 field_key，curl --data-binary @本地文件 POST upload_url 后，用 upload_approval_attachment 带 upload_id 完成登记。单文件上限20MiB，默认15分钟有效。',
     {

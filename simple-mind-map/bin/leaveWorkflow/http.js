@@ -21,6 +21,17 @@ function startWorker(pool, writer) {
 }
 async function handle(req, res, { url, db, writer, readBody, sendJson }) {
   if (!/^\/api\/(?:leave|workflow)-/.test(url.pathname)) return false
+  if (url.pathname === '/api/workflow-hr-sop-check' && req.method === 'POST') {
+    const agent = require('./hrSopCheck')
+    try {
+      // Check room access before extracting files or contacting the model.
+      const input = await readBody(req, { maxBytes: agent.MAX_BODY_BYTES })
+      sendJson(res, 200, await agent.check(db, req, input))
+    } catch (error) {
+      sendJson(res, error.statusCode || 400, false)
+    }
+    return true
+  }
   const run = startWorker(db, writer)
   if (await require('./hrmsBridge').handle(req, res, { url, db, readBody, sendJson })) {
     if (url.pathname.endsWith('/decision') && res.statusCode === 200) setImmediate(run)

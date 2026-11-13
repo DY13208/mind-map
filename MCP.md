@@ -30,6 +30,7 @@ IP 由启动脚本探测，不要手写，也不要用 `127.0.0.1`（WorkBuddy �
 | `delete_attachment` | 从指定节点解绑附件；保留文件对象、其他节点引用和历史版本 |
 | `list_todos` | 列出待办，可选同时读取已完成 |
 | `prepare_todo` | 读取待办并匹配任意SOP的C/P |
+| `check_hr_sop` | 对照「季翔：人事流程」检查本次文字和文件，返回 `true` 或 `false` |
 | `complete_todo` | 全部C通过后把任务移动到已完成 |
 | `propose_sop_improvement` | 生成SOP完善建议，不写入 |
 | `apply_sop_improvement` | 用户确认后应用原建议 |
@@ -45,6 +46,19 @@ IP 由启动脚本探测，不要手写，也不要用 `127.0.0.1`（WorkBuddy �
 2. 需要邀请同事时调用 `get_share_link`，再把返回的 `share_url` 发给对方
 3. 同事打开链接，自动进入同一房间
 4. AI 继续 `add_node` / `update_node`，网页上立刻能看到
+
+### 人事 SOP 材料检查
+
+调用 MCP 工具 `check_hr_sop`，或向 `POST /api/workflow-hr-sop-check` 发送 JSON。HTTP 接口直接返回 JSON 布尔值。
+
+```json
+{
+  "text": "申请类型和本次材料说明",
+  "files": [{"name": "材料.pdf", "base64": "<文件字节的标准 Base64>"}]
+}
+```
+
+文字和文件可以同时提供，也可以只提供其中一项。文件最多 5 个，解码后合计不超过 5 MiB。调用账号需要有 `room-yk3tz4aj` 的查看权限。服务每次读取指定 SOP 节点的最新子树，并使用已配置的审批预审模型核对材料。输入文字、文件提取文本和 SOP 规则会发送至该模型。仅核验通过返回 `true`，不符合、流程不明确、材料不足或无法核验时返回 `false`。检查不会创建或提交审批申请。
 
 `list_maps` 默认每页 20 个房间，最多 100 个；它只返回当前页。首次调用可传 `limit` 和标题筛选 `query`，当 `has_more=true` 时将 `next_cursor` 原样传回，并保持相同的 `query`，直到 `has_more=false`。`total` 和列表都遵循当前用户的房间访问权限；只有读完分页后才能据此判断可见房间数量。
 

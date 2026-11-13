@@ -128,7 +128,7 @@ function parse(text) {
   }
 }
 
-async function call(cfg, prompt) {
+async function call(cfg, prompt, system = '你是严谨的企业审批预审助手，只依据证据做判断，输出合法 JSON。') {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), cfg.timeoutMs)
   try {
@@ -146,7 +146,7 @@ async function call(cfg, prompt) {
         messages: [
           {
             role: 'system',
-            content: '你是严谨的企业审批预审助手，只依据证据做判断，输出合法 JSON。'
+            content: system
           },
           { role: 'user', content: prompt }
         ]
@@ -257,4 +257,4 @@ async function applyOnSubmit(db, row) {
   }
 }
 
-module.exports = { config, shouldRun, buildPrompt, parse, review, applyOnSubmit }
+module.exports = { config, shouldRun, buildPrompt, parse, call, review, applyOnSubmit }
