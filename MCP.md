@@ -51,6 +51,8 @@ IP 由启动脚本探测，不要手写，也不要用 `127.0.0.1`（WorkBuddy �
 
 调用 MCP 工具 `check_hr_sop`，或向 `POST /api/workflow-hr-sop-check` 发送 JSON。HTTP 接口直接返回 JSON 布尔值。
 
+HTTP 调用可额外传入 `"resultMode": "triState"`。启用时，HTTP 200 响应的 `true` 表示通过，`false` 表示证据明确命中当前 SOP 的拒绝条款，`null` 表示不能确认结论，应转人工。非 200 响应也应转人工。省略此参数时沿用原布尔语义。人事审批桥接通过响应头 `X-SOP-Result-Mode: triState` 确认服务已采用三态语义。
+
 ```json
 {
   "text": "申请类型和本次材料说明",

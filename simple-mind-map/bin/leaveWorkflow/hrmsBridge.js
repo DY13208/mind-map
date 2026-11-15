@@ -1,12 +1,12 @@
 const { createHmac, timingSafeEqual } = require('node:crypto')
 
-const directions = new Set(['snapshot', 'decision', 'attachment', 'timeline'])
+const directions = new Set(['snapshot', 'decision', 'attachment', 'timeline', 'hr-sop-check'])
 const route = '/api/workflow-hrms-bridge'
 const maxClockSkew = 300
 const workers = new WeakSet()
 
 function isCallback(method, pathname) {
-  return method === 'POST' && ['/decision', '/attachment', '/timeline'].some(path => pathname === route + path)
+  return method === 'POST' && ['/decision', '/attachment', '/timeline', '/hr-sop-check'].some(path => pathname === route + path)
 }
 
 function denied(message = '人事审批同步签名无效') {
@@ -219,6 +219,23 @@ async function handle(req, res, { url, db, readBody, sendJson }) {
     const cfg = config()
     if (!cfg.enabled) throw denied()
     const direction = url.pathname.split('/').pop()
+    if (direction === 'hr-sop-check') {
+      const viewer = (process.env.WCPD_HR_SOP_BRIDGE_VIEWER_ID || '').trim()
+      if (!viewer) throw denied('未配置人事 SOP 服务查看账号')
+      const sop = require('./hrSopCheck')
+      const input = verify(cfg.key, direction, await readBody(req, { maxBytes: sop.MAX_BODY_BYTES }))
+      const isUid = value => typeof value === 'string' &&
+        /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value)
+      if (input?.corpId !== cfg.corp || !isUid(input.branchUid) ||
+          (input.stepUid !== undefined && !isUid(input.stepUid)) ||
+          [input.stepLabel, input.stepAccount].some(value => value !== undefined &&
+            (typeof value !== 'string' || !value.trim() || value.length > 140))) throw denied()
+      const result = await sop.check(db, { authUser: { id: viewer } }, input, input.branchUid, input.stepUid)
+      if (input.resultMode === 'triState') res.setHeader('X-SOP-Result-Mode', 'triState')
+      if (input.stepLabel || input.stepAccount) res.setHeader('X-SOP-Step-Matching', '1')
+      sendJson(res, 200, result)
+      return true
+    }
     const input = verify(cfg.key, direction, await readBody(req))
     if (input.corpId !== cfg.corp || typeof input.actor !== 'string' || !input.actor) throw denied()
     const { rows } = await db.query(

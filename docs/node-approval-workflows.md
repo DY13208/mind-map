@@ -161,6 +161,27 @@ HRMS接口源码在 `scripts/hrms/approval_import.py`，专用身份初始化在
 两个服务端设置同一个至少 32 字节的随机 `WCPD_HRMS_APPROVAL_BRIDGE_KEY`。WCPD 使用 `HRMS_API_BASE` 和 `WCPD_HRMS_APPROVAL_BRIDGE_CORP_ID`（也可沿用 `HRMS_SYNC_CORP_ID`）。YR-HRMS 设置 `HRMS_WCPD_API_BASE` 为 WCPD 服务地址，并使用同一企业的人事公司与企微配置。企微投递沿用 `HRMS_WECOM_NOTIFICATIONS_ENABLED=true` 和现有应用权限。先部署人事接收及回写端，再启用 WCPD 同步。启用后只补齐仍待审的申请。
 
 WCPD 的 `approval_hrms_outbox` 记录流转同步和重试状态。人事通知的 `wecom_delivery_state` 记录企微发送结果。收件人账号未绑定时，其他已匹配人员仍会收到通知，缺失绑定会在 WCPD 队列中重试。现有转正、录用办结归档继续走原接口。
+
+### 人事系统原生表单的 SOP 预审
+
+在 YR-HRMS 流程设计器中打开目标审批节点，填写「人事 SOP 分支 UID」，并保留人工审批人。脑图使用「季翔：人事流程」现有根节点的直属分支。每个分支写清适用申请类型、必填项、附件、判断条件及须人工确认的事项。已有规则完整时可以直接绑定分支 UID。
+
+一个流程有多个审核步骤时，每个人事审批节点再填写对应的「人事 SOP 审核步骤 UID」。预审读取同分支的「提交要求」和该步骤的规则。审核步骤只有标题时直接转人工。后续节点在上一节点通过后执行自己的预审。
+
+人事系统原生审批先保存人工决定，并把需要预审的下一节点记录为「AI预审中」。后台按当前申请版本核验并保存结果，审批流转显示 AI 决定、节点负责人和判断依据。转人工后才会发送当前节点的人工待办通知。
+
+在审批设计器「表单设置」配置表单级 SOP 分支 UID 和默认核验材料后，未单独绑定的审批节点自动匹配该分支直属的审核步骤。可以使用相同的节点名称，或在脑图步骤下添加 `账号：企微账号` 匹配唯一审批人。匹配缺失或有歧义时转人工。已单独绑定的节点使用自己的步骤和材料配置。
+
+人事审批设计的节点 `props.hr_sop_evidence_keys` 保存需要核对的人事表单字段 key。按脑图现有「提交要求」选择表单已有的字段，类型由表单定义确定。字段必须有值，附件必须属于该字段并可提取正文。未配置、字段不在表单中或材料缺项时直接转人工。只有当前表单实际提供了足以支撑该步骤规则的证据，才配置自动核验。
+
+「自用电脑申请」使用中的 YR-HRMS 表单为 `298`，两个节点都绑定 SOP 分支 `10a3fd15-7617-4ca5-be31-953aa06b47d8`。
+
+- 「直属上级」节点 `approver_reports_to` 绑定「IT审核」步骤 `5efa3199-313c-4da8-8d81-bb73f77d9590`，人工接手人仍为直属上级。
+- 「HR」节点 `approver_hr` 绑定「SSC审核」步骤 `a41c6ec5-7999-40c2-90a3-08e984c6ccac`，人工接手人仍为 HR。
+
+HRMS 使用 `HRMS_WCPD_API_BASE`、`HRMS_WCPD_APPROVAL_COMPANY_ID`、`HRMS_WCPD_APPROVAL_CORP_ID` 和现有桥接密钥。脑图端另设 `WCPD_HR_SOP_BRIDGE_VIEWER_ID` 为具有 SOP 房间查看权的脑图用户 ID。两个服务部署后，通过服务间签名请求调用同一套 SOP 核验逻辑。
+
+只有模型核验通过且匹配到绑定分支时，HRMS 才记录「AI自动同意」并流转。未通过、超时或附件不可读时，交给该节点配置的审批人。AI 按提交资料核验。转人工后，审批人仍可按节点权限修改字段。附件使用本次审批绑定的文件，最多 5 份，合计最多 5 MiB。隐藏字段及其附件不会发给预审服务。
 - 上传写入审批审计事件（附件 ID、字段、版本，不含文件字节）。同一 `operation_id` 和相同内容重放不重复上传；相同编号不同参数或过期 revision 被拒绝。超时结果未知先查询 status，确认附件、字段及版本；直传票据在成功登记后释放，失败时保留至过期以便核对重试。
 
 验证：`node --test simple-mind-map/test/approvalAttachments.test.cjs simple-mind-map/test/approvalAttachments.mcp.test.mjs`。隔离 PostgreSQL 集成测试使用 `APPROVAL_ATTACHMENT_TEST_DB_URL` 指向本机专用测试数据库，再执行 `node --test simple-mind-map/test/approvalAttachments.pg.integration.test.cjs`；测试会创建并清理独立 schema，仅替换外部对象存储和提取服务，使用真实数据库事务、ACL、审批模板、上传/下载入口和提交校验，并断言脑图节点没有变化。

@@ -23,12 +23,13 @@ async function handle(req, res, { url, db, writer, readBody, sendJson }) {
   if (!/^\/api\/(?:leave|workflow)-/.test(url.pathname)) return false
   if (url.pathname === '/api/workflow-hr-sop-check' && req.method === 'POST') {
     const agent = require('./hrSopCheck')
+    let input
     try {
       // Check room access before extracting files or contacting the model.
-      const input = await readBody(req, { maxBytes: agent.MAX_BODY_BYTES })
+      input = await readBody(req, { maxBytes: agent.MAX_BODY_BYTES })
       sendJson(res, 200, await agent.check(db, req, input))
     } catch (error) {
-      sendJson(res, error.statusCode || 400, false)
+      sendJson(res, error.statusCode || 400, input?.resultMode === 'triState' ? null : false)
     }
     return true
   }

@@ -16,6 +16,148 @@ test('approval bridge authenticates the exact body, direction and time window', 
   assert.throws(() => bridge.verify('', 'decision', envelope, now))
 })
 
+test('signed HRMS SOP check requires the service viewer and the exact SOP branch', async t => {
+  const skipRootEnv = process.env.MIND_MAP_SKIP_ROOT_ENV
+  process.env.MIND_MAP_SKIP_ROOT_ENV = '1'
+  require('../bin/leaveWorkflow/hrSopCheck')
+  if (skipRootEnv === undefined) delete process.env.MIND_MAP_SKIP_ROOT_ENV
+  else process.env.MIND_MAP_SKIP_ROOT_ENV = skipRootEnv
+  const env = {
+    HRMS_API_BASE: 'http://127.0.0.1:8080',
+    WCPD_HRMS_APPROVAL_BRIDGE_KEY: key,
+    WCPD_HRMS_APPROVAL_BRIDGE_CORP_ID: 'test-corp',
+    WCPD_HR_SOP_BRIDGE_VIEWER_ID: 'sop-reader',
+    WCPD_AI_REVIEW_ENABLED: '1',
+    WCPD_AI_REVIEW_API_KEY: 'test',
+    WCPD_AI_REVIEW_MIN_CONFIDENCE: '0.75'
+  }
+  const previous = Object.fromEntries(Object.keys(env).map(name => [name, process.env[name]]))
+  Object.assign(process.env, env)
+  t.after(() => {
+    for (const [name, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[name]
+      else process.env[name] = value
+    }
+  })
+  const root = '7df2ad7a-0978-43be-acb7-3d5e4ead6dd7'
+  const branches = [randomUUID(), randomUUID()]
+  const steps = [randomUUID(), randomUUID(), randomUUID()]
+  const rejectGroup = randomUUID()
+  const rejectRule = randomUUID()
+  const ageGroups = Array.from({ length: 9 }, () => randomUUID())
+  let verdict
+  let role = 'viewer'
+  const db = { async query(sql) {
+    if (sql.includes('room_tombstones')) return { rows: [] }
+    if (sql.includes('from rooms')) return { rows: [{ room_key: 'room-yk3tz4aj' }] }
+    if (sql.includes('room_members')) return { rows: [{ user_id: 'sop-reader', role }] }
+    assert.match(sql, /with recursive branch/)
+    return { rows: [
+      { uid: root, depth: 0, text: '人事流程' },
+      ...branches.map(uid => ({ uid, depth: 1, parent_uid: root, text: '测试分支' })),
+      { uid: steps[0], depth: 2, parent_uid: branches[0], text: 'IT审核', note: '核对日期' },
+      { uid: steps[1], depth: 2, parent_uid: branches[0], text: 'SSC审核' },
+      { uid: steps[2], depth: 2, parent_uid: branches[0], text: '没有规则的审核步骤' },
+      { uid: rejectGroup, depth: 3, parent_uid: steps[0], text: '以下情况拒绝' },
+      { uid: 'step-account', depth: 3, parent_uid: steps[0], text: '账号：it-reviewer' },
+      { uid: rejectRule, depth: 4, parent_uid: rejectGroup, text: '明确不符合要求' },
+      ...[
+        [0, branches[0], 2, '提交要求'],
+        [1, ageGroups[0], 3, '待入职人员'], [2, ageGroups[0], 3, '年龄'],
+        [3, ageGroups[0], 3, '待入职人员简历'], [4, ageGroups[3], 4, '简历附件'],
+        [5, steps[1], 3, '默认同意'], [6, steps[1], 3, '以下情况拒绝'],
+        [7, ageGroups[5], 4, '仅在年龄可核验且小于40岁时自动通过。年龄不满足或无法核验时转人工。'],
+        [8, ageGroups[6], 4, '年龄可核验，且大于或等于 40 周岁时，自动驳回']
+      ].map(([index, parent_uid, depth, text]) => ({ uid: ageGroups[index], parent_uid, depth, text }))
+    ].sort((a, b) => a.depth - b.depth) }
+  } }
+  const model = t.mock.method(globalThis, 'fetch', async () => ({ ok: true, async json() {
+    return { choices: [{ message: { content: JSON.stringify(verdict || {
+      pass: true, branchUid: branches[0], confidence: 0.99
+    }) } }] }
+  } }))
+  async function send(branchUid, signed = true, stepUid, files = [], date = '2026-11-14', resultMode, age, includeReason, match = {}) {
+    let result
+    const fields = age === undefined ? { date: { value: date } } : {
+      name: { label: '姓名', value: '测试甲' }, age: { label: '年龄', value: age }
+    }
+    const submission = JSON.stringify({ 提交字段: fields })
+    const requiredEvidence = stepUid === steps[1] ? [] : [{ type: 'field', key: 'date' }]
+    if (age !== undefined) requiredEvidence.push(
+      { type: 'field', key: 'name' }, { type: 'field', key: 'age' }, { type: 'attachment', key: 'record' })
+    if (stepUid === steps[0]) requiredEvidence.push({ type: 'attachment', key: 'record' })
+    const input = bridge.sign(key, 'hr-sop-check', { corpId: 'test-corp', branchUid, stepUid, text: submission, files, requiredEvidence, resultMode, includeReason, ...match })
+    const headers = {}
+    const handled = await bridge.handle({ method: 'POST' }, { setHeader: (key, value) => { headers[key] = value } }, {
+      url: { pathname: '/api/workflow-hrms-bridge/hr-sop-check' }, db,
+      readBody: async () => signed ? input : { ...input, signature: '0'.repeat(64) },
+      sendJson: (_, status, body) => { result = { status, body } }
+    })
+    assert.equal(handled, true)
+    return resultMode ? { ...result, mode: headers['X-SOP-Result-Mode'] } : result
+  }
+  assert.equal((await send(branches[0], false)).status, 403)
+  assert.deepEqual(await send(branches[0]), { status: 200, body: true })
+  assert.deepEqual(await send(branches[1]), { status: 200, body: false })
+  assert.deepEqual(await send(randomUUID()), { status: 200, body: false })
+  const record = { name: 'record.txt', base64: Buffer.from('test record').toString('base64') }
+  assert.deepEqual(await send(branches[0], true, steps[0]), { status: 200, body: false })
+  assert.deepEqual(await send(branches[0], true, steps[0], [record]), { status: 200, body: false })
+  assert.deepEqual(await send(branches[0], true, steps[0], [{ ...record, fieldKey: 'record' }], ' '), { status: 200, body: false })
+  assert.deepEqual(await send(branches[0], true, steps[1]), { status: 200, body: false })
+  assert.equal(model.mock.callCount(), 2)
+  assert.deepEqual(await send(branches[0], true, steps[0], [{ ...record, fieldKey: 'record' }]), { status: 200, body: true })
+  const modelInput = JSON.parse(model.mock.calls.at(-1).arguments[1].body)
+  const modelEvidence = JSON.parse(modelInput.messages[1].content)
+  assert.deepEqual(modelEvidence.sop.map(node => node.uid), [root, branches[0], steps[0], ageGroups[0], rejectGroup, 'step-account',
+    ...ageGroups.slice(1, 4), rejectRule, ageGroups[4]])
+  assert.deepEqual(await send(branches[0], true, steps[2]), { status: 200, body: false })
+  assert.deepEqual(await send(branches[1], true, steps[0]), { status: 200, body: false })
+  role = null
+  assert.equal((await send(branches[0])).status, 403)
+  assert.equal(model.mock.callCount(), 3)
+  role = 'viewer'
+  const tri = files => send(branches[0], true, steps[0], files, '2026-11-14', 'triState')
+  const complete = [{ ...record, fieldKey: 'record' }]
+  verdict = { decision: 'reject', branchUid: branches[0], confidence: 0.99, rejectRuleUid: rejectRule }
+  assert.deepEqual(await tri([]), { status: 200, body: null, mode: 'triState' })
+  assert.equal(model.mock.callCount(), 3)
+  assert.deepEqual(await tri(complete), { status: 200, body: false, mode: 'triState' })
+  verdict.rejectRuleUid = steps[1]
+  assert.deepEqual(await tri(complete), { status: 200, body: null, mode: 'triState' })
+  verdict.rejectRuleUid = rejectRule
+  verdict.confidence = 0.6
+  assert.deepEqual(await tri(complete), { status: 200, body: null, mode: 'triState' })
+  verdict.decision = 'approve'
+  verdict.confidence = 0.99
+  assert.deepEqual(await tri(complete), { status: 200, body: true, mode: 'triState' })
+  const modelCalls = model.mock.callCount()
+  for (const [age, recorded, result] of [[30, 30, true], [40, 40, false], [30, 45, null]]) {
+    verdict = { decision: result === null ? 'manual' : result ? 'approve' : 'reject',
+      branchUid: steps[1], confidence: 0.99, rejectRuleUid: ageGroups[8] }
+    const file = { ...record, fieldKey: 'record', base64: Buffer.from('年龄：' + recorded + '岁').toString('base64') }
+    assert.deepEqual(await send(branches[0], true, steps[1], [file], '2026-11-14', 'triState', age),
+      { status: 200, body: result, mode: 'triState' })
+    const body = JSON.parse(model.mock.calls.at(-1).arguments[1].body)
+    const { submission } = JSON.parse(body.messages[1].content)
+    assert.equal(submission.fields.age.value, age)
+  }
+  assert.equal(model.mock.callCount(), modelCalls + 3)
+  verdict = { decision: 'approve', confidence: 0.98, reason: '年龄符合通过条件。' }
+  const detail = () => send(branches[0], true, steps[0], complete, '2026-11-14', 'triState', undefined, true)
+  assert.deepEqual((await detail()).body, { result: true, reason: '年龄符合通过条件。' })
+  verdict = { decision: 'reject', confidence: 0.98, rejectRuleUid: rejectRule, reason: '记录不符合要求。' }
+  assert.deepEqual((await detail()).body, { result: false, reason: '命中「明确不符合要求」。记录不符合要求。' })
+  const auto = match => send(branches[0], true, undefined, [], '2026-11-14', 'triState', undefined, true, match)
+  verdict = { decision: 'approve', confidence: 0.98, reason: '符合通过条件。' }
+  assert.deepEqual((await auto({ stepLabel: 'IT审核' })).body, { result: true, reason: '符合通过条件。' })
+  assert.deepEqual((await auto({ stepLabel: '审批人', stepAccount: 'IT-REVIEWER' })).body, { result: true, reason: '符合通过条件。' })
+  const beforeMismatch = model.mock.callCount()
+  assert.equal((await auto({ stepLabel: '找不到的节点' })).body.result, null)
+  assert.equal((await auto({ stepLabel: 'SSC审核', stepAccount: 'it-reviewer' })).body.result, null)
+  assert.equal(model.mock.callCount(), beforeMismatch)
+})
+
 test('only Agent applications have synchronized approval events', () => {
   assert.equal(bridge.isAgent({ template: { agentInput: true } }), true)
   assert.equal(bridge.isAgent({ template: { agentDefinition: { version: '2' } } }), true)
