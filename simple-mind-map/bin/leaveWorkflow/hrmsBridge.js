@@ -230,7 +230,12 @@ async function handle(req, res, { url, db, readBody, sendJson }) {
           (input.stepUid !== undefined && !isUid(input.stepUid)) ||
           [input.stepLabel, input.stepAccount].some(value => value !== undefined &&
             (typeof value !== 'string' || !value.trim() || value.length > 140))) throw denied()
-      const result = await sop.check(db, { authUser: { id: viewer } }, input, input.branchUid, input.stepUid)
+      const viewerReq = { authUser: { id: viewer } }
+      if (input.readPreTasks === true) {
+        sendJson(res, 200, { preTasks: await sop.preTasks(db, viewerReq, input) })
+        return true
+      }
+      const result = await sop.check(db, viewerReq, input, input.branchUid, input.stepUid)
       if (input.resultMode === 'triState') res.setHeader('X-SOP-Result-Mode', 'triState')
       if (input.stepLabel || input.stepAccount) res.setHeader('X-SOP-Step-Matching', '1')
       sendJson(res, 200, result)

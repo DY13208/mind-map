@@ -46,6 +46,7 @@ test('signed HRMS SOP check requires the service viewer and the exact SOP branch
   const rejectRule = randomUUID()
   const ageGroups = Array.from({ length: 9 }, () => randomUUID())
   let verdict
+  let preTodoRecipient = '接收账号：test-user'
   let role = 'viewer'
   const db = { async query(sql) {
     if (sql.includes('room_tombstones')) return { rows: [] }
@@ -60,6 +61,9 @@ test('signed HRMS SOP check requires the service viewer and the exact SOP branch
       { uid: steps[2], depth: 2, parent_uid: branches[0], text: '没有规则的审核步骤' },
       { uid: rejectGroup, depth: 3, parent_uid: steps[0], text: '以下情况拒绝' },
       { uid: 'step-account', depth: 3, parent_uid: steps[0], text: '账号：it-reviewer' },
+      { uid: 'before-review', depth: 3, parent_uid: steps[0], text: '审批前待办' },
+      ...(preTodoRecipient ? [{ uid: 'before-account', depth: 4, parent_uid: 'before-review', text: preTodoRecipient }] : []),
+      { uid: 'before-content', depth: 4, parent_uid: 'before-review', text: '处理内容：核对资产编号' },
       { uid: rejectRule, depth: 4, parent_uid: rejectGroup, text: '明确不符合要求' },
       ...[
         [0, branches[0], 2, '提交要求'],
@@ -155,6 +159,24 @@ test('signed HRMS SOP check requires the service viewer and the exact SOP branch
   const beforeMismatch = model.mock.callCount()
   assert.equal((await auto({ stepLabel: '找不到的节点' })).body.result, null)
   assert.equal((await auto({ stepLabel: 'SSC审核', stepAccount: 'it-reviewer' })).body.result, null)
+  assert.equal(model.mock.callCount(), beforeMismatch)
+  assert.deepEqual(await send(branches[0], true, undefined, [], '2026-11-14', undefined, undefined, undefined,
+    { stepAccount: 'IT-REVIEWER', readPreTasks: true }), {
+    status: 200, body: { preTasks: [{ account: 'test-user', content: '核对资产编号' }] }
+  })
+  assert.deepEqual((await send(branches[0], true, steps[1], [], '2026-11-14', undefined, undefined, undefined,
+    { readPreTasks: true })).body, { preTasks: [] })
+  for (const recipient of ['发起人', '被发起人']) {
+    preTodoRecipient = '接收人：' + recipient
+    assert.deepEqual((await send(branches[0], true, steps[0], [], '2026-11-14', undefined, undefined, undefined,
+      { readPreTasks: true })).body, { preTasks: [{ recipient, content: '核对资产编号' }] })
+  }
+  preTodoRecipient = '接收账号：待入职人员的实际企微账号'
+  assert.equal((await send(branches[0], true, steps[0], [], '2026-11-14', undefined, undefined, undefined,
+    { readPreTasks: true })).status, 400)
+  preTodoRecipient = ''
+  assert.deepEqual((await send(branches[0], true, steps[0], [], '2026-11-14', undefined, undefined, undefined,
+    { readPreTasks: true })).body, { preTasks: [{ recipient: '当前审批人', content: '核对资产编号' }] })
   assert.equal(model.mock.callCount(), beforeMismatch)
 })
 

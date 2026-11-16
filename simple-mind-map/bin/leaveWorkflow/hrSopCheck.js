@@ -41,9 +41,10 @@ function isRejectRule(sop, ruleUid, branchUid, stepUid) {
 function scopeStep(sop, branchUid, stepUid) {
   const branch = sop.find(node => node.uid === branchUid)
   const step = sop.find(node => node.uid === stepUid && node.parentUid === branchUid)
-  if (!step || (!sop.some(node => node.parentUid === stepUid) && !step.note)) return []
+  if (!step || (!sop.some(node => node.parentUid === stepUid && node.text !== '审批前待办') && !step.note)) return []
   const included = new Set([stepUid])
   for (const node of sop) {
+    if (node.parentUid === stepUid && node.text === '审批前待办') continue
     if ((node.parentUid === branchUid && node.text === '提交要求') || included.has(node.parentUid)) {
       included.add(node.uid)
     }
@@ -52,18 +53,49 @@ function scopeStep(sop, branchUid, stepUid) {
   return [{ ...root, note: '' }, { ...branch, note: '' }, ...sop.filter(node => included.has(node.uid))]
 }
 
-function matchStep(sop, branchUid, label, account) {
+function matchingSteps(sop, branchUid, label, account) {
   const normalize = value => String(value || '').normalize('NFKC').trim().toLowerCase()
   const name = normalize(label)
   const user = normalize(account)
-  const matches = sop.filter(node => node.parentUid === branchUid && node.text !== '提交要求' &&
-    sop.some(child => child.parentUid === node.uid && ['默认同意', '以下情况拒绝', '须确认'].includes(child.text)) &&
+  return sop.filter(node => node.parentUid === branchUid && node.text !== '提交要求' &&
+    sop.some(child => child.parentUid === node.uid && ['默认同意', '以下情况拒绝', '须确认', '审批前待办'].includes(child.text)) &&
     (name && normalize(node.text) === name || user && sop.some(child => {
       if (child.parentUid !== node.uid) return false
       const match = /^账号\s*[:：]\s*(.+)$/.exec(child.text)
       return match && normalize(match[1]) === user
     })))
-  return matches.length === 1 ? matches[0].uid : null
+}
+
+async function preTasks(db, req, { branchUid, stepUid, stepLabel, stepAccount }) {
+  await assertRoomAccess(db, { ...req, forceAcl: true }, ROOM, 'view')
+  const rules = await readRules(db)
+  if (!rules.length) throw new Error('无法读取人事 SOP')
+  if (!rules.some(node => node.uid === branchUid && node.parentUid === ROOT)) {
+    throw new Error('未找到绑定的人事 SOP 分支')
+  }
+  const matches = stepUid ? [] : matchingSteps(rules, branchUid, stepLabel, stepAccount)
+  if (matches.length > 1 && matches.some(match =>
+    rules.some(node => node.parentUid === match.uid && node.text === '审批前待办'))) {
+    throw new Error('审批前待办适用步骤匹配不唯一')
+  }
+  const step = stepUid || (matches.length === 1 ? matches[0].uid : null)
+  if (!step) return []
+  if (!rules.some(node => node.uid === step && node.parentUid === branchUid)) {
+    throw new Error('未找到绑定的人事 SOP 审核步骤')
+  }
+  const groups = rules.filter(node => node.parentUid === step && node.text === '审批前待办')
+  if (groups.length > 5) throw new Error('审批前待办最多配置五项')
+  return groups.map(group => {
+    const fields = rules.filter(node => node.parentUid === group.uid).map(node => node.text)
+    const account = /^接收账号\s*[:：]\s*([a-z\d_.@-]{1,128})$/i.exec(fields.find(value => /^接收账号/.test(value)) || '')
+    const recipient = /^接收人\s*[:：]\s*(发起人|被发起人)$/.exec(fields.find(value => /^接收人/.test(value)) || '')
+    const content = /^处理内容\s*[:：]\s*(.+)$/s.exec(fields.find(value => /^处理内容/.test(value)) || '')
+    const hasRecipient = !!(account || recipient)
+    if (fields.length !== (hasRecipient ? 2 : 1) || !content || !content[1].trim() || content[1].length > 500) {
+      throw new Error('审批前待办需要填写处理内容，可单独指定接收账号或接收人')
+    }
+    return { ...(account ? { account: account[1] } : { recipient: recipient?.[1] || '当前审批人' }), content: content[1].trim() }
+  })
 }
 
 async function readRules(db) {
@@ -131,8 +163,9 @@ async function check(db, req, input = {}, expectedBranchUid, stepUid) {
     const branches = new Set(sop.filter(node => node.parentUid === ROOT).map(node => node.uid))
     if (!branches.size || (expectedBranchUid && !branches.has(expectedBranchUid))) return unknown
     if (expectedBranchUid && !stepUid && (input.stepLabel || input.stepAccount)) {
-      stepUid = matchStep(sop, expectedBranchUid, input.stepLabel, input.stepAccount)
-      if (!stepUid) return response(triState ? null : false, '该 SOP 分支下无法唯一匹配当前审批步骤。')
+      const matches = matchingSteps(sop, expectedBranchUid, input.stepLabel, input.stepAccount)
+      if (matches.length !== 1) return response(triState ? null : false, '该 SOP 分支下无法唯一匹配当前审批步骤。')
+      stepUid = matches[0].uid
     }
     const attachments = await Promise.all(files.map(async (file, index) => {
       const parsed = await extractBuffer(buffers[index], {
@@ -184,4 +217,4 @@ async function check(db, req, input = {}, expectedBranchUid, stepUid) {
   }
 }
 
-module.exports = { check, MAX_BODY_BYTES }
+module.exports = { check, preTasks, MAX_BODY_BYTES }
