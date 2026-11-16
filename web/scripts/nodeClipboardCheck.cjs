@@ -187,11 +187,10 @@ async function main() {
   const cutNow = renderer.slice(renderer.indexOf('  async cutNow()'), renderer.indexOf('  isClipboardPasteTargetBlocked('))
   Object.assign(context, {
     historyClipboard: { clearHistoryCopy() {} },
-    getTopAncestorsFomNodeList: nodes => nodes,
-    sortNodeList: nodes => nodes,
     createSmmFormatData: (data, sourceRoom) => ({ simpleMindMap: true, data, sourceRoom })
   })
   vm.runInContext('Object.assign(renderer, {' + copyNow + ',' + cutNow + '})', context)
+  context.renderer.getClipboardNodeList = () => [target]
   context.renderer.mindMap.cooperate = { httpRoomKey: 'A', copyNodeTrees: async () => richPayload.data }
   await context.renderer.copyNow()
   assert.equal(context.renderer.beingCopyData, richPayload.data, 'copy retains complete in-memory tree')

@@ -79,7 +79,7 @@ const collabGeneralization = require(genUtilPath)
 {
   check(
     'copyNodeTrees 对虚拟节点直接用本地实例复制',
-    /async copyNodeTrees\(nodes\) \{[\s\S]{0,900}?if \(isGeneralizationScopeNode\(node\)\) \{[\s\S]{0,200}?copyNodeTree\(\{\}, node, true, true\)/.test(coopSrc)
+    /async copyNodeTrees\(nodes\) \{[\s\S]{0,900}?if \(isGeneralizationScopeNode\(node\)\) \{[\s\S]{0,200}?copyClipboardNodeTree\(node\)/.test(coopSrc)
   )
   check(
     'copyNodeTrees 虚拟分支在 httpFetchDeepSubtree 之前 continue',

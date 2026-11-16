@@ -15,8 +15,18 @@ async function main() {
       const branch = {data:{uid:'branch',text:'分支主题1',expand:true},children:[
         {data:{uid:'child',text:'子主题1'},children:[leaf]},
         {data:{uid:'sibling',text:'子主题2'},children:[]}]}
+      const summaryOwner = {data:{uid:'summary-owner',text:'待归纳',generalization:[{
+        uid:'summary',text:'概要',expand:true,children:[
+          {data:{uid:'summary-a',text:'概要子节点 A',customTextWidth:175,customLeft:10},children:[]},
+          {data:{uid:'summary-b',text:'概要子节点 B'},children:[
+            {data:{uid:'summary-b-child',text:'后代',customLeft:20,customTop:30},children:[]}]},
+          {data:{uid:'summary-c',text:'概要子节点 C',customLeft:40,customTop:50},children:[]}
+        ]
+      }]},children:[]}
+      const destinationBranch = {data:{uid:'target',text:'目标分支'},children:[
+        {data:{uid:'existing',text:'已有子节点'},children:[]}]}
       window.map = new MindMap({el:document.getElementById('map'),data:{data:{uid:'root',text:'根节点'},
-        children:location.hash==='#source'?[branch,{...leaf,data:{...leaf.data,uid:'empty',text:''}}]:[]},fit:true})
+        children:location.hash==='#source'?[branch,summaryOwner,{...leaf,data:{...leaf.data,uid:'empty',text:''}}]:[destinationBranch]},fit:true})
       window.select = uid => {map.execCommand('CLEAR_ACTIVE_NODE');map.renderer.findNodeByUid(uid).active()}
       window.copy = async (uid, native) => {
         select(uid)
@@ -32,7 +42,12 @@ async function main() {
         const html=item.types.includes('text/html')?await (await item.getType('text/html')).text():''
         return {text,payload:readSmmClipboardHtml(html)}
       }
-      window.paste = async () => {select('root');await map.renderer.paste()}
+      window.paste = async (uid = 'root') => {select(uid);await map.renderer.paste()}
+      window.copyMultiple = async uids => {
+        map.execCommand('CLEAR_ACTIVE_NODE')
+        map.renderer.activeMultiNode(uids.map(uid => map.renderer.findNodeByUid(uid)))
+        await map.renderer.copy()
+      }
       window.ready=true
     ` }, bundle: true, write: false, platform: 'browser', external: ['buffer'], logLevel: 'warning'
   })
@@ -70,8 +85,56 @@ async function main() {
         assert.equal(leaf.data.note, '保留备注')
       }
     }
+
+    await source.bringToFront()
+    await source.evaluate(() => copyMultiple(['sibling', 'child']))
+    const ordinaryCopy = await source.evaluate(() => read())
+    assert.deepEqual(ordinaryCopy.payload.data.map(node => node.data.text), ['子主题1', '子主题2'])
+    await destination.bringToFront()
+    await destination.evaluate(() => paste())
+    await destination.waitForFunction(() => !map.renderer.isRendering)
+    assert.deepEqual(await destination.evaluate(() => map.getData().children.slice(-2).map(node => node.data.text)), ['子主题1', '子主题2'])
+
+    await source.bringToFront()
+    await source.evaluate(() => copyMultiple(['summary-c', 'summary-b-child', 'summary-b', 'summary-a']))
+    const summaryCopy = await source.evaluate(() => read())
+    const copiedNodes = summaryCopy.payload.data
+    const summaryTitles = ['概要子节点 A', '概要子节点 B', '概要子节点 C']
+    assert.deepEqual(copiedNodes.map(node => node.data.text), summaryTitles)
+    assert.equal(copiedNodes[0].data.customTextWidth, 175)
+    assert.equal(copiedNodes[1].children[0].data.text, '后代')
+    for (const { data } of [...copiedNodes, copiedNodes[1].children[0]]) {
+      assert.equal(data.customLeft, undefined)
+      assert.equal(data.customTop, undefined)
+    }
+    assert.equal(await source.evaluate(() => map.renderer.findNodeByUid('summary-a').getData('customLeft')), 10)
+    await destination.bringToFront()
+    await destination.evaluate(() => paste('target'))
+    await destination.waitForFunction(() => !map.renderer.isRendering)
+    const pasted = await destination.evaluate(() => {
+      const target = map.renderer.findNodeByUid('target')
+      const geometry = (node, index) => {
+        const path = node.parent._lines[index].node
+        const end = path.getPointAtLength(path.getTotalLength())
+        return {
+          text: node.getData('text'), left: node.left, top: node.top,
+          right: node.left + node.width, bottom: node.top + node.height,
+          lineEndsAtNode: Math.abs(end.x - node.left) < 0.1 &&
+            Math.abs(end.y - (node.top + node.height / 2)) < 0.1,
+          children: node.children.map(geometry)
+        }
+      }
+      return { targetRight: target.left + target.width, children: target.children.map(geometry) }
+    })
+    assert.deepEqual(pasted.children.map(node => node.text), ['已有子节点', ...summaryTitles])
+    const [, first, middle, last] = pasted.children
+    assert.ok(first.left > pasted.targetRight && first.left === middle.left && middle.left === last.left)
+    assert.ok(first.bottom < middle.top && middle.bottom < last.top)
+    assert.ok(middle.children[0].left > middle.right)
+    assert.ok([...pasted.children, ...middle.children].every(node => node.lineEndsAtNode))
+
     assert.deepEqual(errors, [])
-    console.log('PASS browser clipboard: plain titles, hidden HTML, single leaf/subtree, modern/native copy, fresh-page paste with attachments and links')
+    console.log('PASS browser clipboard: attachments, links, native copy, cross-page paste, and summary branch order and positioning')
   } finally {
     if (browser) await browser.close()
     await new Promise(resolve => server.close(resolve))

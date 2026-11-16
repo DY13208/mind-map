@@ -10,6 +10,7 @@ import {
   transformObjectToTreeData,
   removeFromParentNodeData,
   detachNodeFromParent,
+  copyClipboardNodeTree,
   copyNodeTree,
   formatGetNodeGeneralization,
   checkIsNodeStyleDataKey
@@ -9473,7 +9474,7 @@ class Cooperate {
       // 结果整棵复制树被替换成残缺数据 —— 粘贴出来就是一堆重复/空节点。
       // 它们的全部数据就在本地（owner.generalization），直接按实例复制。
       if (isGeneralizationScopeNode(node)) {
-        copied = copyNodeTree({}, node, true, true)
+        copied = copyClipboardNodeTree(node)
         if (copied) trees.push(copied)
         continue
       }

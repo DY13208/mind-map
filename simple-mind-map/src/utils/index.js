@@ -288,6 +288,36 @@ export const copyNodeTree = (
   return tree
 }
 
+// 节点实例是否位于概要虚拟子树内（自身或任一祖先是概要节点）。
+export const isInGeneralizationScope = node => {
+  let depth = 0
+  while (node && depth < 200) {
+    if (node.isGeneralization) return true
+    node = node.parent
+    depth++
+  }
+  return false
+}
+
+export const copyClipboardNodeTree = node => {
+  const tree = copyNodeTree({}, node, true)
+  if (isInGeneralizationScope(node)) {
+    // 概要中的绝对坐标属于源画布，副本应随粘贴目标重新布局。
+    const clearPosition = data => {
+      delete data.customLeft
+      delete data.customTop
+      delete data.isFloating
+      formatGetNodeGeneralization(data).forEach(summary => {
+        clearPosition(summary)
+        ;(summary.children || []).forEach(child => walk(child, null, visit))
+      })
+    }
+    const visit = node => clearPosition(node.data)
+    walk(tree, null, visit)
+  }
+  return tree
+}
+
 //  图片转成dataURL
 export const imgToDataUrl = (src, returnBlob = false) => {
   return new Promise((resolve, reject) => {
