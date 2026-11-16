@@ -219,6 +219,10 @@ class Base {
         newNode.needLayout = true
       }
       this.checkGetGeneralizationChange(newNode, isResizeSource)
+      // 复用节点不会重跑构造函数里的 updateGeneralization。粘贴只把节点挂进
+      // 概要子树时，必须在计算 childrenAreaHeight2 之前重测，否则旁边的分支
+      // 仍按旧高度排，概要变高后压住它们；整页刷新会新建节点，所以看起来刷新就好。
+      this.refreshGeneralizationBeforeLayout(newNode)
     } else if (
       (this.lru.has(uid) || this.renderer.lastNodeCache[uid]) &&
       !this.renderer.reRender
@@ -283,6 +287,7 @@ class Base {
         newNode.needLayout = true
       }
       this.checkGetGeneralizationChange(newNode, isResizeSource)
+      this.refreshGeneralizationBeforeLayout(newNode)
     } else {
       // 创建新节点
       const newUid = uid || createUid()
@@ -350,6 +355,32 @@ class Base {
           gNode.needLayout = true
         }
       })
+    }
+  }
+
+  // 布局读取概要占位之前，按当前子树重测宽高。
+  // 绘制阶段的 renderGeneralization 也会测，但那时主树兄弟的位置已经定了。
+  // 这里只补尺寸，不能走 child.remove()：布局途中把节点组摘掉后，
+  // 父节点的连线还留在画布上，随后若这个节点没被重新挂回，就会剩下一截横线。
+  refreshGeneralizationBeforeLayout(node) {
+    if (
+      !node ||
+      node._measuringGeneralization ||
+      typeof node.checkHasGeneralization !== 'function' ||
+      !node.checkHasGeneralization() ||
+      typeof node.createGeneralizationNode !== 'function'
+    ) {
+      return
+    }
+    const layout = node.renderer && node.renderer.layout
+    const previous = layout && layout._generalizationMeasureOnly
+    if (layout) layout._generalizationMeasureOnly = true
+    node._measuringGeneralization = true
+    try {
+      node.createGeneralizationNode()
+    } finally {
+      node._measuringGeneralization = false
+      if (layout) layout._generalizationMeasureOnly = previous
     }
   }
 
@@ -443,8 +474,29 @@ class Base {
     // 概要后新增子节点）。仅重置 children 会遗留旧 SVG group；这些
     // group 仍挂在共享 nodeDraw 上并继续接收右键事件，导致事件落到
     // 已脱离当前概要树的旧节点实例。
+    // 布局途中的测量（_generalizationMeasureOnly）不能摘掉还在的节点：
+    // 父节点连线不会跟着 child.remove() 消失，画面上就会剩一截线。
+    // 已经不在数据里的节点仍然要摘掉，否则删除后的连线会留下来。
+    const measureOnly = !!this._generalizationMeasureOnly
+    const keepUids = new Set()
+    if (measureOnly) {
+      const collect = (list, depth) => {
+        if (!Array.isArray(list) || depth > 50) return
+        list.forEach(item => {
+          const uid = item && item.data && item.data.uid
+          if (uid) keepUids.add(uid)
+          collect(item && item.children, depth + 1)
+        })
+      }
+      collect(gNode.nodeData && gNode.nodeData.children, 0)
+    }
     ;(gNode.children || []).forEach(child => {
-      if (child && typeof child.remove === 'function') child.remove()
+      if (!child || typeof child.remove !== 'function') return
+      if (measureOnly) {
+        const uid = typeof child.getData === 'function' && child.getData('uid')
+        if (uid && keepUids.has(uid)) return
+      }
+      child.remove()
     })
     gNode.children = []
     const tree = gNode.nodeData

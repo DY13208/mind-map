@@ -849,13 +849,15 @@ class MindMapNode {
 
   //  递归删除，只是从画布删除，节点容器还在，后续还可以重新插回画布
   remove() {
-    if (!this.group) return
-    this.group.remove()
-    this.removeGeneralization()
+    // 没有 group 也要清线。否则节点组先被摘掉、连线还挂在 lineDraw 上，
+    // 下次重建会再画一套，旧线就留在画布上。
     this.removeLine()
+    if (this.group) this.group.remove()
+    this.removeGeneralization()
     // 子节点
     if (this.children && this.children.length) {
-      this.children.forEach(item => {
+      const children = this.children.splice(0, this.children.length)
+      children.forEach(item => {
         item.remove()
       })
     }
