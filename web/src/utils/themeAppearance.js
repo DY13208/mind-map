@@ -12,6 +12,28 @@ const BUILTIN_THEMES = [
   ...themeList
 ]
 
+export function registerMindMapThemes(MindMap) {
+  themeList.forEach(({ value, theme }) => {
+    if (value !== 'classic4') {
+      MindMap.defineTheme(value, theme)
+      return
+    }
+
+    const summaryAccent = '#806136'
+    MindMap.defineTheme(value, {
+      ...theme,
+      generalizationLineColor: summaryAccent,
+      generalization: {
+        ...theme.generalization,
+        fillColor: '#fff3da',
+        color: '#392707',
+        borderColor: summaryAccent,
+        borderWidth: 1
+      }
+    })
+  })
+}
+
 export function collectThemeMeta(extendThemeGroupList = []) {
   const extendThemes = []
   ;(extendThemeGroupList || []).forEach(group => {

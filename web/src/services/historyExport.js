@@ -9,9 +9,9 @@ import OuterFrame from 'simple-mind-map/src/plugins/OuterFrame.js'
 import NodeBase64ImageStorage from 'simple-mind-map/src/plugins/NodeBase64ImageStorage.js'
 import RainbowLines from 'simple-mind-map/src/plugins/RainbowLines.js'
 import MindMapLayoutPro from 'simple-mind-map/src/plugins/MindMapLayoutPro.js'
-import Themes from 'simple-mind-map-plugin-themes'
 import { downloadFile, imgToDataUrl } from 'simple-mind-map/src/utils/index'
 import { ERROR_TYPES } from 'simple-mind-map/src/constants/constant'
+import { registerMindMapThemes } from '../utils/themeAppearance'
 
 export const HISTORY_EXPORT_TYPES = Object.freeze([
   'smm',
@@ -156,7 +156,7 @@ function ensureThemesRegistered() {
   if (!themesRegistered) {
     // The editor normally initializes these templates. History can be opened
     // from the product shell without mounting the editor first.
-    Themes.init(MindMap)
+    registerMindMapThemes(MindMap)
     themesRegistered = true
   }
 }

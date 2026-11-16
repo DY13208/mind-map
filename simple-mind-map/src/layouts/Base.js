@@ -469,6 +469,7 @@ class Base {
           index,
           ancestors
         )
+        return cur.data.expand === false
       },
       (cur, parent, isRoot, layerIndex) => {
         if (isRoot || !cur._node) return

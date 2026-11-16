@@ -3742,8 +3742,11 @@ export default {
       if (this.jobDispatching || this.isReadonly) return
       this.jobDispatching = true
       const active = (this.activeNodes || [])[0]
+      const targetNode = active && active.isGeneralization
+        ? this.generalizationOwner(active)
+        : active
       const runNode =
-        options.node || (active && !active.isGeneralization ? active : null)
+        options.node || (targetNode && !targetNode.isGeneralization ? targetNode : null)
       try {
         // —— 用哪条通道（2026-10-08 用户要求）——
         // 在右侧栏「设置 → AI 执行引擎」选一次，这里直接读，**不再弹窗**。

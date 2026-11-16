@@ -115,7 +115,6 @@ import Demonstrate from 'simple-mind-map/src/plugins/Demonstrate.js'
 import OuterFrame from 'simple-mind-map/src/plugins/OuterFrame.js'
 import MindMapLayoutPro from 'simple-mind-map/src/plugins/MindMapLayoutPro.js'
 import NodeBase64ImageStorage from 'simple-mind-map/src/plugins/NodeBase64ImageStorage.js'
-import Themes from 'simple-mind-map-plugin-themes'
 import Cooperate from 'simple-mind-map/src/plugins/Cooperate.js'
 import OutlineSidebar from './OutlineSidebar.vue'
 import Style from './Style.vue'
@@ -164,7 +163,7 @@ import {
 import handleClipboardText from '@/utils/handleClipboardText'
 import { copyNodeAttachments } from '@/utils/copyNodeAttachments'
 import { getRuntimeConfig } from '@/utils/runtimeConfig'
-import { isDarkThemeValue, resolveAppearanceTheme } from '@/utils/themeAppearance'
+import { isDarkThemeValue, registerMindMapThemes, resolveAppearanceTheme } from '@/utils/themeAppearance'
 import Scrollbar from './Scrollbar.vue'
 import exampleData from 'simple-mind-map/example/exampleData'
 import FormulaSidebar from './FormulaSidebar.vue'
@@ -227,7 +226,7 @@ MindMap.usePlugin(MiniMap)
   .usePlugin(Cooperate)
 
 // 注册主题
-Themes.init(MindMap)
+registerMindMapThemes(MindMap)
 // 扩展主题列表
 if (typeof window.MoreThemes !== 'undefined') {
   window.MoreThemes.init(MindMap)
@@ -1063,7 +1062,6 @@ export default {
       if (!this.mindMap) return
       this.mindMap.on('node_tree_render_start', this.syncCanvasDarkBackground)
       this.mindMap.on('view_theme_change', this.onViewThemeChange)
-      this.mindMap.on('node_click', this.onGeneralizationNodeClick)
       this.mindMap.on('node_tree_render_end', this.markGeneralizationClickable)
     },
 
@@ -1071,27 +1069,7 @@ export default {
       if (!this.mindMap) return
       this.mindMap.off('node_tree_render_start', this.syncCanvasDarkBackground)
       this.mindMap.off('view_theme_change', this.onViewThemeChange)
-      this.mindMap.off('node_click', this.onGeneralizationNodeClick)
       this.mindMap.off('node_tree_render_end', this.markGeneralizationClickable)
-    },
-
-    /**
-     * 概要点不是一个真正的节点，不能当「运行」的落点：
-     * 点它之后把选中切回它所属的那个节点（点概要 = 选中「按它继续」，
-     * 派发由工具栏「运行」按钮做；这里只负责把选中状态掰回来 ——
-     * active() 是在 emit 之后同步跑的，所以推到下一 tick）。
-     */
-    onGeneralizationNodeClick(node) {
-      if (!node || !node.isGeneralization || !this.mindMap) return
-      const owner = node.generalizationBelongNode || node.parent
-      if (!owner) return
-      this.$nextTick(() => {
-        const renderer = this.mindMap && this.mindMap.renderer
-        if (!renderer) return
-        if (renderer.clearActiveNodeList) renderer.clearActiveNodeList()
-        if (renderer.addNodeToActiveList) renderer.addNodeToActiveList(owner)
-        if (renderer.emitNodeActiveEvent) renderer.emitNodeActiveEvent(owner)
-      })
     },
 
     /** 概要点做成「像能点的」：手型鼠标 + 悬停提示（渲染完顺手刷一遍） */
@@ -1520,8 +1498,7 @@ export default {
         this.isLargeMap = true
         this.mindMap.updateConfig({
           openPerformance: true,
-          openRealtimeRenderOnNodeTextEdit: false,
-          isShowExpandNum: nodeCount >= 200
+          openRealtimeRenderOnNodeTextEdit: false
         })
         if (prepared && prepared.collapsed && !quiet) {
           this.$message.info(this.$t('edit.largeMapImportTip'))

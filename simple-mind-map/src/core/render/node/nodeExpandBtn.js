@@ -197,13 +197,13 @@ function updateExpandBtnPos() {
 
 //  创建展开收缩按钮
 function renderExpandBtn() {
-  if (!this.group || this.isGeneralization) return
+  if (!this.group || this.mindMap.opt.notShowExpandBtn) return
   if (this.getChildrenLength() <= 0 || this.isRoot) {
     return
   }
   const { isShowCreateChildBtnIcon, readonly } = this.mindMap.opt
   if (
-    isShowCreateChildBtnIcon &&
+    isShowCreateChildBtnIcon && !this.isGeneralization &&
     !readonly &&
     this.getData('isActive') &&
     this.getData('expand') !== false

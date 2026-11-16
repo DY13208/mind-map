@@ -416,6 +416,7 @@ class MindMap extends Base {
         (isLeft ? item.generalizationNode.width : 0)
       item.generalizationNode.top =
         top + (bottom - top - item.generalizationNode.height) / 2
+      item.generalizationNode.dir = item.node.dir
       this.layoutGeneralizationChildren(
         item.generalizationNode,
         'h',

@@ -5,6 +5,7 @@
  * → babel 转 CJS → 用 require stub 加载 → 把 methods bind 到手写的 mock vm 上跑。
  */
 const assert = require('assert').strict
+const { EventEmitter } = require('node:events')
 const fs = require('fs')
 const path = require('path')
 const babel = require('@babel/core')
@@ -114,6 +115,7 @@ new Function('require', 'module', 'exports', code)(name => {
   if (name === '@/utils/mindmapRunPrompt') return runPrompt
   if (name === '@/utils/runChannel') return runChannelUtil
   if (name === '@/utils/runLog') return runLogUtil
+  if (name === '@/utils/knowledgeFiles') return { appendKnowledgeFullText: async prompt => prompt }
   if (name === '@/utils/workbuddyJobBridge') return bridgeStub
   return {}
 }, mod, mod.exports)
@@ -232,12 +234,49 @@ const GEN_ORPHAN = makeNode('没有所属节点', {}, {
   isGeneralization: true
 })
 
+async function checkEditorSummarySelection() {
+  const source = fs.readFileSync(path.join(WEB, 'src/pages/Edit/components/Edit.vue'), 'utf8')
+  const { script } = compiler.parseComponent(source)
+  const { code } = babel.transformSync(script.content, {
+    babelrc: false,
+    configFile: false,
+    plugins: [require.resolve('@babel/plugin-transform-modules-commonjs')]
+  })
+  const module = { exports: {} }
+  const mindMapStub = { usePlugin: () => mindMapStub }
+  new Function('require', 'module', 'exports', 'window', code)(name => {
+    if (name === 'simple-mind-map') return mindMapStub
+    if (name === '@/utils/themeAppearance') return { registerMindMapThemes() {} }
+    if (name === 'vuex') return { mapState: () => ({}), mapMutations: () => ({}) }
+    return {}
+  }, module, module.exports, {})
+
+  const mindMap = new EventEmitter()
+  let selection = [OWNER]
+  mindMap.renderer = {
+    clearActiveNodeList: () => { selection = [] },
+    addNodeToActiveList: node => { selection.push(node) }
+  }
+  const editor = { mindMap, $nextTick: callback => Promise.resolve().then(callback) }
+  Object.entries(module.exports.default.methods).forEach(([key, method]) => {
+    editor[key] = method.bind(editor)
+  })
+  editor.bindCanvasThemeEvents()
+  // 核心节点的 click 回调先发事件，再同步激活节点。
+  mindMap.emit('node_click', GEN_WRITTEN)
+  selection = [GEN_WRITTEN]
+  await Promise.resolve()
+  check('编辑器保持点击后的概要选中状态', selection.length === 1 && selection[0] === GEN_WRITTEN)
+  editor.unbindCanvasThemeEvents()
+}
+
 async function main() {
+  await checkEditorSummarySelection()
   // ---- 1. 点概要不再直接派发 ----
   dispatched.length = 0
   let vm = makeVm()
-  vm.activeNodes = [OWNER]
   vm.onJobNodeClick(GEN_WRITTEN)
+  vm.onNodeActive(GEN_WRITTEN, [GEN_WRITTEN])
   check('点概要不会立刻派发', dispatched.length === 0)
   check(
     '点概要只记下「按这条继续」',
@@ -266,8 +305,8 @@ async function main() {
   dispatched.length = 0
   genStore.text = '接着把投放计划细化到周，并给出预算分配'
   vm = makeVm()
-  vm.activeNodes = [OWNER]
   vm.onJobNodeClick(GEN_WRITTEN)
+  vm.onNodeActive(GEN_WRITTEN, [GEN_WRITTEN])
   await vm.runWorkbuddyJob({ channel: 'bridge' })
   const containerEvt = vm.events.find(a => a[0] === 'create_job_container')
   check('点运行派发了一次', dispatched.length === 1, JSON.stringify(dispatched[0] && dispatched[0].name))
@@ -290,13 +329,14 @@ async function main() {
     JSON.stringify(containerEvt && containerEvt[1].nodeUid)
   )
   check('任务名标出这是继续执行', /继续$/.test(dispatched[0].name), dispatched[0].name)
+  check('运行后画布仍可选中概要', vm.activeNodes[0] === GEN_WRITTEN)
 
   // ---- 4. 运行时现取概要最新文字（双击改完文字再点运行，用的是新文字）----
   dispatched.length = 0
   genStore.text = '改成：先算预算上限，再排周计划'
   vm = makeVm()
-  vm.activeNodes = [OWNER]
   vm.onJobNodeClick(GEN_WRITTEN)
+  vm.onNodeActive(GEN_WRITTEN, [GEN_WRITTEN])
   await vm.runWorkbuddyJob({ channel: 'bridge' })
   check(
     '用的是概要当下的文字（不是点时的快照）',
@@ -308,8 +348,8 @@ async function main() {
   dispatched.length = 0
   genStore.text = jobWriter.FOLLOW_UP_PLACEHOLDER
   vm = makeVm()
-  vm.activeNodes = [OWNER]
   vm.onJobNodeClick(GEN_EMPTY)
+  vm.onNodeActive(GEN_EMPTY, [GEN_EMPTY])
   check(
     '占位概要点了也不弹提醒（用户要求去掉运行提醒）',
     vm.messages.length === 0,
@@ -327,8 +367,9 @@ async function main() {
   dispatched.length = 0
   genStore.text = '接着把投放计划细化到周'
   vm = makeVm()
-  vm.activeNodes = [OTHER]
-  vm.onJobNodeClick(GEN_WRITTEN) // 记的是 owner-1
+  vm.onJobNodeClick(GEN_WRITTEN)
+  vm.onNodeActive(GEN_WRITTEN, [GEN_WRITTEN])
+  vm.onNodeActive(OTHER, [OTHER])
   await vm.runWorkbuddyJob({ channel: 'bridge' })
   check(
     '换节点后概要自动失效，按新节点默认任务跑',

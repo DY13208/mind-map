@@ -117,7 +117,10 @@ function makeEnv(owner) {
     createGeneralizationChildNodes: gNode => {
       rebuildCalls.push(gNode)
       // 模拟真实实现：清空并重建 children
-      gNode.children = (gNode.nodeData.children || []).map(child => {
+      const children = gNode.getData('expand') === false
+        ? []
+        : gNode.nodeData.children || []
+      gNode.children = children.map(child => {
         const n = new FakeMindMapNode({
           data: child,
           isGeneralization: true,
@@ -184,6 +187,36 @@ rebuildCalls.length = 0
 itemA.children[0].data.expand = false
 api.createGeneralizationNode.call(owner)
 check('展开态变化：触发重建', rebuildCalls.length === 1)
+
+// ---- 概要自身收起后复用空分支，展开时恢复原有子节点 ----
+{
+  const gNode = owner._generalizationList[0].generalizationNode
+  const rawChildren = itemA.children
+  const expectedUids = rawChildren.map(child => child.data.uid).join(',')
+
+  rebuildCalls.length = 0
+  itemA.expand = false
+  api.createGeneralizationNode.call(owner)
+  check('收起概要：重建且不渲染子节点', rebuildCalls.length === 1 && gNode.children.length === 0)
+  check(
+    '收起概要：保留原始子节点数据',
+    itemA.children === rawChildren && gNode.nodeData.children === rawChildren &&
+      rawChildren.map(child => child.data.uid).join(',') === expectedUids
+  )
+
+  const collapsedChildren = gNode.children
+  rebuildCalls.length = 0
+  api.createGeneralizationNode.call(owner)
+  check('保持收起：复用空的渲染分支', rebuildCalls.length === 0 && gNode.children === collapsedChildren)
+
+  rebuildCalls.length = 0
+  itemA.expand = true
+  api.createGeneralizationNode.call(owner)
+  check(
+    '重新展开概要：按原顺序恢复子节点',
+    rebuildCalls.length === 1 && gNode.children.map(child => child.getData('uid')).join(',') === expectedUids
+  )
+}
 
 // ---- 5. children 数组被整体替换（远端快照）：必须重建 ----
 rebuildCalls.length = 0

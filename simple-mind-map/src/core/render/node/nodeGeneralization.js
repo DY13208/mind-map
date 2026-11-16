@@ -312,12 +312,13 @@ function createGeneralizationNode() {
     // child.remove() + 重建，正在编辑的节点会被拆掉，输入内容随之丢失。
     const structureSig = generalizationStructureSignature(item)
     const kids = cur.generalizationNode.children
+    const visibleChildCount = item.expand === false ? 0 : item.children.length
     const reusable =
       !!cur.structureSig &&
       cur.structureSig === structureSig &&
       cur.childrenRef === item.children &&
       Array.isArray(kids) &&
-      kids.length === item.children.length &&
+      kids.length === visibleChildCount &&
       kids.every(child => child && child.group)
     if (!reusable) {
       layout.createGeneralizationChildNodes(cur.generalizationNode)
