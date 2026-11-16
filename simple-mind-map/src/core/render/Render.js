@@ -13,7 +13,8 @@ import TextEdit from './TextEdit'
 import ViewportIndex from '../../utils/viewportIndex'
 import { walkLayoutInSlices, runWorkInSlices } from '../../utils/layoutSlices'
 import {
-  copyNodeTree,
+  copyClipboardNodeTree,
+  isInGeneralizationScope,
   simpleDeepClone,
   walk,
   bfsWalk,
@@ -109,18 +110,6 @@ function countVisibleLayoutNodes(tree) {
     for (let i = 0; i < kids.length; i += 1) stack.push(kids[i])
   }
   return count
-}
-
-// 节点实例是否位于概要虚拟子树内（自身或任一祖先是概要节点）。
-function isInGeneralizationScope(node) {
-  let cur = node
-  let depth = 0
-  while (cur && depth < 200) {
-    if (cur.isGeneralization) return true
-    cur = cur.parent
-    depth++
-  }
-  return false
 }
 
 // 就地剔除 nodeData 子树上的渲染期实例引用（`_node` → MindMapNode，
@@ -2174,19 +2163,35 @@ class Render {
     }
   }
 
+  getClipboardNodeList(excludeRoot = false) {
+    const nodes = getTopAncestorsFomNodeList(this.activeNodeList).filter(
+      node => !excludeRoot || !node.isRoot
+    )
+    if (nodes.length < 2 || !nodes.some(isInGeneralizationScope)) {
+      return sortNodeList(nodes)
+    }
+
+    // 主树的 sortIndex 不包含概要子树，按包含概要的渲染树顺序复制。
+    const pending = new Set(nodes)
+    const ordered = []
+    this.forEachRenderedNode(node => {
+      if (pending.delete(node)) ordered.push(node)
+    })
+    return ordered.concat([...pending])
+  }
+
   async copyNow() {
     if (this.activeNodeList.length <= 0) {
       this.beingCopyData = null
       return
     }
     historyClipboard.clearHistoryCopy()
-    let nodeList = getTopAncestorsFomNodeList(this.activeNodeList)
-    nodeList = sortNodeList(nodeList)
+    const nodeList = this.getClipboardNodeList()
     const cooperate = this.mindMap.cooperate
     if (cooperate && typeof cooperate.copyNodeTrees === 'function') {
       this.beingCopyData = await cooperate.copyNodeTrees(nodeList)
     } else {
-      this.beingCopyData = nodeList.map(node => copyNodeTree({}, node, true))
+      this.beingCopyData = nodeList.map(copyClipboardNodeTree)
     }
     if (!this.beingCopyData) return
     if (!this.mindMap.opt.disabledClipboard) {
@@ -2220,10 +2225,7 @@ class Render {
       cooperate &&
       typeof cooperate.copyNodeTrees === 'function'
     ) {
-      let nodeList = getTopAncestorsFomNodeList(this.activeNodeList).filter(
-        node => !node.isRoot
-      )
-      nodeList = sortNodeList(nodeList)
+      const nodeList = this.getClipboardNodeList(true)
       copied = await cooperate.copyNodeTrees(nodeList)
     }
     this.mindMap.execCommand('CUT_NODE', copyData => {
@@ -2938,11 +2940,8 @@ class Render {
     if (this.activeNodeList.length <= 0) {
       return null
     }
-    let nodeList = getTopAncestorsFomNodeList(this.activeNodeList)
-    nodeList = sortNodeList(nodeList)
-    return nodeList.map(node => {
-      return copyNodeTree({}, node, true)
-    })
+    const nodeList = this.getClipboardNodeList()
+    return nodeList.map(copyClipboardNodeTree)
   }
 
   //  剪切节点
@@ -2954,16 +2953,9 @@ class Render {
       return
     }
     // 找出激活节点中的顶层节点列表，并过滤掉根节点
-    let nodeList = getTopAncestorsFomNodeList(this.activeNodeList).filter(
-      node => {
-        return !node.isRoot
-      }
-    )
-    nodeList = sortNodeList(nodeList)
+    const nodeList = this.getClipboardNodeList(true)
     // 复制数据
-    const copyData = nodeList.map(node => {
-      return copyNodeTree({}, node, true)
-    })
+    const copyData = nodeList.map(copyClipboardNodeTree)
     // 从父节点的数据中移除
     nodeList.forEach(node => {
       this.mindMap.command.recordContentChange?.({ removed: [node] })
