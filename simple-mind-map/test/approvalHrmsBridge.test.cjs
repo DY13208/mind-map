@@ -112,6 +112,7 @@ test('signed HRMS SOP check requires the service viewer and the exact SOP branch
   assert.equal(model.mock.callCount(), 2)
   assert.deepEqual(await send(branches[0], true, steps[0], [{ ...record, fieldKey: 'record' }]), { status: 200, body: true })
   const modelInput = JSON.parse(model.mock.calls.at(-1).arguments[1].body)
+  assert.match(modelInput.messages[0].content, /核对该流程所有必填字段/)
   const modelEvidence = JSON.parse(modelInput.messages[1].content)
   assert.deepEqual(modelEvidence.sop.map(node => node.uid), [root, branches[0], steps[0], ageGroups[0], rejectGroup, 'step-account',
     ...ageGroups.slice(1, 4), rejectRule, ageGroups[4]])
@@ -150,6 +151,19 @@ test('signed HRMS SOP check requires the service viewer and the exact SOP branch
   verdict = { decision: 'approve', confidence: 0.98, reason: '年龄符合通过条件。' }
   const detail = () => send(branches[0], true, steps[0], complete, '2026-11-14', 'triState', undefined, true)
   assert.deepEqual((await detail()).body, { result: true, reason: '年龄符合通过条件。' })
+  const selected = await send(branches[0], true, steps[0], complete, '2026-11-14', 'triState', undefined, true,
+    { selectedEvidenceOnly: true })
+  assert.equal(selected.body.result, true)
+  const selectedPrompt = JSON.parse(model.mock.calls.at(-1).arguments[1].body).messages[0].content
+  assert.match(selectedPrompt, /本次只核验目标审核步骤/)
+  assert.doesNotMatch(selectedPrompt, /核对该流程所有必填字段/)
+  const subsidyFiles = Array.from({ length: 6 }, (_, index) => ({ ...complete[0], name: `proof-${index}.txt` }))
+  assert.equal((await tri(subsidyFiles)).body, null)
+  const subsidy = await send(branches[0], true, steps[0], subsidyFiles, '2026-11-14', 'triState', undefined, true,
+    { subsidyEvidence: true })
+  assert.equal(subsidy.body.result, true)
+  const subsidyPrompt = JSON.parse(model.mock.calls.at(-1).arguments[1].body)
+  assert.equal(JSON.parse(subsidyPrompt.messages[1].content).submission.attachments.length, 6)
   verdict = { decision: 'reject', confidence: 0.98, rejectRuleUid: rejectRule, reason: '记录不符合要求。' }
   assert.deepEqual((await detail()).body, { result: false, reason: '命中「明确不符合要求」。记录不符合要求。' })
   const auto = match => send(branches[0], true, undefined, [], '2026-11-14', 'triState', undefined, true, match)
