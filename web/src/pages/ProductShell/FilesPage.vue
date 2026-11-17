@@ -92,28 +92,6 @@
             @toggle-select="toggleFolderSelect"
           />
         </template>
-      <template v-if="mode === 'trash' && visibleRooms.length"
-        ><div class="trashList">
-          <div v-for="room in visibleRooms" :key="room.id" class="trashRow">
-            <div class="trashIcon"><i class="el-icon-document" /></div>
-            <div>
-              <strong>{{ room.title }}</strong
-              ><span
-                >删除于 {{ formatDate(room.deletedAt) }} · 原位置
-                {{ room.folderName }}</span
-              >
-            </div>
-            <el-button size="small" @click="restore(room)">恢复</el-button
-            ><el-button
-              size="small"
-              type="danger"
-              plain
-              @click="permanentDelete(room)"
-              >永久删除</el-button
-            >
-          </div>
-        </div></template
-      >
         <RoomCard
           v-for="room in visibleRooms"
           :key="room.roomKey || room.id"
@@ -133,6 +111,24 @@
           @delete="deleteRoom"
           @toggle-select="toggleRoomSelect"
         />
+      </div>
+      <div v-if="mode === 'trash' && visibleRooms.length" class="trashList">
+        <div v-for="room in visibleRooms" :key="room.id" class="trashRow">
+          <div class="trashIcon"><i class="el-icon-document" /></div>
+          <div>
+            <strong>{{ room.title }}</strong>
+            <span>
+              删除于 {{ formatDate(room.deletedAt) }} · 原位置 {{ room.folderName }}
+            </span>
+          </div>
+          <el-button size="small" @click="restore(room)">恢复</el-button>
+          <el-button
+            size="small"
+            type="danger"
+            plain
+            @click="permanentDelete(room)"
+          >永久删除</el-button>
+        </div>
       </div>
       <RoomList
         v-if="mode !== 'trash' && (view === 'list' && !isMobileViewport) && itemCount"
@@ -561,7 +557,7 @@ export default {
         : []
     },
     visibleRooms() {
-      if (this.isMobileViewport && this.mobileKind === 'folders') return []
+      if (this.useMobileFilesHeader && this.mobileKind === 'folders') return []
       const q = this.search.trim().toLowerCase()
       const rooms = this.rooms.filter(room => {
         if (this.roleFilter && room.role !== String(this.roleFilter).toLowerCase()) {
