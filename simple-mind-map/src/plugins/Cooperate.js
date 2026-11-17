@@ -2993,18 +2993,21 @@ class Cooperate {
       if (name === 'node.batch') (body && body.ops || []).forEach(item => collectInserted(item.type, item.payload))
     }
     collectInserted(type, payload)
-    const creationEvents = []
-    const collectCreationAck = (name, body) => {
+    const placementEvents = []
+    const collectPlacementAck = (name, body) => {
       if ((name === 'node.inserted' || name === 'node.insert') && body && insertedUids.has(String(body.uid))) {
-        creationEvents.push({ type: 'node.inserted', payload: body })
+        placementEvents.push({ type: 'node.inserted', payload: body })
+      }
+      if (['node.move', 'node.moved', 'node.reorder', 'node.reordered'].includes(name) && body && body.uid) {
+        placementEvents.push({ type: 'node.moved', payload: body })
       }
     }
     if (Array.isArray(committedPayload.events)) {
-      committedPayload.events.forEach(item => collectCreationAck(item.type, item.payload))
+      committedPayload.events.forEach(item => collectPlacementAck(item.type, item.payload))
     } else if (Array.isArray(committedPayload.ops)) {
-      committedPayload.ops.forEach(item => collectCreationAck(item.type, item.payload))
+      committedPayload.ops.forEach(item => collectPlacementAck(item.type, item.payload))
     } else {
-      collectCreationAck(committedType, committedPayload)
+      collectPlacementAck(committedType, committedPayload)
     }
     const ackSessionId = type === 'node.update' && payload && payload.uid
       ? this._pendingEditSessionByFingerprint.get(this.editSessionOperationFingerprint(payload.uid, payload.patch, payload.expected))
@@ -3071,7 +3074,10 @@ class Cooperate {
         v2Trace('ack.reconcile.skip-scope-changed', {})
         return false
       }
-      creationEvents.forEach(event => this.acknowledgeLocalNodeCreation(event, committedRev))
+      placementEvents.forEach(event => {
+        if (event.type === 'node.inserted') this.acknowledgeLocalNodeCreation(event, committedRev)
+        else this.acknowledgeLocalNodePlacement(event, committedRev)
+      })
       const renderer = this.mindMap && this.mindMap.renderer
       const context = {
         epoch: scope.epoch,
@@ -3128,6 +3134,26 @@ class Cooperate {
     })
     this._v2RemoteApplyQueue = task.catch(() => {})
     return task
+  }
+
+  acknowledgeLocalNodePlacement(event, revision) {
+    const payload = event && event.payload || {}
+    const uid = String(payload.uid || '')
+    if (!uid || !this.currentData || !Number.isSafeInteger(revision) || revision <= 0) return
+    if (this.isTombstonedUid(uid)) return
+    if (!this._structuralGuardRevisions) this._structuralGuardRevisions = new Map()
+    if ((this._structuralGuardRevisions.get(uid) || 0) > revision) return
+    const siblingPositions = Object.fromEntries(Object.entries(payload.siblingPositions || {}).filter(([id]) =>
+      (this._structuralGuardRevisions.get(String(id)) || 0) <= revision
+    ))
+    // The canvas already reflects this move. Update only committed authority,
+    // so the next insert cannot project the sibling order from before the drag.
+    this.currentData = applyCollabEvent(this.currentData, {
+      ...event, payload: { ...payload, siblingPositions }
+    }, { allowPartial: true })
+    ;[uid, ...Object.keys(siblingPositions)].forEach(id => {
+      this._structuralGuardRevisions.set(String(id), revision)
+    })
   }
 
   acknowledgeLocalNodeCreation(event, revision) {
