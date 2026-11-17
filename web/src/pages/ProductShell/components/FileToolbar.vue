@@ -39,7 +39,7 @@
       <i :class="favoritesActive ? 'el-icon-star-on' : 'el-icon-star-off'" aria-hidden="true" />
     </button>
     </ActionTooltip>
-    <ThemeModeToggle />
+    <ThemeModeToggle v-if="!isMobileViewport || shellMode === 'embed'" />
 
     <el-dropdown
       v-if="showCreate || showCreateFolder"
@@ -90,6 +90,7 @@ export default {
   components: { FileSearch, ThemeModeToggle, ActionTooltip },
   props: {
     search: String,
+    isMobileViewport: Boolean,
     showFavorites: { type: Boolean, default: false },
     favoritesActive: { type: Boolean, default: false },
     showCreate: { type: Boolean, default: true },

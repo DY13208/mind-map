@@ -20,6 +20,7 @@
     <FileToolbar
       v-else
       :search.sync="search"
+      :is-mobile-viewport="isMobileViewport"
       :show-favorites="!isTeamView && ['files', 'folder', 'favorites'].includes(mode)"
       :favorites-active="mode === 'favorites'"
       :show-create="!isMobileViewport && (mode === 'files' || mode === 'folder')"
@@ -34,12 +35,14 @@
       @toggle-favorites="toggleFavorites"
     >
       <FolderBreadcrumb
+        v-if="mode === 'files' || mode === 'folder' || mode === 'favorites'"
         slot="title"
         :path="folder ? folderPath : mode === 'favorites' ? favoritesCrumb : []"
         :team-id="selectedTeamId"
         :base-path="filesBasePath"
         :root-label="isTeamView && selectedTeam ? selectedTeam.name : '脑图'"
       />
+      <span v-else slot="title">{{ pageTitle }}</span>
     </FileToolbar>
     <MobileCreateMenu :visible="mobileCreateOpen" :can-create-folder="!isTeamView || canManageTeam" @close="mobileCreateOpen = false" @select="selectMobileCreate" />
     <BatchActionBar
@@ -72,7 +75,12 @@
         show-icon
       /><el-button @click="load({ reset: true, keepPage: true })">重试</el-button>
     </div>
-    <div v-else v-loading="loading || busy" class="contentArea">
+    <div
+      v-else
+      v-loading="loading || busy"
+      :element-loading-text="loading ? '正在加载…' : ''"
+      class="contentArea"
+    >
       <div v-if="mode !== 'trash' && (view === 'card' || isMobileViewport) && itemCount" class="itemGrid">
         <template v-if="showFolders">
           <FolderCard
