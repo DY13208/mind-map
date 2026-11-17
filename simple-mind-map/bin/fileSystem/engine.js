@@ -1028,6 +1028,7 @@ function createFileSystem(options = {}) {
       if (!folder) folderId = null
     }
     const row = await store.restoreRoom(roomKey, folderId)
+    if (!row) throw fsError('ROOM_NOT_FOUND', 'room not found', 404)
     notifyStorage(roomKey, 'restore')
     return publicFile(
       {
@@ -1046,7 +1047,9 @@ function createFileSystem(options = {}) {
     if (!before.deleted_at) {
       throw fsError('ROOM_NOT_TRASHED', '只能永久删除回收站中的脑图', 409)
     }
-    await store.purgeRoom(roomKey)
+    if (!(await store.purgeRoom(roomKey))) {
+      throw fsError('ROOM_NOT_TRASHED', '只能永久删除回收站中的脑图', 409)
+    }
     notifyStorage(roomKey, 'purge')
     return { ok: true, roomKey }
   }

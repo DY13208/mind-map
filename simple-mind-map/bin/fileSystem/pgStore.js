@@ -537,7 +537,12 @@ function createPgFileStore(pool) {
     },
     async purgeRoom(roomKey) {
       const key = String(roomKey || '')
-      await this.withTx(async db => {
+      return this.withTx(async db => {
+        const { rows } = await db.query(
+          `select room_key from rooms where room_key = $1 and deleted_at is not null for update`,
+          [key]
+        )
+        if (!rows.length) return false
         await db.query(`delete from room_restore_idempotency where room_key = $1`, [key])
         await db.query(`delete from room_history_auto_jobs where room_key = $1`, [key])
         await db.query(`delete from room_version_legacy_map where room_key = $1`, [key])
@@ -556,8 +561,8 @@ function createPgFileStore(pool) {
         await db.query(`delete from room_nodes where room_key = $1`, [key])
         await db.query(`delete from room_tombstones where room_key = $1`, [key])
         await db.query(`delete from rooms where room_key = $1`, [key])
+        return true
       })
-      return true
     },
     async getPreviewProjection(roomKey) {
       queryCount += 1

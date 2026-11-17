@@ -40,6 +40,7 @@
     </button>
     </ActionTooltip>
     <ThemeModeToggle v-if="!isMobileViewport || shellMode === 'embed'" />
+    <slot name="actions" />
 
     <el-dropdown
       v-if="showCreate || showCreateFolder"

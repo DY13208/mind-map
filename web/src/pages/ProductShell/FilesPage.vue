@@ -43,6 +43,15 @@
         :root-label="isTeamView && selectedTeam ? selectedTeam.name : '脑图'"
       />
       <span v-else slot="title">{{ pageTitle }}</span>
+      <el-button
+        v-if="mode === 'trash'"
+        slot="actions"
+        size="small"
+        type="danger"
+        plain
+        :disabled="loading || busy || !!error || !total"
+        @click="emptyTrash"
+      >清空回收站</el-button>
     </FileToolbar>
     <MobileCreateMenu :visible="mobileCreateOpen" :can-create-folder="!isTeamView || canManageTeam" @close="mobileCreateOpen = false" @select="selectMobileCreate" />
     <BatchActionBar
@@ -1463,6 +1472,52 @@ export default {
           () => roomService.permanentDelete(room.roomKey || room.id),
           '已永久删除'
         )
+    },
+    async emptyTrash() {
+      if (this.mode !== 'trash' || this.busy || this.loading || this.error || !this.total) return
+      const confirmed = await this.$confirm(
+        '将永久删除回收站中你有权管理的所有脑图，包括搜索结果之外的记录。删除后无法恢复。',
+        '清空回收站',
+        { type: 'warning', confirmButtonText: '清空回收站' }
+      )
+        .then(() => true)
+        .catch(() => false)
+      if (!confirmed || this.mode !== 'trash' || this.busy || this.loading) return
+
+      this.busy = true
+      try {
+        const roomKeys = new Set()
+        const limit = 100
+        // Collect all pages before deleting, so deletions don't shift later offsets.
+        for (let offset = 0; ; offset += limit) {
+          const page = await roomService.listRooms({ trash: true, limit, offset })
+          page.list.filter(room => room.canManage).forEach(room => {
+            roomKeys.add(this.roomKey(room))
+          })
+          if (page.list.length < limit || offset + limit >= page.total) break
+        }
+
+        let deleted = 0
+        let failed = 0
+        for (const roomKey of roomKeys) {
+          try {
+            await roomService.permanentDelete(roomKey)
+            deleted++
+          } catch (error) {
+            if (!['ROOM_NOT_FOUND', 'ROOM_NOT_TRASHED'].includes(error.code)) failed++
+          }
+        }
+        if (failed) {
+          this.$message.warning(`已永久删除 ${deleted} 个脑图，${failed} 个删除失败，可重试`)
+        } else {
+          this.$message.success(`已永久删除 ${deleted} 个脑图`)
+        }
+      } catch (error) {
+        this.$message.error(userMessageFromError(error))
+      } finally {
+        if (this.mode === 'trash') await this.load()
+        this.busy = false
+      }
     },
     formatDate(value) {
       return new Date(value).toLocaleString('zh-CN')

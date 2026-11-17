@@ -465,6 +465,7 @@ function createMemoryFileStore(seed = {}) {
     async purgeRoom(roomKey) {
       bump()
       const key = String(roomKey || '')
+      if (!rooms.get(key)?.deleted_at) return false
       rooms.delete(key)
       nodes.delete(key)
       tombstones.delete(key)
