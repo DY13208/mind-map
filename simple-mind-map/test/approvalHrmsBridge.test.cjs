@@ -39,7 +39,7 @@ test('signed HRMS SOP check requires the service viewer and the exact SOP branch
       else process.env[name] = value
     }
   })
-  const root = '7df2ad7a-0978-43be-acb7-3d5e4ead6dd7'
+  let root = '7df2ad7a-0978-43be-acb7-3d5e4ead6dd7'
   const branches = [randomUUID(), randomUUID()]
   const steps = [randomUUID(), randomUUID(), randomUUID()]
   const rejectGroup = randomUUID()
@@ -192,6 +192,17 @@ test('signed HRMS SOP check requires the service viewer and the exact SOP branch
   assert.deepEqual((await send(branches[0], true, steps[0], [], '2026-11-14', undefined, undefined, undefined,
     { readPreTasks: true })).body, { preTasks: [{ recipient: '当前审批人', content: '核对资产编号' }] })
   assert.equal(model.mock.callCount(), beforeMismatch)
+  root = 'e91c8fe9-e848-4697-a409-4f2dfcd40c23'
+  verdict = { decision: 'approve', confidence: 0.98, reason: '业务材料符合条件。' }
+  assert.deepEqual((await detail()).body, { result: true, reason: '业务材料符合条件。' })
+  const businessEvidence = JSON.parse(JSON.parse(model.mock.calls.at(-1).arguments[1].body).messages[1].content)
+  assert.equal(businessEvidence.sop[0].uid, root)
+  assert.deepEqual((await send(branches[0], true, steps[1], [], '2026-11-14', undefined, undefined, undefined,
+    { readPreTasks: true })).body, { preTasks: [] })
+  root = randomUUID()
+  assert.equal((await detail()).body.result, null)
+  assert.equal((await send(branches[0], true, steps[1], [], '2026-11-14', undefined, undefined, undefined,
+    { readPreTasks: true })).status, 400)
 })
 
 test('only Agent applications have synchronized approval events', () => {

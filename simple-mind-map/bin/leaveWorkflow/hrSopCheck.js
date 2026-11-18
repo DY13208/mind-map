@@ -6,6 +6,7 @@ const { config, call } = require('./aiReview')
 
 const ROOM = 'room-yk3tz4aj'
 const ROOT = '7df2ad7a-0978-43be-acb7-3d5e4ead6dd7'
+const SOP_ROOTS = [ROOT, 'e91c8fe9-e848-4697-a409-4f2dfcd40c23']
 const MAX_FILE_BYTES = 5 * 1024 * 1024
 const MAX_BODY_BYTES = 7 * 1024 * 1024
 const MAX_RULE_NODES = 1000
@@ -51,7 +52,7 @@ function scopeStep(sop, branchUid, stepUid, includeSubmissionRequirements) {
       included.add(node.uid)
     }
   }
-  const root = sop.find(node => node.uid === ROOT)
+  const root = sop.find(node => node.uid === branch?.parentUid)
   return [{ ...root, note: '' }, { ...branch, note: '' }, ...sop.filter(node => included.has(node.uid))]
 }
 
@@ -70,9 +71,9 @@ function matchingSteps(sop, branchUid, label, account) {
 
 async function preTasks(db, req, { branchUid, stepUid, stepLabel, stepAccount }) {
   await assertRoomAccess(db, { ...req, forceAcl: true }, ROOM, 'view')
-  const rules = await readRules(db)
+  const rules = await readRules(db, branchUid)
   if (!rules.length) throw new Error('无法读取人事 SOP')
-  if (!rules.some(node => node.uid === branchUid && node.parentUid === ROOT)) {
+  if (!rules.some(node => node.uid === branchUid && SOP_ROOTS.includes(node.parentUid))) {
     throw new Error('未找到绑定的人事 SOP 分支')
   }
   const matches = stepUid ? [] : matchingSteps(rules, branchUid, stepLabel, stepAccount)
@@ -100,11 +101,15 @@ async function preTasks(db, req, { branchUid, stepUid, stepLabel, stepAccount })
   })
 }
 
-async function readRules(db) {
+async function readRules(db, branchUid) {
   const { rows } = await db.query(
     `with recursive branch as (
        select uid,parent_uid,data,0 as depth,array[uid] as trail
-       from room_nodes where room_key=$1 and uid=$2 and deleted_at is null
+       from room_nodes r where room_key=$1 and uid=any($2::text[]) and deleted_at is null
+         and (uid=$4 or exists (
+           select 1 from room_nodes child where child.room_key=r.room_key
+             and child.parent_uid=r.uid and child.uid=$4 and child.deleted_at is null
+         ))
        union all
        select n.uid,n.parent_uid,n.data,b.depth+1,b.trail||n.uid
        from room_nodes n join branch b on n.parent_uid=b.uid
@@ -112,7 +117,7 @@ async function readRules(db) {
      )
      select uid,parent_uid,data->>'text' as text,data->>'note' as note,depth
      from branch order by depth,parent_uid,uid limit $3`,
-    [ROOM, ROOT, MAX_RULE_NODES + 1]
+    [ROOM, SOP_ROOTS, MAX_RULE_NODES + 1, branchUid || ROOT]
   )
   if (rows.length < 2 || rows.length > MAX_RULE_NODES || rows.some(row => row.depth >= 20)) return []
   return rows.map(row => ({
@@ -162,8 +167,8 @@ async function check(db, req, input = {}, expectedBranchUid, stepUid) {
     const buffers = files.map(decodeFile)
     if (buffers.some(buffer => !buffer?.length) ||
         buffers.reduce((total, buffer) => total + buffer.length, 0) > MAX_FILE_BYTES) return unknown
-    const sop = await readRules(db)
-    const branches = new Set(sop.filter(node => node.parentUid === ROOT).map(node => node.uid))
+    const sop = await readRules(db, expectedBranchUid)
+    const branches = new Set(sop.filter(node => SOP_ROOTS.includes(node.parentUid)).map(node => node.uid))
     if (!branches.size || (expectedBranchUid && !branches.has(expectedBranchUid))) return unknown
     if (expectedBranchUid && !stepUid && (input.stepLabel || input.stepAccount)) {
       const matches = matchingSteps(sop, expectedBranchUid, input.stepLabel, input.stepAccount)
