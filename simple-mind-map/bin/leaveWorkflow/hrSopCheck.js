@@ -26,7 +26,7 @@ const TRI_STATE_RULE = '仅输出 JSON，包含 decision（approve、reject 或 
 const WHOLE_FORM_RULE = '核对该流程所有必填字段、必需附件、条件、拒绝规则及须确认事项。'
 const STEP_RULE = '本次只核验目标审核步骤的审批条件、拒绝规则和须确认事项。表单级「提交要求」用于解释材料；除非本步骤明确要求核验某项材料，该材料未出现在模型输入中不构成证据不足。规则中没有明确、可核验的审核条件时，结论必须为无法判断。'
 const BOUND_STEP_RULE = '本次步骤已由人事系统指定，不需要输出 branchUid。若驳回，rejectRuleUid 必须填写命中的具体拒绝条款的 uid。'
-const REASON_RULE = '同时输出 reason，用一句中文说明命中的条款和可核实依据，或说明缺少什么证据。不要复述姓名、联系方式、证件号等个人信息。'
+const REASON_RULE = '同时输出 reason，说明命中的条款和可核实依据，或说明缺少什么证据。转人工时必须写明：无法确认的具体审核条件、现有材料为什么不足或冲突、需要人工核实或补充什么。不能只说无法判断、证据不足或置信度不足。attachments.text 是已成功提取的附件文字；若文字可读但不能证明申请事项，应说明与哪项条件缺少关联，不能误称附件无法辨认。不要复述姓名、联系方式、证件号等个人信息。'
 const EVIDENCE_RULE = 'submission.fields 是本次表单字段，attachments 是附件正文。按节点的父子关系读取通过与拒绝条件，只核对这些条件所需的事实。对明确的数值阈值，先核对材料中的数值，再按条件中的比较方向和边界判断。材料中的数值明确且互相一致时，用明确的通过或拒绝结论；只有相关证据缺失、冲突或规则不明确时才转人工。'
 
 function isRejectRule(sop, ruleUid, branchUid, stepUid) {
@@ -155,23 +155,33 @@ async function check(db, req, input = {}, expectedBranchUid, stepUid) {
   await assertRoomAccess(db, { ...req, forceAcl: true }, ROOM, 'view')
   const triState = input?.resultMode === 'triState'
   const includeReason = input?.includeReason === true
-  const response = (result, reason, external) => includeReason
+  let jackyunEvidence
+  const response = (result, reason, external = jackyunEvidence) => includeReason
     ? { result, reason, ...(external ? { jackyun: jackyun.summary(external) } : {}) } : result
-  const unknown = response(triState ? null : false, '预审无法确认，可能是材料无法读取或服务暂不可用。')
+  const manual = reason => response(triState ? null : false, reason)
   const { text = '', files = [] } = input || {}
   const subsidyEvidence = triState && !!expectedBranchUid && !!stepUid && input.subsidyEvidence === true
   if (typeof text !== 'string' || text.length > 16000 || !Array.isArray(files) ||
-      files.length > (subsidyEvidence ? 63 : 5) || (!text.trim() && !files.length)) return unknown
+      files.length > (subsidyEvidence ? 63 : 5) || (!text.trim() && !files.length)) {
+    return manual('提交材料为空、格式不正确或超过预审读取上限，需人工核对完整申请。')
+  }
 
   const cfg = config()
-  if (!cfg.enabled || !cfg.apiKey) return unknown
+  if (!cfg.enabled) return manual('本企业的AI预审服务未启用，需人工核对审批条件。')
+  if (!cfg.apiKey) return manual('AI预审模型连接尚未配置，未执行材料核验，需管理员处理或人工审核。')
+  let stage = '读取附件'
   try {
     const buffers = files.map(decodeFile)
     if (buffers.some(buffer => !buffer?.length) ||
-        buffers.reduce((total, buffer) => total + buffer.length, 0) > MAX_FILE_BYTES) return unknown
+        buffers.reduce((total, buffer) => total + buffer.length, 0) > MAX_FILE_BYTES) {
+      return manual('附件文件数据无效或合计超过5MB，未能读取原材料，需人工查看附件。')
+    }
+    stage = '读取审批规则'
     const sop = await readRules(db, expectedBranchUid)
     const branches = new Set(sop.filter(node => SOP_ROOTS.includes(node.parentUid)).map(node => node.uid))
-    if (!branches.size || (expectedBranchUid && !branches.has(expectedBranchUid))) return unknown
+    if (!branches.size || (expectedBranchUid && !branches.has(expectedBranchUid))) {
+      return manual('未能读取本节点绑定的SOP分支，无法确定审核条件，需管理员核对规则绑定。')
+    }
     if (expectedBranchUid && !stepUid && (input.stepLabel || input.stepAccount)) {
       const matches = matchingSteps(sop, expectedBranchUid, input.stepLabel, input.stepAccount)
       if (matches.length !== 1) return response(triState ? null : false, '该 SOP 分支下无法唯一匹配当前审批步骤。')
@@ -182,36 +192,52 @@ async function check(db, req, input = {}, expectedBranchUid, stepUid) {
         fileName: file.name,
         sourceKind: 'approval_request'
       })
-      if (parsed.status !== 'ready' || !parsed.extractedText?.trim() ||
-          parsed.extractedText.length >= MAX_EXTRACT_CHARS) return null
+      if (parsed.status !== 'ready' || !parsed.extractedText?.trim()) {
+        const problem = /未配置/.test(parsed.errorMessage || '') ? '文字识别服务未配置'
+          : /超时|timeout|timed out/i.test(parsed.errorMessage || '') ? '文字识别服务超时'
+            : '未提取到可供核验的文字'
+        return { error: `附件“${file.name}”${problem}，需人工查看原文件。` }
+      }
+      if (parsed.extractedText.length >= MAX_EXTRACT_CHARS) {
+        return { error: `附件“${file.name}”提取内容超过读取上限，需人工核对完整文件。` }
+      }
       return { name: file.name, text: parsed.extractedText, fieldKey: file.fieldKey }
     }
+    stage = '提取附件文字'
     const attachments = []
     for (let start = 0; start < files.length; start += 5) {
       const batch = await Promise.all(files.slice(start, start + 5)
         .map((file, index) => extractAttachment(file, start + index)))
-      if (batch.some(item => !item)) return unknown
+      const failed = batch.find(item => item.error)
+      if (failed) return manual(failed.error)
       attachments.push(...batch)
     }
     const structured = triState && expectedBranchUid
     const selectedEvidenceOnly = structured && stepUid && input.selectedEvidenceOnly === true
     const scoped = stepUid ? scopeStep(sop, expectedBranchUid, stepUid, !selectedEvidenceOnly) : sop
-    if (!scoped.length) return unknown
+    if (!scoped.length) return manual('当前审批步骤没有可读取的具体规则，需管理员核对步骤绑定和审核条件。')
+    stage = '解析申请字段'
     const form = expectedBranchUid ? JSON.parse(text) : null
     if (expectedBranchUid && !hasRequiredEvidence(input.requiredEvidence, form?.提交字段, attachments)) {
-      return response(triState ? null : false, '必需的表单字段或附件证据不足。')
+      const missing = Array.isArray(input.requiredEvidence)
+        ? input.requiredEvidence.filter(item => !hasRequiredEvidence([item], form?.提交字段, attachments))
+          .map(item => form?.提交字段?.[item?.key]?.label || item?.key || '未命名材料') : []
+      return manual(missing.length
+        ? `以下必需材料未通过读取校验：${missing.join('、')}。需核对是否填写、文件是否提交及字段格式。`
+        : '本节点尚未配置必需核验材料清单，需管理员指定审核字段和附件。')
     }
     const submission = structured
       ? { formTitle: form.申请类型, fields: form.提交字段, attachments }
       : { text, attachments }
-    const jackyunEvidence = await jackyun.collect({
+    stage = '读取聚水潭核验资料'
+    jackyunEvidence = await jackyun.collect({
       rules: scoped, submission, branchUids: [...branches], branchUid: expectedBranchUid, cfg, call
     })
     const blocked = jackyun.guard(jackyunEvidence)
-    if (blocked) return response(blocked.decision === 'reject' ? false : triState ? null : false, blocked.reason, jackyunEvidence)
+    if (blocked) return response(blocked.decision === 'reject' ? false : triState ? null : false, blocked.reason)
     const evidence = JSON.stringify({ sop: scoped, stepUid, submission,
       ...(jackyunEvidence ? { jackyun: jackyunEvidence } : {}) })
-    if (evidence.length > MAX_PROMPT_CHARS) return unknown
+    if (evidence.length > MAX_PROMPT_CHARS) return manual('审批规则与材料合计超过模型读取上限，需人工核对完整材料。')
     const boundStep = structured && stepUid
     const system = [BASE_RULES, selectedEvidenceOnly ? STEP_RULE : WHOLE_FORM_RULE,
       stepUid && !selectedEvidenceOnly && '本次仅核对 sop 中提供的提交要求和目标审核步骤。规则中没有明确、可核验的审核条件时，结论必须为无法判断。',
@@ -220,30 +246,48 @@ async function check(db, req, input = {}, expectedBranchUid, stepUid) {
       triState && (boundStep ? BOUND_STEP_RULE : '同时输出匹配的一级流程 branchUid。'),
       includeReason && REASON_RULE,
       jackyunEvidence?.status === 'ready' && jackyun.VERDICT_RULES].filter(Boolean).join('\n')
+    stage = '调用预审模型'
     const message = await call(cfg, evidence, system)
+    stage = '解析模型返回结果'
     const result = JSON.parse(message.content)
     const branchUid = boundStep ? expectedBranchUid : result?.branchUid
     if (!branches.has(branchUid) || (expectedBranchUid && branchUid !== expectedBranchUid) ||
         (jackyunEvidence?.branchUid && branchUid !== jackyunEvidence.branchUid) ||
-        typeof result?.confidence !== 'number' || result.confidence > 1) return unknown
-    if (result.confidence < Math.max(0.75, cfg.minConfidence)) {
-      return response(triState ? null : false, '模型判定的置信度不足。')
+        typeof result?.confidence !== 'number' || !Number.isFinite(result.confidence) ||
+        result.confidence < 0 || result.confidence > 1) {
+      return manual('模型返回的流程标识或置信度格式无效，无法可靠执行自动审批，需人工核对。')
     }
     const reason = typeof result.reason === 'string' ? result.reason.trim().slice(0, 300) : ''
+    const generic = /^(?:AI|模型)?(?:无法判断|无法确认|证据不足|置信度不足)[。.!！\s]*$/.test(reason)
+    const minimumConfidence = Math.max(0.75, cfg.minConfidence)
+    if (result.confidence < minimumConfidence) {
+      const percent = value => Math.round(value * 1000) / 10
+      return response(triState ? null : false,
+        `置信度${percent(result.confidence)}%，低于自动审批阈值${percent(minimumConfidence)}%。具体原因：${reason && !generic ? reason : '模型未提供具体判断依据或证据缺口，需人工核实。'}`)
+    }
     const inconsistent = jackyun.guard(jackyunEvidence, result)
     if (inconsistent) return response(inconsistent.decision === 'reject' ? false : triState ? null : false,
-      inconsistent.reason, jackyunEvidence)
-    if (!triState) return response(result.pass === true, reason || (result.pass === true ? '材料核验通过。' : '材料未通过核验。'), jackyunEvidence)
+      inconsistent.reason)
+    if (!triState) return response(result.pass === true, reason || (result.pass === true ? '材料核验通过。' : '材料未通过核验。'))
     if (result.decision === 'approve') {
-      return includeReason && !reason ? unknown : response(true, reason, jackyunEvidence)
+      return includeReason && !reason
+        ? manual('模型建议通过，但未提供对应规则和判断依据，需人工核对后处理。') : response(true, reason)
     }
     if (result.decision === 'reject' && isRejectRule(scoped, result.rejectRuleUid, branchUid, stepUid)) {
       const clause = scoped.find(node => node.uid === result.rejectRuleUid).text
-      return response(false, (reason ? `命中「${clause}」。${reason}` : `命中「${clause}」。`).slice(0, 500), jackyunEvidence)
+      return response(false, (reason ? `命中「${clause}」。${reason}` : `命中「${clause}」。`).slice(0, 500))
     }
-    return response(null, reason || '模型无法确认是否符合该步骤的规则。', jackyunEvidence)
-  } catch {
-    return unknown
+    if (result.decision === 'reject') {
+      return manual(`模型建议驳回，但未匹配到本节点的有效拒绝条款，需人工核实。${reason ? `模型说明：${reason}` : '模型未提供具体判断依据。'}`)
+    }
+    return response(null, reason && !generic ? reason
+      : '模型返回无法判断，但未指出具体审核条件或证据缺口，需人工逐项核对本节点的审批规则。')
+  } catch (error) {
+    const detail = /AbortError|TimeoutError/.test(error?.name || '') ? '等待服务响应超时'
+      : error instanceof SyntaxError ? '数据不是有效的JSON格式'
+        : /^模型返回 \d{3}$/.test(error?.message || '') ? `${error.message}，未返回可用核验结果`
+          : '服务调用或材料解析失败，未取得完整核验结果'
+    return manual(`${stage}失败：${detail}，需人工核对。`)
   }
 }
 

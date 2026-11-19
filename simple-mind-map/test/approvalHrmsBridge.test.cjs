@@ -151,6 +151,34 @@ test('signed HRMS SOP check requires the service viewer and the exact SOP branch
   verdict = { decision: 'approve', confidence: 0.98, reason: '年龄符合通过条件。' }
   const detail = () => send(branches[0], true, steps[0], complete, '2026-11-14', 'triState', undefined, true)
   assert.deepEqual((await detail()).body, { result: true, reason: '年龄符合通过条件。' })
+  verdict = { decision: 'manual', confidence: 0.6, reason: '附件中的日期与申请日期不一致，无法确认适用期间。' }
+  assert.deepEqual((await detail()).body, {
+    result: null,
+    reason: '置信度60%，低于自动审批阈值75%。具体原因：附件中的日期与申请日期不一致，无法确认适用期间。'
+  })
+  verdict.reason = ''
+  assert.match((await detail()).body.reason, /模型未提供具体判断依据/)
+  process.env.WCPD_AI_REVIEW_MIN_CONFIDENCE = '0.85'
+  verdict.confidence = 0.8
+  assert.match((await detail()).body.reason, /置信度80%，低于自动审批阈值85%/)
+  process.env.WCPD_AI_REVIEW_MIN_CONFIDENCE = '0.75'
+  verdict = { decision: 'manual', confidence: 0.99, reason: '附件文字可读，但没有对应申请日期，需人工核实材料适用期间。' }
+  assert.deepEqual((await detail()).body, { result: null, reason: verdict.reason })
+  verdict.reason = '无法判断。'
+  assert.match((await detail()).body.reason, /未指出具体审核条件或证据缺口/)
+  verdict.confidence = 0.6
+  assert.match((await detail()).body.reason, /模型未提供具体判断依据或证据缺口/)
+  verdict = { decision: 'approve', confidence: 0.99, reason: '' }
+  assert.match((await detail()).body.reason, /未提供对应规则和判断依据/)
+  verdict.confidence = null
+  assert.match((await detail()).body.reason, /置信度格式无效/)
+  assert.match((await send(branches[0], true, steps[0], complete, ' ', 'triState', undefined, true)).body.reason, /date/)
+  assert.match((await send(branches[0], true, steps[0], [{ ...complete[0], name: 'bad.doc' }],
+    '2026-11-14', 'triState', undefined, true)).body.reason, /附件“bad.doc”未提取到可供核验的文字/)
+  process.env.WCPD_AI_REVIEW_ENABLED = '0'
+  assert.match((await detail()).body.reason, /AI预审服务未启用/)
+  process.env.WCPD_AI_REVIEW_ENABLED = '1'
+  verdict = { decision: 'approve', confidence: 0.98, reason: '年龄符合通过条件。' }
   const selected = await send(branches[0], true, steps[0], complete, '2026-11-14', 'triState', undefined, true,
     { selectedEvidenceOnly: true })
   assert.equal(selected.body.result, true)
