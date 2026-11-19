@@ -46,6 +46,8 @@ test('signed HRMS SOP check requires the service viewer and the exact SOP branch
   const rejectRule = randomUUID()
   const ageGroups = Array.from({ length: 9 }, () => randomUUID())
   let verdict
+  let branchTitle = '测试分支'
+  let stepTitle = 'IT审核'
   let preTodoRecipient = '接收账号：test-user'
   let role = 'viewer'
   const db = { async query(sql) {
@@ -55,8 +57,8 @@ test('signed HRMS SOP check requires the service viewer and the exact SOP branch
     assert.match(sql, /with recursive branch/)
     return { rows: [
       { uid: root, depth: 0, text: '人事流程' },
-      ...branches.map(uid => ({ uid, depth: 1, parent_uid: root, text: '测试分支' })),
-      { uid: steps[0], depth: 2, parent_uid: branches[0], text: 'IT审核', note: '核对日期' },
+      ...branches.map(uid => ({ uid, depth: 1, parent_uid: root, text: branchTitle })),
+      { uid: steps[0], depth: 2, parent_uid: branches[0], text: stepTitle, note: '核对日期' },
       { uid: steps[1], depth: 2, parent_uid: branches[0], text: 'SSC审核' },
       { uid: steps[2], depth: 2, parent_uid: branches[0], text: '没有规则的审核步骤' },
       { uid: rejectGroup, depth: 3, parent_uid: steps[0], text: '以下情况拒绝' },
@@ -151,6 +153,22 @@ test('signed HRMS SOP check requires the service viewer and the exact SOP branch
   verdict = { decision: 'approve', confidence: 0.98, reason: '年龄符合通过条件。' }
   const detail = () => send(branches[0], true, steps[0], complete, '2026-11-14', 'triState', undefined, true)
   assert.deepEqual((await detail()).body, { result: true, reason: '年龄符合通过条件。' })
+  branchTitle = '请假'
+  stepTitle = '部门负责人'
+  await detail()
+  const leavePrompt = JSON.parse(model.mock.calls.at(-1).arguments[1].body).messages[0].content
+  assert.match(leavePrompt, /本次请假时长至少1小时/)
+  assert.match(leavePrompt, /累计应包含本次申请/)
+  assert.match(leavePrompt, /已转正员工只核验转正全年累计不超过20天/)
+  assert.match(leavePrompt, /试用期员工只核验试用期累计不超过5天/)
+  assert.match(leavePrompt, /不适用于事假/)
+  assert.match(leavePrompt, /不是审批前已完成的前置条件/)
+  assert.match(leavePrompt, /不得推定累计为零/)
+  stepTitle = 'SSC'
+  await detail()
+  assert.doesNotMatch(JSON.parse(model.mock.calls.at(-1).arguments[1].body).messages[0].content, /事假仅核验/)
+  branchTitle = '测试分支'
+  stepTitle = 'IT审核'
   verdict = { decision: 'approve', confidence: 0.6, reason: '缺少本年度累计事假记录。' }
   assert.deepEqual((await detail()).body, {
     result: null,

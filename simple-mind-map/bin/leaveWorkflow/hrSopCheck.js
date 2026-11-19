@@ -27,6 +27,13 @@ const STEP_RULE = '本次只核验目标审核步骤的审批条件、拒绝规�
 const BOUND_STEP_RULE = '本次步骤已由人事系统指定，不需要输出 branchUid。若驳回，rejectRuleUid 必须填写命中的具体拒绝条款的 uid。'
 const REASON_RULE = '同时输出 reason，用一句中文说明命中的条款和可核实依据，或说明缺少什么证据。不要复述姓名、联系方式、证件号等个人信息。'
 const EVIDENCE_RULE = 'submission.fields 是本次表单字段，attachments 是附件正文。按节点的父子关系读取通过与拒绝条件，只核对这些条件所需的事实。对明确的数值阈值，先核对材料中的数值，再按条件中的比较方向和边界判断。材料中的数值明确且互相一致时，用明确的通过或拒绝结论；只有相关证据缺失、冲突或规则不明确时才转人工。'
+const LEAVE_HEAD_RULE = [
+  '请假部门负责人步骤须先按本次假期类型选择适用条件，不得把不同假种的要求合并为全部必需。',
+  '事假仅核验本次请假时长至少1小时，以及适用的事假累计额度。已转正员工只核验转正全年累计不超过20天；试用期员工只核验试用期累计不超过5天。累计应包含本次申请，并按工作日、排班和每天8小时口径核验，不能直接用自然时间跨度代替请假时长。',
+  '病假证明、长假的司龄和次数限制、上级及交接人同意等要求，不适用于事假。其他假种仍按各自适用规则核验。',
+  '离开和返回须打卡、事后补交证明等属于事后考勤或补交义务，不是审批前已完成的前置条件；不能因为尚未发生的打卡或尚未到期的补交义务阻断本次审批。',
+  '累计额度仍需可核验的历史记录；历史范围不完整或在职阶段无法确认时，应具体指出缺少的记录，不得推定累计为零，也不得要求已转正员工补齐不适用的试用期额度证明。'
+].join('\n')
 
 function isRejectRule(sop, ruleUid, branchUid, stepUid) {
   const byUid = new Map(sop.map(node => [node.uid, node]))
@@ -226,9 +233,12 @@ async function check(db, req, input = {}, expectedBranchUid, stepUid) {
     const evidence = JSON.stringify({ sop: scoped, stepUid, submission })
     if (evidence.length > MAX_PROMPT_CHARS) return unknown
     const boundStep = structured && stepUid
+    const leaveHead = boundStep && scoped.some(node => node.uid === expectedBranchUid && node.text === '请假') &&
+      scoped.some(node => node.uid === stepUid && node.text === '部门负责人')
     const system = [BASE_RULES, selectedEvidenceOnly ? STEP_RULE : WHOLE_FORM_RULE,
       stepUid && !selectedEvidenceOnly && '本次仅核对 sop 中提供的提交要求和目标审核步骤。规则中没有明确、可核验的审核条件时，结论必须为无法判断。',
       structured && EVIDENCE_RULE,
+      leaveHead && LEAVE_HEAD_RULE,
       triState ? TRI_STATE_RULE : BOOLEAN_RULE,
       triState && (boundStep ? BOUND_STEP_RULE : '同时输出匹配的一级流程 branchUid。'),
       includeReason && REASON_RULE].filter(Boolean).join('\n')
