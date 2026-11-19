@@ -151,6 +151,20 @@ test('signed HRMS SOP check requires the service viewer and the exact SOP branch
   verdict = { decision: 'approve', confidence: 0.98, reason: '年龄符合通过条件。' }
   const detail = () => send(branches[0], true, steps[0], complete, '2026-11-14', 'triState', undefined, true)
   assert.deepEqual((await detail()).body, { result: true, reason: '年龄符合通过条件。' })
+  verdict = { decision: 'approve', confidence: 0.6, reason: '缺少本年度累计事假记录。' }
+  assert.deepEqual((await detail()).body, {
+    result: null,
+    reason: '模型判定的置信度不足（60.0%，自动审批门槛 75.0%）。缺少本年度累计事假记录。'
+  })
+  verdict.reason = ' '
+  assert.match((await detail()).body.reason, /模型未提供具体核验理由/)
+  for (const confidence of [-0.1, '0.99']) {
+    verdict.confidence = confidence
+    assert.equal((await detail()).body.result, null)
+  }
+  verdict = { decision: 'approve', confidence: 0.75, reason: '达到自动审批门槛。' }
+  assert.equal((await detail()).body.result, true)
+  verdict = { decision: 'approve', confidence: 0.98, reason: '年龄符合通过条件。' }
   const selected = await send(branches[0], true, steps[0], complete, '2026-11-14', 'triState', undefined, true,
     { selectedEvidenceOnly: true })
   assert.equal(selected.body.result, true)

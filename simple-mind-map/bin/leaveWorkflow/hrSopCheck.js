@@ -236,12 +236,16 @@ async function check(db, req, input = {}, expectedBranchUid, stepUid) {
     const result = JSON.parse(message.content)
     const branchUid = boundStep ? expectedBranchUid : result?.branchUid
     if (!branches.has(branchUid) || (expectedBranchUid && branchUid !== expectedBranchUid) ||
-        typeof result?.confidence !== 'number' || result.confidence > 1) return unknown
-    if (result.confidence < Math.max(0.75, cfg.minConfidence)) {
-      return response(triState ? null : false, '模型判定的置信度不足。')
+        !Number.isFinite(result?.confidence) || result.confidence < 0 || result.confidence > 1) return unknown
+    const reason = typeof result.reason === 'string' ? result.reason.trim().slice(0, 300) : ''
+    const minimum = Math.max(0.75, cfg.minConfidence)
+    if (result.confidence < minimum) {
+      const score = `${(result.confidence * 100).toFixed(1)}%`
+      const threshold = `${(minimum * 100).toFixed(1)}%`
+      return response(triState ? null : false,
+        `模型判定的置信度不足（${score}，自动审批门槛 ${threshold}）。${reason || '模型未提供具体核验理由。'}`)
     }
     if (!triState) return result.pass === true
-    const reason = typeof result.reason === 'string' ? result.reason.trim().slice(0, 300) : ''
     if (result.decision === 'approve') {
       return includeReason && !reason ? unknown : response(true, reason)
     }
