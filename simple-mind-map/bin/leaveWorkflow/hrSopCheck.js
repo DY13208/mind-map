@@ -40,13 +40,21 @@ function isRejectRule(sop, ruleUid, branchUid, stepUid) {
   return false
 }
 
-function scopeStep(sop, branchUid, stepUid, includeSubmissionRequirements) {
+function legacyTransferTodos(sop, branchUid, stepUid) {
+  if (branchUid !== '0d37e8b4-09c5-41af-991e-cc363c48e9e1' ||
+      stepUid !== 'c3112a9d-9f20-4c79-8f74-78ed4abcc441') return []
+  const principles = sop.filter(node => node.parentUid === stepUid && node.text === '审核原则')
+  return sop.filter(node => node.text === '待办' && principles.some(parent => parent.uid === node.parentUid))
+}
+
+function scopeStep(sop, branchUid, stepUid, includeSubmissionRequirements, transferHandover) {
   const branch = sop.find(node => node.uid === branchUid)
   const step = sop.find(node => node.uid === stepUid && node.parentUid === branchUid)
   if (!step || (!sop.some(node => node.parentUid === stepUid && node.text !== '审批前待办') && !step.note)) return []
   const included = new Set([stepUid])
+  const legacyTodos = new Set((transferHandover ? legacyTransferTodos(sop, branchUid, stepUid) : []).map(node => node.uid))
   for (const node of sop) {
-    if (node.parentUid === stepUid && node.text === '审批前待办') continue
+    if ((node.parentUid === stepUid && node.text === '审批前待办') || legacyTodos.has(node.uid)) continue
     if ((includeSubmissionRequirements && node.parentUid === branchUid && node.text === '提交要求') ||
         included.has(node.parentUid)) {
       included.add(node.uid)
@@ -69,7 +77,7 @@ function matchingSteps(sop, branchUid, label, account) {
     })))
 }
 
-async function preTasks(db, req, { branchUid, stepUid, stepLabel, stepAccount }) {
+async function preTasks(db, req, { branchUid, stepUid, stepLabel, stepAccount, transferHandover }) {
   await assertRoomAccess(db, { ...req, forceAcl: true }, ROOM, 'view')
   const rules = await readRules(db, branchUid)
   if (!rules.length) throw new Error('无法读取人事 SOP')
@@ -85,6 +93,19 @@ async function preTasks(db, req, { branchUid, stepUid, stepLabel, stepAccount })
   if (!step) return []
   if (!rules.some(node => node.uid === step && node.parentUid === branchUid)) {
     throw new Error('未找到绑定的人事 SOP 审核步骤')
+  }
+  const legacy = transferHandover === true ? legacyTransferTodos(rules, branchUid, step) : []
+  if (legacy.length) {
+    if (legacy.length !== 1 || rules.some(node => node.parentUid === step && node.text === '审批前待办')) {
+      throw new Error('调岗交接待办配置不唯一')
+    }
+    const items = rules.filter(node => node.parentUid === legacy[0].uid)
+    if (items.length !== 3 || items.some(node => !node.text || rules.some(child => child.parentUid === node.uid))) {
+      throw new Error('调岗交接待办必须为三项明确的交接事项')
+    }
+    const content = items.map((node, index) => `${index + 1}、${node.text}`).join('\n')
+    if (content.length > 500) throw new Error('调岗交接待办过长')
+    return [{ recipient: '当前审批人', content }]
   }
   const groups = rules.filter(node => node.parentUid === step && node.text === '审批前待办')
   if (groups.length > 5) throw new Error('审批前待办最多配置五项')
@@ -193,7 +214,7 @@ async function check(db, req, input = {}, expectedBranchUid, stepUid) {
     }
     const structured = triState && expectedBranchUid
     const selectedEvidenceOnly = structured && stepUid && input.selectedEvidenceOnly === true
-    const scoped = stepUid ? scopeStep(sop, expectedBranchUid, stepUid, !selectedEvidenceOnly) : sop
+    const scoped = stepUid ? scopeStep(sop, expectedBranchUid, stepUid, !selectedEvidenceOnly, input.transferHandover === true) : sop
     if (!scoped.length) return unknown
     const form = expectedBranchUid ? JSON.parse(text) : null
     if (expectedBranchUid && !hasRequiredEvidence(input.requiredEvidence, form?.提交字段, attachments)) {
