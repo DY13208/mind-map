@@ -2996,12 +2996,14 @@ async function handleApi(req, res) {
     const roomKey = decodeURIComponent(transferOwnershipMatch[1])
     try {
       const body = await readBody(req)
+      const actor = roomAcl.actorFromReq(req)
       const list = await roomAcl.transferOwnership(
         getPool(),
         roomKey,
         body.user_id || body.userId,
-        roomAcl.actorFromReq(req).id,
-        req.authUser && req.authUser.corpId
+        actor.id,
+        req.authUser && req.authUser.corpId,
+        { bypass: !!actor.bypass, superAdmin: !!actor.superAdmin }
       )
       sendJson(res, 200, {
         ok: true,

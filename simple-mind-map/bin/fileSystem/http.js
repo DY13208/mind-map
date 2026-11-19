@@ -209,7 +209,7 @@ async function handleFileSystemApi(req, res, options = {}) {
         })
       }
       if (!bypass && folder.created_by !== userId) {
-        throw Object.assign(new Error('只有文件夹所有者可以转移所有权'), {
+        throw Object.assign(new Error('只有文件夹所有者或超级管理员可以转移所有权'), {
           code: 'FORBIDDEN',
           statusCode: 403
         })
@@ -226,8 +226,15 @@ async function handleFileSystemApi(req, res, options = {}) {
           statusCode: 400
         })
       }
-      if (targetId === folder.created_by) {
+      // 普通所有者不能转给自己；超级管理员可接管离职员工遗留文件夹。
+      if (!bypass && targetId === userId) {
         throw Object.assign(new Error('不能将所有权转移给自己'), {
+          code: 'BAD_REQUEST',
+          statusCode: 400
+        })
+      }
+      if (targetId === folder.created_by) {
+        throw Object.assign(new Error('对方已经是所有者'), {
           code: 'BAD_REQUEST',
           statusCode: 400
         })

@@ -629,6 +629,9 @@ export default {
     },
     canTransferOwnership() {
       if (!this.currentUserId) return false
+      const user = getCurrentUser() || {}
+      // env 配置的超级管理员可接管离职员工遗留资源
+      if (user.superAdmin) return true
       return this.members.some(
         member =>
           this.isOwnerRole(member.role) && this.isCurrentUserMember(member)

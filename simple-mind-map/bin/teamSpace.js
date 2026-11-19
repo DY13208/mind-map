@@ -342,16 +342,22 @@ async function removeMember(db, who, id, target) {
 async function transferOwnership(db, who, id, target) {
   return transaction(db, async tx => {
     const team = await getTeam(tx, who.corpId, id, who.userId, teamAccessOpts(who))
-    if (team.role !== 'owner') throw error(403, 'FORBIDDEN', 'Ã¥ÂÂªÃ¦ÂÂÃ¥ÂÂ¢Ã©ÂÂÃ¦ÂÂÃ¦ÂÂÃ¨ÂÂÃ¥ÂÂ¯Ã¤Â»Â¥Ã¨Â½Â¬Ã§Â§Â»Ã¦ÂÂÃ¦ÂÂÃ¦ÂÂ')
+    const canTransfer = team.role === 'owner' || !!(who && who.superAdmin)
+    if (!canTransfer) throw error(403, 'FORBIDDEN', '只有团队所有者或超级管理员可以转移所有权')
     const targetId = await resolveMemberId(tx, who, target)
-    if (!targetId) throw error(400, 'BAD_REQUEST', 'Ã¨Â¯Â·Ã©ÂÂÃ¦ÂÂ©Ã¦ÂÂ°Ã§ÂÂÃ¦ÂÂÃ¦ÂÂÃ¨ÂÂ')
-    if (targetId === who.userId) throw error(400, 'BAD_REQUEST', 'Ã¤Â¸ÂÃ¨ÂÂ½Ã¥Â°ÂÃ¦ÂÂÃ¦ÂÂÃ¦ÂÂÃ¨Â½Â¬Ã§Â§Â»Ã§Â»ÂÃ¨ÂÂªÃ¥Â·Â±')
+    if (!targetId) throw error(400, 'BAD_REQUEST', '请选择新的所有者')
+    if (!who.superAdmin && targetId === who.userId) {
+      throw error(400, 'BAD_REQUEST', '不能将所有权转移给自己')
+    }
+    if (team.owner_id === targetId) {
+      throw error(400, 'BAD_REQUEST', '对方已经是所有者')
+    }
     const member = await tx.query(
       `select user_id, role from team_members where team_id = $1 and corp_id = $2 and user_id = $3`,
       [id, who.corpId, targetId]
     )
     if (!member.rows.length) {
-      throw error(400, 'TEAM_MEMBER_REQUIRED', 'Ã¨Â¯Â·Ã¥ÂÂÃ¥Â°ÂÃ¥Â¯Â¹Ã¦ÂÂ¹Ã¥ÂÂ Ã¥ÂÂ¥Ã¥ÂÂ¢Ã©ÂÂÃ¯Â¼ÂÃ¥ÂÂÃ¨Â½Â¬Ã§Â§Â»Ã¦ÂÂÃ¦ÂÂÃ¦ÂÂ')
+      throw error(400, 'TEAM_MEMBER_REQUIRED', '请先将对方加入团队，再转移所有权')
     }
     await tx.query(
       `update teams set owner_id = $3, updated_at = now() where id = $1 and corp_id = $2 and deleted_at is null`,
@@ -362,10 +368,11 @@ async function transferOwnership(db, who, id, target) {
        where team_id = $1 and corp_id = $2 and user_id = $3`,
       [id, who.corpId, targetId]
     )
+    // 降级所有前所有者（含离职员工），避免超管代转后仍残留多个 owner
     await tx.query(
       `update team_members set role = 'admin', updated_at = now()
-       where team_id = $1 and corp_id = $2 and user_id = $3 and role = 'owner'`,
-      [id, who.corpId, who.userId]
+       where team_id = $1 and corp_id = $2 and role = 'owner' and user_id <> $3`,
+      [id, who.corpId, targetId]
     )
     return listMembers(tx, who, id)
   })

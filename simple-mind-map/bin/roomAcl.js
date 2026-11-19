@@ -907,14 +907,25 @@ async function resolveUserId(db, value, corpId = '') {
   return result.rows[0] ? result.rows[0].user_id : uid
 }
 
-async function transferOwnership(db, roomKey, targetUserId, actorUserId, corpId = '') {
+async function transferOwnership(
+  db,
+  roomKey,
+  targetUserId,
+  actorUserId,
+  corpId = '',
+  options = {}
+) {
   const key = String(roomKey || '').trim()
   const actor = normalizeUserId(actorUserId)
+  const bypass = !!(options && (options.bypass || options.superAdmin))
   const target = await resolveUserId(db, targetUserId, corpId)
   if (!key) throw aclError(400, 'BAD_REQUEST', '缺少脑图标识')
   if (!actor) throw aclError(401, 'UNAUTHORIZED', '请先登录')
   if (!target) throw aclError(400, 'BAD_REQUEST', '请选择新的所有者')
-  if (actor === target) throw aclError(400, 'BAD_REQUEST', '不能将所有权转移给自己')
+  // 普通所有者不能转给自己；超级管理员可接管离职员工遗留脑图。
+  if (!bypass && actor === target) {
+    throw aclError(400, 'BAD_REQUEST', '不能将所有权转移给自己')
+  }
 
   if (Array.isArray(db.members)) {
     const room =
@@ -941,10 +952,14 @@ async function transferOwnership(db, roomKey, targetUserId, actorUserId, corpId 
     }
     const actorRow = memberRows.find(row => row.user_id === actor)
     const actorIsOwner =
+      bypass ||
       (actorRow && resolveMemberRole(actorRow) === 'owner') ||
       room.owner_id === actor
     if (!actorIsOwner) {
-      throw aclError(403, 'FORBIDDEN', '只有所有者可以转移所有权')
+      throw aclError(403, 'FORBIDDEN', '只有所有者或超级管理员可以转移所有权')
+    }
+    if (room.owner_id === target) {
+      throw aclError(400, 'BAD_REQUEST', '对方已经是所有者')
     }
     room.owner_id = target
     room.updated_at = new Date().toISOString()
@@ -1039,10 +1054,14 @@ async function transferOwnership(db, roomKey, targetUserId, actorUserId, corpId 
 
     const actorRow = memberRows.find(row => row.user_id === actor)
     const actorIsOwner =
+      bypass ||
       (actorRow && resolveMemberRole(actorRow) === 'owner') ||
       room.rows[0].owner_id === actor
     if (!actorIsOwner) {
-      throw aclError(403, 'FORBIDDEN', '只有所有者可以转移所有权')
+      throw aclError(403, 'FORBIDDEN', '只有所有者或超级管理员可以转移所有权')
+    }
+    if (room.rows[0].owner_id === target) {
+      throw aclError(400, 'BAD_REQUEST', '对方已经是所有者')
     }
 
     await conn.query(
