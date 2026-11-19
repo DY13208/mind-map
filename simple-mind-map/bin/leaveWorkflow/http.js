@@ -29,7 +29,9 @@ async function handle(req, res, { url, db, writer, readBody, sendJson }) {
       input = await readBody(req, { maxBytes: agent.MAX_BODY_BYTES })
       sendJson(res, 200, await agent.check(db, req, input))
     } catch (error) {
-      sendJson(res, error.statusCode || 400, input?.resultMode === 'triState' ? null : false)
+      const result = input?.resultMode === 'triState' ? null : false
+      sendJson(res, error.statusCode || 400, input?.includeReason === true
+        ? { result, reason: '预审请求无法处理或没有访问权限。' } : result)
     }
     return true
   }

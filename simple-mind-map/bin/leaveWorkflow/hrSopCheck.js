@@ -3,6 +3,7 @@ const { stripSearchHtml } = require('../roomNodes')
 const { extractBuffer } = require('../nodeKnowledge/extract')
 const { MAX_EXTRACT_CHARS } = require('../nodeKnowledge/limits')
 const { config, call } = require('./aiReview')
+const jackyun = require('./jackyunReview')
 
 const ROOM = 'room-yk3tz4aj'
 const ROOT = '7df2ad7a-0978-43be-acb7-3d5e4ead6dd7'
@@ -153,8 +154,9 @@ function hasRequiredEvidence(requirements, fields, attachments) {
 async function check(db, req, input = {}, expectedBranchUid, stepUid) {
   await assertRoomAccess(db, { ...req, forceAcl: true }, ROOM, 'view')
   const triState = input?.resultMode === 'triState'
-  const includeReason = triState && !!expectedBranchUid && input.includeReason === true
-  const response = (result, reason) => includeReason ? { result, reason } : result
+  const includeReason = input?.includeReason === true
+  const response = (result, reason, external) => includeReason
+    ? { result, reason, ...(external ? { jackyun: jackyun.summary(external) } : {}) } : result
   const unknown = response(triState ? null : false, '预审无法确认，可能是材料无法读取或服务暂不可用。')
   const { text = '', files = [] } = input || {}
   const subsidyEvidence = triState && !!expectedBranchUid && !!stepUid && input.subsidyEvidence === true
@@ -202,7 +204,13 @@ async function check(db, req, input = {}, expectedBranchUid, stepUid) {
     const submission = structured
       ? { formTitle: form.申请类型, fields: form.提交字段, attachments }
       : { text, attachments }
-    const evidence = JSON.stringify({ sop: scoped, stepUid, submission })
+    const jackyunEvidence = await jackyun.collect({
+      rules: scoped, submission, branchUids: [...branches], branchUid: expectedBranchUid, cfg, call
+    })
+    const blocked = jackyun.guard(jackyunEvidence)
+    if (blocked) return response(blocked.decision === 'reject' ? false : triState ? null : false, blocked.reason, jackyunEvidence)
+    const evidence = JSON.stringify({ sop: scoped, stepUid, submission,
+      ...(jackyunEvidence ? { jackyun: jackyunEvidence } : {}) })
     if (evidence.length > MAX_PROMPT_CHARS) return unknown
     const boundStep = structured && stepUid
     const system = [BASE_RULES, selectedEvidenceOnly ? STEP_RULE : WHOLE_FORM_RULE,
@@ -210,25 +218,30 @@ async function check(db, req, input = {}, expectedBranchUid, stepUid) {
       structured && EVIDENCE_RULE,
       triState ? TRI_STATE_RULE : BOOLEAN_RULE,
       triState && (boundStep ? BOUND_STEP_RULE : '同时输出匹配的一级流程 branchUid。'),
-      includeReason && REASON_RULE].filter(Boolean).join('\n')
+      includeReason && REASON_RULE,
+      jackyunEvidence?.status === 'ready' && jackyun.VERDICT_RULES].filter(Boolean).join('\n')
     const message = await call(cfg, evidence, system)
     const result = JSON.parse(message.content)
     const branchUid = boundStep ? expectedBranchUid : result?.branchUid
     if (!branches.has(branchUid) || (expectedBranchUid && branchUid !== expectedBranchUid) ||
+        (jackyunEvidence?.branchUid && branchUid !== jackyunEvidence.branchUid) ||
         typeof result?.confidence !== 'number' || result.confidence > 1) return unknown
     if (result.confidence < Math.max(0.75, cfg.minConfidence)) {
       return response(triState ? null : false, '模型判定的置信度不足。')
     }
-    if (!triState) return result.pass === true
     const reason = typeof result.reason === 'string' ? result.reason.trim().slice(0, 300) : ''
+    const inconsistent = jackyun.guard(jackyunEvidence, result)
+    if (inconsistent) return response(inconsistent.decision === 'reject' ? false : triState ? null : false,
+      inconsistent.reason, jackyunEvidence)
+    if (!triState) return response(result.pass === true, reason || (result.pass === true ? '材料核验通过。' : '材料未通过核验。'), jackyunEvidence)
     if (result.decision === 'approve') {
-      return includeReason && !reason ? unknown : response(true, reason)
+      return includeReason && !reason ? unknown : response(true, reason, jackyunEvidence)
     }
     if (result.decision === 'reject' && isRejectRule(scoped, result.rejectRuleUid, branchUid, stepUid)) {
       const clause = scoped.find(node => node.uid === result.rejectRuleUid).text
-      return response(false, (reason ? `命中「${clause}」。${reason}` : `命中「${clause}」。`).slice(0, 500))
+      return response(false, (reason ? `命中「${clause}」。${reason}` : `命中「${clause}」。`).slice(0, 500), jackyunEvidence)
     }
-    return response(null, reason || '模型无法确认是否符合该步骤的规则。')
+    return response(null, reason || '模型无法确认是否符合该步骤的规则。', jackyunEvidence)
   } catch {
     return unknown
   }

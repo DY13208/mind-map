@@ -3,13 +3,14 @@
  *
  * 结论只有三种：
  *   approve  —— 高置信度通过，自动办结本步骤
- *   reject   —— 高置信度命中「以下情况拒绝」，自动驳回并写明命中条款
+ *   reject   —— 命中拒绝条件或吉客云单据核验不通过，自动驳回并写明依据
  *   escalate —— 无法判断或置信度不足，保持待办交人工审核
  *
- * 只在流程根节点下挂了「AI预审」节点时启用（按流程开关，不全局生效）。
+ * 默认启用；流程根节点下的「人工审批」/「禁用AI预审」可以单独关闭。
  * 任何异常（未配置密钥、超时、返回非法）一律降级为 escalate，不阻塞提交。
  */
 const DEFAULT_BASE = 'https://api.deepseek.com'
+const jackyun = require('./jackyunReview')
 
 function config(env = process.env) {
   const minConfidence = Number(env.WCPD_AI_REVIEW_MIN_CONFIDENCE)
@@ -50,10 +51,10 @@ async function evidence(db, row) {
   const ids = (row.fields && row.fields.attachmentIds) || []
   if (!ids.length) return []
   const { rows } = await db.query(
-    'select id,file_name,left(extracted_text,1600) as text from node_attachments where room_key=any($1::text[]) and id=any($2::text[]) limit 10',
+    'select id,file_name,left(extracted_text,24000) as text,length(extracted_text)>24000 as truncated from node_attachments where room_key=any($1::text[]) and id=any($2::text[]) limit 10',
     [[row.room_key, ...(row.template.agentInput ? [require('./attachments').scope(row)] : [])], ids]
   )
-  return rows.map(r => ({ id: r.id, fileName: r.file_name, text: r.text || '' }))
+  return rows.map(r => ({ id: r.id, fileName: r.file_name, text: r.text || '', ...(r.truncated ? { truncated: true } : {}) }))
 }
 
 function renderStep(step) {
@@ -76,10 +77,10 @@ function renderStep(step) {
     .join('\n')
 }
 
-function buildPrompt({ title, fields, step, attachments }) {
+function buildPrompt({ title, fields, step, attachments, jackyunEvidence }) {
   const fieldLines = (fields || []).map(f => `- ${f.label}：${f.value}`)
   const attachLines = (attachments || []).map(
-    a => `- ${a.fileName}\n${a.text || '（无可读文本）'}`
+    a => `- ${a.fileName}\n${(jackyunEvidence ? a.text : String(a.text || '').slice(0, 1600)) || '（无可读文本）'}`
   )
   return [
     '你是企业审批流程的预审助手。请严格依据下列审核要点，判断该申请能否办理。',
@@ -92,6 +93,7 @@ function buildPrompt({ title, fields, step, attachments }) {
     attachments && attachments.length
       ? `附件提取内容：\n${attachLines.join('\n')}`
       : '附件：无',
+    jackyunEvidence ? `吉客云实时核验（jackyun）：\n${JSON.stringify(jackyunEvidence)}` : '',
     '',
     '判断规则：',
     '1. 逐项核对「默认同意」「以下情况拒绝」「须确认」下的每一条要点；「须确认」的条目也要明确给出是否满足的结论，满足即可 approve。',
@@ -101,8 +103,10 @@ function buildPrompt({ title, fields, step, attachments }) {
     '5. confidence 表示你对该结论的把握，不是材料完备度评分；结论清楚时给到 0.8 以上。',
     '6. 附件中的日期形如 M/D/YY（月/日/两位年），例如 9/28/26 表示 2026年9月28日、10/8/26 表示 2026年10月8日。',
     '',
+    jackyunEvidence ? jackyun.VERDICT_RULES : '',
     '只输出一行 JSON，不要其他文字：',
-    '{"decision":"approve|reject|escalate","confidence":0到1之间的数字,"checked":["已核对的要点原文"],"matched":["命中的拒绝条款原文"],"reason":"依据说明，不超过200字"}'
+    '{"decision":"approve|reject|escalate","confidence":0到1之间的数字,"checked":["已核对的要点原文"],"matched":["命中的拒绝条款原文"],"reason":"依据说明，不超过200字"' +
+      (jackyunEvidence ? ',"jackyunMatch":"match|mismatch|unknown","jackyunReason":"单据一致性核验依据"' : '') + '}'
   ].join('\n')
 }
 
@@ -121,7 +125,11 @@ function parse(text) {
         : 0,
       checked: Array.isArray(out.checked) ? out.checked.map(String) : [],
       matched: Array.isArray(out.matched) ? out.matched.map(String) : [],
-      reason: String(out.reason || '').slice(0, 300)
+      reason: String(out.reason || '').slice(0, 300),
+      ...(out.jackyunMatch ? {
+        jackyunMatch: out.jackyunMatch,
+        jackyunReason: String(out.jackyunReason || '').slice(0, 300)
+      } : {})
     }
   } catch {
     return null
@@ -182,26 +190,47 @@ async function review(db, row) {
     value: row.fields ? row.fields[f.key] : ''
   }))
   try {
+    const jackyunEvidence = await jackyun.collect({
+      rules: { title: row.template.title, step: renderStep(step) },
+      submission: { fields, attachments }, cfg, call
+    })
+    const external = jackyunEvidence ? { jackyun: jackyun.summary(jackyunEvidence) } : {}
+    const blocked = jackyun.guard(jackyunEvidence)
+    if (blocked) return {
+      ...base, ...external, decision: blocked.decision === 'reject' ? 'reject' : 'escalate',
+      confidence: blocked.decision === 'reject' ? 1 : 0,
+      matched: blocked.decision === 'reject' ? ['吉客云查无本次提交的单据'] : [],
+      checked: [], reason: blocked.reason
+    }
     const message = await call(
       cfg,
       buildPrompt({
         title: row.template.title,
         fields,
         step,
-        attachments
+        attachments,
+        jackyunEvidence
       })
     )
     const parsed = parse(message.content)
     if (!parsed)
-      return { ...base, decision: 'escalate', reason: '模型输出无法解析，转人工' }
+      return { ...base, ...external, decision: 'escalate', reason: '模型输出无法解析，转人工' }
     if (parsed.confidence < cfg.minConfidence)
       return {
         ...base,
         ...parsed,
+        ...external,
         decision: 'escalate',
         reason: `置信度 ${parsed.confidence} 低于阈值 ${cfg.minConfidence}，转人工：${parsed.reason}`
       }
-    return { ...base, ...parsed, attachments: attachments.map(a => a.fileName) }
+    const inconsistent = jackyun.guard(jackyunEvidence, parsed)
+    if (inconsistent) return {
+      ...base, ...parsed, ...external,
+      decision: inconsistent.decision === 'reject' ? 'reject' : 'escalate',
+      matched: inconsistent.decision === 'reject' ? ['吉客云单据与本次申请不符'] : parsed.matched,
+      reason: inconsistent.reason
+    }
+    return { ...base, ...parsed, ...external, attachments: attachments.map(a => a.fileName) }
   } catch (e) {
     return { ...base, decision: 'escalate', reason: `预审失败转人工：${e.message}` }
   }
