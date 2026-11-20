@@ -16,7 +16,7 @@
     "url": "https://github.com/wanglin2/mind-map"
   },
   "scripts": {
-    "test:approval:jackyun": "node --test ./scripts/verifyJackyunReview.cjs",
+    "test:approval:jackyun": "node --test ./scripts/verifyJackyunReview.cjs ./scripts/verifyJackyunInventory.cjs ./scripts/verifyApprovalEvidence.cjs",
     "test:clipboard": "node ../web/scripts/nodeClipboardCheck.cjs && node ../web/scripts/copyNodeAttachmentsCheck.cjs && node ../web/scripts/clipboardAttachmentKnowledgeCheck.cjs",
     "test:clipboard:browser": "node ../web/scripts/nodeClipboardBrowserCheck.cjs",
     "test:mcp:history": "node ./test/mcpHistory.test.js",

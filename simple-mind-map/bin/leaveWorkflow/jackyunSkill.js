@@ -1,7 +1,8 @@
 // Query-only adapter for the supplied jackyun-erp-operations skill (2026.08.26.1).
-// Sources: helpers/jackyun_signature.py, modules/{sales_order,stock_doc,transfer}.py.
+// Sources: helpers/jackyun_signature.py, modules/{sales_order,stock_doc,transfer,inventory,warehouse}.py.
 // The approval engine cannot invoke the skill's create, audit, reject or pay operations.
 const { createHash } = require('node:crypto')
+const { warehouseStock } = require('./jackyunInventory')
 
 const VERSION = '2026.08.26.1'
 const DEFAULT_URL = 'https://open.jackyun.com/open/openapi/do'
@@ -15,7 +16,7 @@ const METHODS = {
       'totalFee', 'payment', 'payStatus', 'tradeTime', 'consignTime', 'remark',
       'tradeStatus', 'tradeStatusExplain', 'warehouseName', 'warehouseCode',
       'logisticName', 'logisticCode', 'flagNames', 'customerName',
-      'goodsDetail.goodsNo', 'goodsDetail.goodsName', 'goodsDetail.specName',
+      'goodsDetail.goodsNo', 'goodsDetail.goodsName', 'goodsDetail.specName', 'goodsDetail.barcode',
       'goodsDetail.sellCount', 'goodsDetail.sellPrice', 'goodsDetail.sellTotal',
       'goodsDetail.isGift', 'goodsDetail.goodsDelivery.batchNo',
       'goodsDetail.goodsDelivery.sendCount'
@@ -75,7 +76,7 @@ const BUSINESS_FIELDS = new Set([
   'gmtCreate', 'gmtModified', 'createTime', 'applyDate', 'auditDate', 'status',
   'inStatus', 'outStatus', 'inType', 'outType', 'logisticNo', 'logisticName',
   'logisticCode', 'flagNames', 'goodsNo', 'goodsName', 'skuName', 'specName',
-  'quantity', 'unitPrice', 'sellCount', 'sellPrice', 'sellTotal', 'amount',
+  'quantity', 'unitPrice', 'sellCount', 'sellPrice', 'sellTotal', 'amount', 'barcode', 'skuBarcode',
   'totalAmount', 'totalMoney', 'price', 'unit', 'batchNo', 'sendCount', 'isGift',
   'inTypeName', 'outTypeName', 'skuCount', 'skuPrice', 'goodsTotalAmount',
   'totalSkuCount', 'innerCount', 'uninnerCount', 'outedCount', 'unOutedCount', 'memo',
@@ -90,7 +91,9 @@ function config(env = process.env) {
     appKey: String(env.JACKYUN_APP_KEY || '').trim(),
     appSecret: String(env.JACKYUN_APP_SECRET || '').trim(),
     url: String(env.JACKYUN_API_URL || DEFAULT_URL).trim(),
-    timeoutMs: timeout > 0 ? Math.min(timeout, 30000) : 8000
+    timeoutMs: timeout > 0 ? Math.min(timeout, 30000) : 8000,
+    inventoryBudgetMs: 20000,
+    maxInventoryPages: 100
   }
 }
 
@@ -169,24 +172,21 @@ async function readJson(response) {
   return JSON.parse(Buffer.concat(chunks).toString('utf8'))
 }
 
-async function query(query, cfg = config()) {
-  const spec = Object.hasOwn(METHODS, query.kind) && METHODS[query.kind]
-  if (!spec || !Object.hasOwn(spec.identifiers, query.numberField) ||
-      !/^[A-Za-z0-9][A-Za-z0-9_./-]{2,99}$/.test(query.number || '') || !/\d/.test(query.number)) {
-    throw Error('不支持的吉客云单据查询')
+async function request(method, bizcontent, cfg) {
+  if (![...Object.values(METHODS).map(spec => spec.method), 'erp.warehouse.get', 'erp.stockquantity.get'].includes(method)) {
+    throw Error('不支持的吉客云只读查询')
   }
   if (!cfg.enabled || !cfg.appKey || !cfg.appSecret) throw Error('吉客云审批查询未启用或未配置凭据')
   // No model-supplied URLs, method names, field lists or broad search filters.
   const url = new URL(cfg.url)
   if (url.protocol !== 'https:' || url.username || url.password) throw Error('吉客云接口地址配置无效')
-  const bizcontent = { ...spec.defaults, pageIndex: 0, pageSize: 20, [query.numberField]: query.number }
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), cfg.timeoutMs)
   try {
     const response = await fetch(url, {
       method: 'POST', redirect: 'error', signal: controller.signal,
       headers: { 'content-type': 'application/x-www-form-urlencoded; charset=UTF-8' },
-      body: new URLSearchParams(signedParams(spec.method, bizcontent, cfg)).toString()
+      body: new URLSearchParams(signedParams(method, bizcontent, cfg)).toString()
     })
     if (!response.ok) throw Error(`吉客云接口返回 HTTP ${response.status}`)
     const payload = await readJson(response)
@@ -195,20 +195,9 @@ async function query(query, cfg = config()) {
       // Never echo upstream messages: they may contain signed payloads or credentials.
       throw Error(`吉客云接口调用失败（错误码 ${code}），未能核验单据`)
     }
-    const rows = records(payload, spec)
-    if (rows.length >= 20) throw Error('吉客云单据查询达到分页上限，需人工核验')
-    const matching = rows.filter(row => spec.identifiers[query.numberField]
-      .some(key => String(row[key] ?? '').trim().toLowerCase() === query.number.toLowerCase()))
-    if (rows.length && matching.length !== rows.length) throw Error('吉客云返回的单号与查询条件不一致，需人工核验')
-    const documents = matching.map(row => project(row))
-    if (JSON.stringify(documents).length > 24000) throw Error('吉客云单据明细过长，需人工核验')
-    return {
-      kind: query.kind, numberField: query.numberField, number: query.number,
-      method: spec.method, status: documents.length ? 'found' : 'not_found', documents
-    }
+    return payload
   } catch (error) {
     if (controller.signal.aborted) throw Error('吉客云查询超时，未能核验单据')
-    // Do not expose fetch errors (URLs) or JSON parser errors (response bodies).
     if (/^吉客云|^单据/.test(error.message)) throw error
     throw Error('吉客云查询失败，未能核验单据')
   } finally {
@@ -216,8 +205,36 @@ async function query(query, cfg = config()) {
   }
 }
 
+function validQuery(query) {
+  if (!query || typeof query.number !== 'string') return false
+  if (query.kind === 'warehouse_stock') return query.numberField === 'warehouseName' &&
+    query.number.trim().length >= 2 && query.number.length <= 180 && !/[\x00-\x1f*%]/.test(query.number)
+  const spec = Object.hasOwn(METHODS, query.kind) && METHODS[query.kind]
+  return !!spec && Object.hasOwn(spec.identifiers, query.numberField) &&
+    /^[A-Za-z0-9][A-Za-z0-9_./-]{2,99}$/.test(query.number) && /\d/.test(query.number)
+}
+
+async function query(query, cfg = config()) {
+  if (!validQuery(query)) throw Error('不支持的吉客云单据或库存查询')
+  if (query.kind === 'warehouse_stock') return warehouseStock(query, { ...config(), ...cfg }, request)
+  const spec = METHODS[query.kind]
+  const bizcontent = { ...spec.defaults, pageIndex: 0, pageSize: 20, [query.numberField]: query.number }
+  const payload = await request(spec.method, bizcontent, cfg)
+  const rows = records(payload, spec)
+  if (rows.length >= 20) throw Error('吉客云单据查询达到分页上限，需人工核验')
+  const matching = rows.filter(row => spec.identifiers[query.numberField]
+    .some(key => String(row[key] ?? '').trim().toLowerCase() === query.number.toLowerCase()))
+  if (rows.length && matching.length !== rows.length) throw Error('吉客云返回的单号与查询条件不一致，需人工核验')
+  const documents = matching.map(row => project(row))
+  if (JSON.stringify(documents).length > 24000) throw Error('吉客云单据明细过长，需人工核验')
+  return {
+    kind: query.kind, numberField: query.numberField, number: query.number,
+    method: spec.method, status: documents.length ? 'found' : 'not_found', documents
+  }
+}
+
 const DESCRIPTION = Object.entries(METHODS).map(([kind, spec]) => ({
   kind, label: spec.label, numberFields: Object.keys(spec.identifiers)
-}))
+})).concat([{ kind: 'warehouse_stock', label: '按完整仓库名称核验实时存货（不是单号，不需要截图）', numberFields: ['warehouseName'] }])
 
-module.exports = { VERSION, DESCRIPTION, config, sign, signedParams, query }
+module.exports = { VERSION, DESCRIPTION, config, sign, signedParams, validQuery, query }

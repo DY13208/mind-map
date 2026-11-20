@@ -1,9 +1,9 @@
 const { assertRoomAccess } = require('../roomAcl')
 const { stripSearchHtml } = require('../roomNodes')
 const { extractBuffer } = require('../nodeKnowledge/extract')
-const { MAX_EXTRACT_CHARS } = require('../nodeKnowledge/limits')
 const { config, call } = require('./aiReview')
 const jackyun = require('./jackyunReview')
+const approvalEvidence = require('./approvalEvidence')
 
 const ROOM = 'room-yk3tz4aj'
 const ROOT = '7df2ad7a-0978-43be-acb7-3d5e4ead6dd7'
@@ -11,7 +11,6 @@ const SOP_ROOTS = [ROOT, 'e91c8fe9-e848-4697-a409-4f2dfcd40c23']
 const MAX_FILE_BYTES = 5 * 1024 * 1024
 const MAX_BODY_BYTES = 7 * 1024 * 1024
 const MAX_RULE_NODES = 1000
-const MAX_PROMPT_CHARS = 60000
 const BASE_RULES = [
   '你只做材料是否符合人事 SOP 的检查，不执行审批。',
   '按 SOP 树的父子关系理解规则。从根节点的直接子分支中匹配唯一适用流程。',
@@ -156,8 +155,10 @@ async function check(db, req, input = {}, expectedBranchUid, stepUid) {
   const triState = input?.resultMode === 'triState'
   const includeReason = input?.includeReason === true
   let jackyunEvidence
+  let evidenceSelection
   const response = (result, reason, external = jackyunEvidence) => includeReason
-    ? { result, reason, ...(external ? { jackyun: jackyun.summary(external) } : {}) } : result
+    ? { result, reason, ...(external ? { jackyun: jackyun.summary(external) } : {}),
+      ...(evidenceSelection ? { evidenceSelection } : {}) } : result
   const manual = reason => response(triState ? null : false, reason)
   const { text = '', files = [] } = input || {}
   const subsidyEvidence = triState && !!expectedBranchUid && !!stepUid && input.subsidyEvidence === true
@@ -167,6 +168,7 @@ async function check(db, req, input = {}, expectedBranchUid, stepUid) {
   }
 
   const cfg = config()
+  const limits = approvalEvidence.config()
   if (!cfg.enabled) return manual('本企业的AI预审服务未启用，需人工核对审批条件。')
   if (!cfg.apiKey) return manual('AI预审模型连接尚未配置，未执行材料核验，需管理员处理或人工审核。')
   let stage = '读取附件'
@@ -187,61 +189,89 @@ async function check(db, req, input = {}, expectedBranchUid, stepUid) {
       if (matches.length !== 1) return response(triState ? null : false, '该 SOP 分支下无法唯一匹配当前审批步骤。')
       stepUid = matches[0].uid
     }
-    const extractAttachment = async (file, index) => {
-      const parsed = await extractBuffer(buffers[index], {
-        fileName: file.name,
-        sourceKind: 'approval_request'
-      })
-      if (parsed.status !== 'ready' || !parsed.extractedText?.trim()) {
-        const problem = /未配置/.test(parsed.errorMessage || '') ? '文字识别服务未配置'
-          : /超时|timeout|timed out/i.test(parsed.errorMessage || '') ? '文字识别服务超时'
-            : '未提取到可供核验的文字'
-        return { error: `附件“${file.name}”${problem}，需人工查看原文件。` }
-      }
-      if (parsed.extractedText.length >= MAX_EXTRACT_CHARS) {
-        return { error: `附件“${file.name}”提取内容超过读取上限，需人工核对完整文件。` }
-      }
-      return { name: file.name, text: parsed.extractedText, fieldKey: file.fieldKey }
-    }
-    stage = '提取附件文字'
-    const attachments = []
-    for (let start = 0; start < files.length; start += 5) {
-      const batch = await Promise.all(files.slice(start, start + 5)
-        .map((file, index) => extractAttachment(file, start + index)))
-      const failed = batch.find(item => item.error)
-      if (failed) return manual(failed.error)
-      attachments.push(...batch)
-    }
     const structured = triState && expectedBranchUid
     const selectedEvidenceOnly = structured && stepUid && input.selectedEvidenceOnly === true
     const scoped = stepUid ? scopeStep(sop, expectedBranchUid, stepUid, !selectedEvidenceOnly) : sop
     if (!scoped.length) return manual('当前审批步骤没有可读取的具体规则，需管理员核对步骤绑定和审核条件。')
     stage = '解析申请字段'
     const form = expectedBranchUid ? JSON.parse(text) : null
-    if (expectedBranchUid && !hasRequiredEvidence(input.requiredEvidence, form?.提交字段, attachments)) {
+    // requiredEvidence checks material presence. Its legacy callers also put
+    // every filled optional field here; it is not a mandate to review unrelated
+    // attachment contents at every step. Rule-specific reads are selected below.
+    if (expectedBranchUid && !hasRequiredEvidence(input.requiredEvidence, form?.提交字段, files)) {
       const missing = Array.isArray(input.requiredEvidence)
-        ? input.requiredEvidence.filter(item => !hasRequiredEvidence([item], form?.提交字段, attachments))
+        ? input.requiredEvidence.filter(item => !hasRequiredEvidence([item], form?.提交字段, files))
           .map(item => form?.提交字段?.[item?.key]?.label || item?.key || '未命名材料') : []
       return manual(missing.length
         ? `以下必需材料未通过读取校验：${missing.join('、')}。需核对是否填写、文件是否提交及字段格式。`
         : '本节点尚未配置必需核验材料清单，需管理员指定审核字段和附件。')
     }
+    const extractAttachment = async (file, index) => {
+      let parsed
+      try {
+        parsed = await extractBuffer(buffers[index], {
+          fileName: file.name, sourceKind: 'approval_request', maxExtractChars: limits.maxAttachmentChars
+        })
+      } catch {
+        return { name: file.name, fieldKey: file.fieldKey, requiredForStep: file.requiredForStep === true,
+          error: `附件“${file.name}”无法解析，需人工查看原文件。` }
+      }
+      const attachment = { name: file.name, text: parsed.extractedText || '', fieldKey: file.fieldKey,
+        requiredForStep: file.requiredForStep === true, truncated: parsed.truncated === true }
+      if (parsed.status !== 'ready' || !parsed.extractedText?.trim()) {
+        const problem = /未配置/.test(parsed.errorMessage || '') ? '文字识别服务未配置'
+          : /超时|timeout|timed out/i.test(parsed.errorMessage || '') ? '文字识别服务超时'
+            : '未提取到可供核验的文字'
+        return { ...attachment, error: `附件“${file.name}”${problem}，需人工查看原文件。` }
+      }
+      if (parsed.truncated) {
+        return { ...attachment, error: `附件“${file.name}”超过本步骤附件读取上限（${limits.maxAttachmentChars}字），未完整读取，需人工核对完整文件。` }
+      }
+      return attachment
+    }
+    stage = '提取附件文字'
+    const extracted = []
+    for (let start = 0; start < files.length; start += 5) {
+      const batch = await Promise.all(files.slice(start, start + 5)
+        .map((file, index) => extractAttachment(file, start + index)))
+      extracted.push(...batch)
+    }
+    let chosen = extracted.map((_, index) => index)
+    if (selectedEvidenceOnly && limits.selectStepAttachments && !subsidyEvidence) {
+      stage = '核对本步骤所需附件'
+      const selection = await approvalEvidence.select({ rules: scoped, stepUid,
+        fields: form?.提交字段, attachments: extracted, requirements: input.requiredEvidence, cfg, call })
+      chosen = selection.selected
+      if (selection.omitted.length) evidenceSelection = {
+        scope: 'current_step',
+        selected: chosen.map(index => ({ name: extracted[index].name, fieldKey: extracted[index].fieldKey })),
+        omitted: selection.omitted.map(({ index, reason }) => ({ name: extracted[index].name,
+          fieldKey: extracted[index].fieldKey, reason }))
+      }
+    }
+    const failed = chosen.map(index => extracted[index]).find(item => item.error)
+    if (failed) return manual(failed.error)
+    const attachments = chosen.map(index => ({ name: extracted[index].name,
+      fieldKey: extracted[index].fieldKey, text: extracted[index].text }))
     const submission = structured
       ? { formTitle: form.申请类型, fields: form.提交字段, attachments }
       : { text, attachments }
-    stage = '读取聚水潭核验资料'
+    stage = '读取吉客云核验资料'
     jackyunEvidence = await jackyun.collect({
-      rules: scoped, submission, branchUids: [...branches], branchUid: expectedBranchUid, cfg, call
+      rules: scoped, submission, branchUids: [...branches], branchUid: expectedBranchUid,
+      cfg: { ...cfg, maxPromptChars: limits.maxPromptChars }, call
     })
     const blocked = jackyun.guard(jackyunEvidence)
     if (blocked) return response(blocked.decision === 'reject' ? false : triState ? null : false, blocked.reason)
     const evidence = JSON.stringify({ sop: scoped, stepUid, submission,
+      ...(evidenceSelection ? { omittedAttachments: evidenceSelection.omitted } : {}),
       ...(jackyunEvidence ? { jackyun: jackyunEvidence } : {}) })
-    if (evidence.length > MAX_PROMPT_CHARS) return manual('审批规则与材料合计超过模型读取上限，需人工核对完整材料。')
+    if (evidence.length > limits.maxPromptChars) return manual(`审批规则与本步骤所需材料合计超过模型读取上限（${limits.maxPromptChars}字），需人工核对完整材料。`)
     const boundStep = structured && stepUid
     const system = [BASE_RULES, selectedEvidenceOnly ? STEP_RULE : WHOLE_FORM_RULE,
       stepUid && !selectedEvidenceOnly && '本次仅核对 sop 中提供的提交要求和目标审核步骤。规则中没有明确、可核验的审核条件时，结论必须为无法判断。',
       structured && EVIDENCE_RULE,
+      evidenceSelection && 'omittedAttachments 列出经当前步骤规则判定无需核验的附件，它们没有作为已核验的证据。不得声称已阅读其正文；若实际判断依赖其中的附件，必须转人工并指出所需材料，不能自动通过。',
       triState ? TRI_STATE_RULE : BOOLEAN_RULE,
       triState && (boundStep ? BOUND_STEP_RULE : '同时输出匹配的一级流程 branchUid。'),
       includeReason && REASON_RULE,

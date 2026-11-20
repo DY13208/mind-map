@@ -139,7 +139,7 @@ test('the query planner cannot skip required lookup, use example IDs, query othe
     { required: true, queries: [{ ...lookup, number: 'YR-OTHER001' }] },
     { required: true, queries: [{ ...lookup, number: '20261119001' }] },
     { required: true, queries: [{ ...lookup, kind: 'oms.trade.ordercreate' }] },
-    { required: true, queries: Array.from({ length: 7 }, () => lookup) }
+    { required: true, queries: Array.from({ length: 51 }, () => lookup) }
   ]) {
     const result = await collect({ call: async () => modelMessage(plan) })
     assert.equal(result.status, 'manual')
@@ -184,6 +184,19 @@ test('every requested document must be found; a missing document fails even if a
   assert.equal(result.status, 'not_found')
   assert.equal(result.queries.length, 2)
   assert.equal(external.guard(result).decision, 'reject')
+})
+
+test('order numbers separated by newlines in one attachment cell are all verifiable', async t => {
+  env(t)
+  const queries = Array.from({ length: 10 }, (_, index) => ({ ...lookup, number: `YR202611190${index + 10}` }))
+  t.mock.method(globalThis, 'fetch', async (_url, options) => {
+    const body = JSON.parse(new URLSearchParams(options.body).get('bizcontent'))
+    return apiResponse({ trades: [{ tradeNo: body.tradeNo }] })
+  })
+  const result = await collect({ submission: { attachments: [{ text: queries.map(q => q.number).join('\n') }] },
+    call: async () => modelMessage({ required: true, queries }) })
+  assert.equal(result.status, 'ready')
+  assert.equal(result.queries.length, 10)
 })
 
 test('truncated or oversized evidence cannot silently drop related documents', async t => {

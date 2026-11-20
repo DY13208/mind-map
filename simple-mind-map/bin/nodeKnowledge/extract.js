@@ -2,6 +2,8 @@ const JSZip = require('jszip')
 const { kindOf, normalizeMime, MAX_EXTRACT_CHARS } = require('./limits')
 const fs = require('fs')
 const path = require('path')
+const { AsyncLocalStorage } = require('node:async_hooks')
+const extractionLimits = new AsyncLocalStorage()
 
 const DOCLING_IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'webp'])
 const doclingRuntimes = new Map()
@@ -52,12 +54,14 @@ function getDoclingRuntime(baseUrl) {
   return runtime
 }
 
-function clip(text, max = MAX_EXTRACT_CHARS) {
+function clip(text, max = extractionLimits.getStore()?.maxChars || MAX_EXTRACT_CHARS) {
   const value = String(text || '')
     .replace(/\u0000/g, '')
     .replace(/\r\n/g, '\n')
     .trim()
   if (value.length <= max) return value
+  const context = extractionLimits.getStore()
+  if (context) context.truncated = true
   return value.slice(0, Math.max(0, max - 1)) + '…'
 }
 
@@ -132,6 +136,9 @@ async function extractXlsx(buffer) {
     const XLSX = require('xlsx')
     const workbook = XLSX.read(buffer, { type: 'buffer', raw: false })
     const parts = []
+    if (workbook.SheetNames.length > 10 && extractionLimits.getStore()) {
+      extractionLimits.getStore().truncated = true
+    }
     workbook.SheetNames.slice(0, 10).forEach(name => {
       const sheet = workbook.Sheets[name]
       if (!sheet) return
@@ -351,6 +358,18 @@ async function extractFile(filePath, options = {}) {
 }
 
 async function extractBuffer(buffer, options = {}) {
+  // A per-call budget keeps approval reads independent of knowledge-base reads
+  // and of concurrently extracted attachments. Never mutate process.env here.
+  if (options.maxExtractChars !== undefined) {
+    const requested = Number(options.maxExtractChars)
+    const maxChars = Number.isFinite(requested)
+      ? Math.max(1000, Math.min(500000, Math.floor(requested))) : MAX_EXTRACT_CHARS
+    const context = { maxChars, truncated: false }
+    return extractionLimits.run(context, async () => {
+      const result = await extractBuffer(buffer, { ...options, maxExtractChars: undefined })
+      return { ...result, truncated: context.truncated }
+    })
+  }
   const fileName = options.fileName || 'file'
   const mimeType = normalizeMime(options.mimeType, fileName)
   const kind = kindOf(fileName, mimeType)
