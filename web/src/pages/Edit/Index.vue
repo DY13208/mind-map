@@ -39,6 +39,9 @@ import { getLocalConfig, withRightDragDefault } from '@/api'
 import { returnFromEditor } from '@/utils/editorFileReturn'
 import { getReturnLabel } from '@/utils/fileNavigation'
 import editorViewport from '@/utils/editorViewport'
+import { getMapRootTitle } from '@/utils/mapTitleSync'
+
+const PAGE_TITLE = 'WCPD'
 
 export default {
   name: 'EditPage',
@@ -81,6 +84,8 @@ export default {
   },
   async created() {
     this.$bus.$on('room_title_updated', this.onRoomTitleUpdated)
+    this.$bus.$on('room_canvas_ready', this.onRoomCanvasTitleReady)
+    this.$bus.$on('node_tree_render_end', this.syncBrowserTabTitle)
     // activeSidebar 是全局运行态。离开编辑器再返回时必须从关闭状态开始，
     // 否则触发条会预留侧栏宽度，而新创建的侧栏组件仍处于关闭状态。
     this.setActiveSidebar('')
@@ -118,6 +123,9 @@ export default {
   },
   beforeDestroy() {
     this.$bus.$off('room_title_updated', this.onRoomTitleUpdated)
+    this.$bus.$off('room_canvas_ready', this.onRoomCanvasTitleReady)
+    this.$bus.$off('node_tree_render_end', this.syncBrowserTabTitle)
+    document.title = PAGE_TITLE
     this.setHistoryInteractionPaused(false)
     if (typeof this._finishRoomCanvasWait === 'function') {
       this._finishRoomCanvasWait()
@@ -127,6 +135,17 @@ export default {
     this.setActiveSidebar('')
   },
   methods: {
+    onRoomCanvasTitleReady() {
+      this._roomTabTitleReady = true
+      this.syncBrowserTabTitle()
+    },
+    syncBrowserTabTitle() {
+      if (this.roomKey && !this._roomTabTitleReady) return
+      const editor = this.$refs.editor
+      const rootTitle = getMapRootTitle(editor && editor.mindMap)
+      const title = rootTitle ? `${PAGE_TITLE} ${rootTitle}` : PAGE_TITLE
+      if (document.title !== title) document.title = title
+    },
     onRoomTitleUpdated(update) {
       if (!update || update.roomKey !== this.roomKey || !update.title || !this.historyRoom) return
       this.historyRoom = { ...this.historyRoom, title: update.title, name: update.title }

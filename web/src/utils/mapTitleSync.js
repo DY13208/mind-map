@@ -6,6 +6,11 @@ import { withMirrorForwardSuppressed } from './mapRefMirror'
 
 const plainTitle = text => String(text || '').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').trim()
 
+export function getMapRootTitle(mindMap) {
+  const root = mindMap && mindMap.renderer && mindMap.renderer.renderTree
+  return plainTitle(root && root.data && root.data.text)
+}
+
 // Resolve only the references already present in the preview, before its first
 // paint. Do not persist derived labels or fetch entire referenced maps.
 export async function resolveInitialMapRefTitles(tree, {
@@ -76,8 +81,7 @@ export class MapTitleSync {
   }
 
   rootTitle() {
-    const root = this.map.renderer && this.map.renderer.renderTree
-    return plainTitle(root && root.data && root.data.text)
+    return getMapRootTitle(this.map)
   }
 
   start() {
