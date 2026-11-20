@@ -9,7 +9,8 @@ test('refresh restoration waits for layout and hydrated render before traversing
   const end = source.indexOf('\n    unbindPersonalExpandState()', begin)
   let applied = false, rendered = false, loaded = false, nestedRendered = false, scans = 0
   const fn = vm.runInNewContext('({' + source.slice(begin, end) + '}).restorePersonalExpandState', {
-    Promise, Object, applyPersonalExpandState: () => { if (applied) return false; applied = true; return true }
+    Promise, Object, collectExpandProtectUids: () => new Set(),
+    applyPersonalExpandState: () => { if (applied) return false; applied = true; return true }
   })
   const component = {
     personalExpandRoomKey: 'room', personalExpandState: { parent: true }, personalExpandApplying: false,

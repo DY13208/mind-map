@@ -339,6 +339,7 @@ import {
 } from '@/utils/mapNavTrail'
 import {
   applyPersonalExpandState,
+  applyTreeExpandState,
   collectExpandProtectUids,
   collectPersonalExpandState,
   loadPersonalExpandState,
@@ -1340,12 +1341,12 @@ export default {
         this.largeMapInitialOverview ||
         this.personalExpandApplying ||
         !this.personalExpandState ||
-        !Object.keys(this.personalExpandState).length ||
         !this.mindMap
       ) {
         return
       }
       const roomKey = this.personalExpandRoomKey
+      const hasSavedExpand = Object.keys(this.personalExpandState).length > 0
       this.personalExpandApplying = true
       try {
         const cooperate = this.mindMap.cooperate
@@ -1359,6 +1360,7 @@ export default {
           // Hydration inspects rendered instances, not only renderTree data.
           // Wait until expanded parents exist before checking their children.
           if (changed) await new Promise(resolve => this.mindMap.render(resolve))
+          if (!hasSavedExpand && !changed) break
           if (
             !cooperate ||
             typeof cooperate.hydrateExpandedPartialParents !== 'function'
@@ -2811,6 +2813,9 @@ export default {
           resolve(rendered !== false)
         }
         let tree = preview.tree
+        if (tree && !this.largeMapInitialOverview) {
+          applyTreeExpandState(tree, this.personalExpandState || {})
+        }
         if (tree && this.largeMapInitialOverview) {
           this.personalExpandOverviewFrozen = true
           this.personalExpandOverviewSnapshot = copyExpandState(

@@ -215,6 +215,8 @@ test('initial lookup ignores stale room attempts and bounds concurrent reference
 })
 
 test('room preview waits for initial labels before setData and abandons an outdated attempt', async () => {
+  const expandSource = fs.readFileSync(require.resolve('../src/utils/personalExpandState.js'), 'utf8')
+  const { applyTreeExpandState } = await import('data:text/javascript;base64,' + Buffer.from(expandSource).toString('base64'))
   const sfc = fs.readFileSync(require('node:path').join(__dirname, '../src/pages/Edit/components/CooperateDialog.vue'), 'utf8')
   const start = sfc.indexOf('    async applyPreview(')
   const end = sfc.indexOf('    async promptSopConfirmation(', start)
@@ -223,16 +225,21 @@ test('room preview waits for initial labels before setData and abandons an outda
     let finish, painted = false
     const stoppedAtPaint = new Error('observed first paint')
     const context = { resolveInitialMapRefTitles: tree => new Promise(yes => { finish = () => { tree.data.text = 'Fresh label'; yes(tree) } }),
-      countNodes: () => 1, hasPartialPreviewTree: () => false }
+      applyTreeExpandState, countNodes: () => 1, hasPartialPreviewTree: () => false }
     const methods = vm.runInNewContext(`({ ${method} })`, context)
     const owner = { _openAttemptId: 1, mindMap: { cooperate: { setPreviewApplied() {} } },
       applyAccess() {}, useCollabV2: () => false, enableHttpCollab() {},
       $bus: { $emit: (event, tree) => { if (event === 'setData') {
         painted = true
         assert.equal(tree.data.text, 'Fresh label')
+        assert.equal(tree.children[0].children[0].data.expand, false)
         throw stoppedAtPaint
       } } } }
-    const promise = methods.applyPreview.call(owner, { tree: { data: { text: 'Old label' } } }, true, 1)
+    const tree = { data: { text: 'Old label' }, children: [{
+      data: { uid: 'mirror', mapRef: { syncMode: 'mirror', uidMap: { branch: 'source' } } },
+      children: [{ data: { uid: 'branch', expand: true, childCount: 1 }, children: [] }]
+    }] }
+    const promise = methods.applyPreview.call(owner, { tree }, true, 1)
     assert.equal(painted, false)
     if (cancel) owner._openAttemptId = 2
     finish()

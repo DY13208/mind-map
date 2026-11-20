@@ -1895,21 +1895,22 @@ class Render {
   }
 
   // 插入多个子节点
-  insertMultiChildNode(appointNodes, childList) {
+  insertMultiChildNode(appointNodes, childList, { preserveView = false } = {}) {
     if (!childList || childList.length <= 0) return
     appointNodes = formatDataToArray(appointNodes)
     if (this.activeNodeList.length <= 0 && appointNodes.length <= 0) {
       return
     }
-    this.textEdit.hideEditTextBox()
+    if (!preserveView) this.textEdit.hideEditTextBox()
     const list = appointNodes.length > 0 ? appointNodes : this.activeNodeList
     const isRichText = this.hasRichTextPlugin()
-    const { focusNewNode } = this.getNewNodeBehavior(false, true)
+    const focusNewNode =
+      !preserveView && this.getNewNodeBehavior(false, true).focusNewNode
     const params = {
-      expand: true,
       richText: isRichText,
       isActive: focusNewNode
     }
+    if (!preserveView) params.expand = true
     if (isRichText) params.resetRichText = true
     childList = addDataToAppointNodes(childList, params)
     let createNewId = false
@@ -1925,10 +1926,9 @@ class Render {
       this.mindMap.command.recordContentChange?.({ added: childList, countable: this.mindMap.command.isCountableNode(node) })
       const live = node.nodeData.children.length
       const prev = Number(node.getData && node.getData('childCount')) || 0
-      node.setData({
-        expand: true,
-        childCount: Math.max(live, prev + childList.length)
-      })
+      const patch = { childCount: Math.max(live, prev + childList.length) }
+      if (!preserveView) patch.expand = true
+      node.setData(patch)
       if (node.isGeneralization && node.generalizationBelongNode) {
         node.generalizationBelongNode.createGeneralizationNode()
       }

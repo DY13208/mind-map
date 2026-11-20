@@ -40,3 +40,29 @@ test('view-only renders skip restore; tree, server and local state changes resto
   gate.invalidate()
   assert.equal(gate.shouldRestore(tree, 2, state, 1), true)
 })
+
+test('restoring a legacy mirror folds only mapped branches without saved preferences', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '../web/src/utils/personalExpandState.js'), 'utf8')
+  const { applyTreeExpandState } = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'))
+  const branch = uid => ({ data: { uid, expand: true, childCount: 1 }, children: [] })
+  const collapsed = branch('collapsed')
+  const opened = branch('opened')
+  const protectedBranch = branch('editing')
+  const ordinary = branch('ordinary')
+  const mirror = {
+    data: { uid: 'host', expand: true, mapRef: { syncMode: 'mirror', uidMap: {
+      host: 'source', collapsed: 'source-1', opened: 'source-2', editing: 'source-3'
+    } } },
+    children: [collapsed, opened, protectedBranch, ordinary]
+  }
+  const root = { data: { uid: 'root', expand: true }, children: [mirror] }
+  const saved = { opened: true }
+  const protect = new Set(['editing'])
+  assert.equal(applyTreeExpandState(root, saved, protect), true)
+  assert.equal(collapsed.data.expand, false)
+  for (const node of [mirror, opened, protectedBranch, ordinary]) {
+    assert.equal(node.data.expand, true, `${node.data.uid} must stay open`)
+  }
+  assert.deepEqual(saved, { opened: true })
+  assert.equal(applyTreeExpandState(root, saved, protect), false)
+})

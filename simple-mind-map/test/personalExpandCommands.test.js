@@ -218,6 +218,7 @@ async function main() {
   let remoteReady
   const listeners = {}
   vm.runInContext(fs.readFileSync(require.resolve('../../web/src/utils/expandRestoreGate.js'), 'utf8').replace('export function', 'function'), sandbox)
+  vm.runInContext(fs.readFileSync(require.resolve('../../web/src/utils/personalViewPolicy.js'), 'utf8').replace(/export /g, ''), sandbox)
   Object.assign(sandbox, {
     loadPersonalExpandState: () => ({ branch: true }),
     savePersonalExpandState() {}, bindPersonalAppearance: () => () => {},
@@ -238,6 +239,9 @@ async function main() {
   await Promise.resolve(); await Promise.resolve()
   assert.strictEqual(component.personalExpandState.branch, false, 'late initial preferences must not overwrite user input')
   f.branch.data.expand = true
+  listeners.personal_expand_change()
+  assert.strictEqual(component.personalExpandState.branch, false, 'restore renders are not saved as user preferences')
+  component.personalExpandApplying = false
   listeners.personal_expand_change()
   assert.strictEqual(component.personalExpandState.branch, true, 'async batch event updates personal preferences')
 

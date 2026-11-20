@@ -4,7 +4,11 @@ const { resolveRoomRef } = require('../bin/roomNodes')
 
 function testNormalizeMapRef() {
   assert.strictEqual(normalizeMapRef(null), null)
-  assert.strictEqual(normalizeMapRef('room-a'), null)
+  assert.deepStrictEqual(normalizeMapRef('room-a'), {
+    mapId: 'room-a',
+    nodeId: null,
+    type: 'map'
+  })
   assert.strictEqual(normalizeMapRef({}), null)
   assert.deepStrictEqual(normalizeMapRef({ mapId: 'room-a' }), {
     mapId: 'room-a',

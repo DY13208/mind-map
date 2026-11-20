@@ -1,4 +1,5 @@
-import { createUid } from 'simple-mind-map/src/utils/index'
+import { createUid, detachNodeFromParent } from 'simple-mind-map/src/utils/index'
+import mapRefUtil from 'simple-mind-map/src/utils/mapRef'
 import { normalizeMapRef, isMirrorMapRef } from '@/utils/mapRefNav'
 import {
   getFileSubtree,
@@ -41,17 +42,6 @@ function withCollabRemoteApply(mindMap, fn) {
   if (cooperate) cooperate.isApplyingRemote = true
   try {
     return fn()
-  } finally {
-    if (cooperate) cooperate.isApplyingRemote = prev
-  }
-}
-
-async function withCollabRemoteApplyAsync(mindMap, fn) {
-  const cooperate = mindMap && mindMap.cooperate
-  const prev = cooperate ? !!cooperate.isApplyingRemote : false
-  if (cooperate) cooperate.isApplyingRemote = true
-  try {
-    return await fn()
   } finally {
     if (cooperate) cooperate.isApplyingRemote = prev
   }
@@ -292,7 +282,7 @@ export function buildRemappedChildren(peerTree, hostUid, peerRootUid) {
   }
   uidMap[host] = rootPeerUid
 
-  const remapNode = (node, depth) => {
+  const remapNode = node => {
     if (!node || !node.data) return null
     const peerUid = String(node.data.uid || '').trim()
     const localUid = createUid()
@@ -303,16 +293,16 @@ export function buildRemappedChildren(peerTree, hostUid, peerRootUid) {
     data.resetRichText = true
     data.inserting = true
     data.text = stripHtml(data.text) || '(空)'
-    data.expand = depth < 2
+    data.expand = false
     const children = (node.children || [])
-      .map(child => remapNode(child, depth + 1))
+      .map(remapNode)
       .filter(Boolean)
     data.childCount = children.length
     return { data, children }
   }
 
   const children = (peerTree.children || [])
-    .map(child => remapNode(child, 0))
+    .map(remapNode)
     .filter(Boolean)
 
   return {
@@ -534,7 +524,9 @@ export async function implantMirrorSubtree({
       // INSERT_MULTI_CHILD_NODE 又没带 inserting 时整树会被滤掉 →「节点没引用过来」
       ensureHostActive(mindMap, node)
       markInsertingTree(children)
-      mindMap.execCommand('INSERT_MULTI_CHILD_NODE', [node], children)
+      mindMap.execCommand('INSERT_MULTI_CHILD_NODE', [node], children, {
+        preserveView: true
+      })
     }
 
     return {
@@ -900,6 +892,16 @@ export class MapRefMirrorSync {
     }
   }
 
+  _applyRemote(fn) {
+    // 抑制同步命令的回写。网络读和附件复制期间仍接收用户编辑。
+    this._applyingRemote = true
+    try {
+      return withCollabRemoteApply(this.mindMap, fn)
+    } finally {
+      this._applyingRemote = false
+    }
+  }
+
   /**
    * @returns {Promise<boolean>} 是否成功应用（unchanged 也算成功）
    */
@@ -916,61 +918,54 @@ export class MapRefMirrorSync {
       return false
     }
     if (fetched.unchanged) return true
-    if (!fetched.tree) return false
+    if (!fetched.tree || this._stopped) return false
 
-    this._applyingRemote = true
-    try {
-      return await withCollabRemoteApplyAsync(this.mindMap, async () => {
-        const live =
-          (this.mindMap.renderer &&
-            this.mindMap.renderer.findNodeByUid &&
-            this.mindMap.renderer.findNodeByUid(host.uid)) ||
-          host.node
-        if (!live) return false
+    const live = this.mindMap.renderer.findNodeByUid(host.uid)
+    if (!live || !mapRefUtil.mapRefEquals(live.getData('mapRef'), ref)) return false
 
-        // 更新宿主文案
-        const rootText = stripHtml(fetched.tree.data && fetched.tree.data.text)
-        const rootNote = (fetched.tree.data && fetched.tree.data.note) || ''
-        if (rootText && stripHtml(live.getData('text')) !== rootText) {
-          this.mindMap.renderer.setNodeDataRender(live, {
-            text: rootText,
-            richText: false,
-            resetRichText: true
-          })
-        }
-        if (rootNote !== (live.getData('note') || '')) {
-          this.mindMap.execCommand('SET_NODE_NOTE', live, rootNote)
-        }
+    this._applyRemote(() => {
+      const rootText = stripHtml(fetched.tree.data && fetched.tree.data.text)
+      const rootNote = (fetched.tree.data && fetched.tree.data.note) || ''
+      if (rootText && stripHtml(live.getData('text')) !== rootText) {
+        this.mindMap.renderer.setNodeDataRender(live, {
+          text: rootText,
+          richText: false,
+          resetRichText: true
+        })
+      }
+      if (rootNote !== (live.getData('note') || '')) {
+        this.mindMap.execCommand('SET_NODE_NOTE', live, rootNote)
+      }
+    })
 
-        const reverse = invertUidMap(ref.uidMap)
-        await this._syncChildren(
-          live,
-          fetched.tree.children || [],
-          reverse,
-          host
-        )
+    const synced = await this._syncChildren(
+      live,
+      fetched.tree.children || [],
+      invertUidMap(ref.uidMap),
+      host,
+      !fetched.truncated
+    )
+    if (this._stopped || !mapRefUtil.mapRefEquals(live.getData('mapRef'), ref)) return false
 
-        // 写回 peerVersion（asRemote：不把巨大 uidMap 当成本地协同写）
-        const nextRef = {
-          ...normalizeMapRef(live.getData('mapRef')),
-          uidMap: { ...(host.ref.uidMap || {}) },
-          peerVersion: fetched.version || null
-        }
-        host.ref = nextRef
-        live.setData({ mapRef: nextRef })
-        this.mindMap.execCommand('SET_NODE_MAP_REF', live, nextRef)
-        return true
-      })
-    } finally {
-      this._applyingRemote = false
+    // 写回本次同步进度。只在所有已读取分支都可应用时推进版本。
+    const nextRef = {
+      ...normalizeMapRef(live.getData('mapRef')),
+      uidMap: { ...(host.ref.uidMap || {}) },
+      peerVersion: synced ? fetched.version || null : ref.peerVersion
     }
+    host.ref = nextRef
+    this._applyRemote(() => {
+      live.setData({ mapRef: nextRef })
+      this.mindMap.execCommand('SET_NODE_MAP_REF', live, nextRef)
+    })
+    return synced
   }
 
   /**
    * 把 peer 子树 remap 成可一次 INSERT 的本地树，并登记 uidMap。
    * 整树插入，避免逐层依赖 findNodeByUid（折叠/未渲染时会丢深层节点）。
    */
-  _remapPeerSubtree(peerNode, reverse, host, depth) {
+  _remapPeerSubtree(peerNode, reverse, host) {
     if (!peerNode || !peerNode.data) return null
     const peerUid = String(peerNode.data.uid || '').trim()
     if (!peerUid) return null
@@ -981,25 +976,38 @@ export class MapRefMirrorSync {
     data.richText = false
     data.resetRichText = true
     data.inserting = true
-    data.expand = depth < 1
+    data.expand = false
     host.ref.uidMap = { ...(host.ref.uidMap || {}), [newUid]: peerUid }
     reverse[peerUid] = newUid
     const children = (peerNode.children || [])
-      .map(child => this._remapPeerSubtree(child, reverse, host, depth + 1))
+      .map(child => this._remapPeerSubtree(child, reverse, host))
       .filter(Boolean)
     data.childCount = children.length
     return { data, children }
   }
 
-  async _syncChildren(localParent, peerChildren, reverse, host) {
-    const localKids = [...((localParent && localParent.children) || [])]
+  async _syncChildren(localParent, peerChildren, reverse, host, canRemove) {
+    if (this._stopped) return false
+    const parentData = localParent.nodeData
+    const needsChildren = () =>
+      parentData.data.hasMore ||
+      Number(parentData.data.childCount) > (parentData.children || []).length
+    const cooperate = this.mindMap.cooperate
+    if (needsChildren()) {
+      // 未加载的镜像成员已有本地 UID，补齐本房子树后再比较，避免重复插入。
+      if (!cooperate || typeof cooperate.hydrateNodeData !== 'function') return false
+      await cooperate.hydrateNodeData(parentData)
+      if (needsChildren() || this._stopped) return false
+    }
+    const localKids = [...(parentData.children || [])]
     const usedLocal = new Set()
+    let synced = true
 
     for (const peerChild of peerChildren) {
       if (!peerChild || !peerChild.data) continue
       const peerUid = String(peerChild.data.uid || '')
       if (!peerUid) continue
-      let localUid = reverse[peerUid]
+      const localUid = reverse[peerUid]
       let localNode =
         localUid &&
         this.mindMap.renderer &&
@@ -1013,7 +1021,7 @@ export class MapRefMirrorSync {
       }
 
       if (!localNode) {
-        let tree = this._remapPeerSubtree(peerChild, reverse, host, 0)
+        let tree = this._remapPeerSubtree(peerChild, reverse, host)
         if (!tree) continue
         // poll 拉到的新节点若带产物，同样复制到当前房
         const transferred = await transferTreeAttachments(
@@ -1021,60 +1029,72 @@ export class MapRefMirrorSync {
           host.ref && host.ref.mapId,
           currentRoomKey(this.mindMap)
         )
+        if (this._stopped) return false
         tree = (transferred.trees && transferred.trees[0]) || tree
-        ensureHostActive(this.mindMap, localParent)
         markInsertingTree([tree])
-        this.mindMap.execCommand(
-          'INSERT_MULTI_CHILD_NODE',
-          [localParent],
-          [tree]
-        )
-        localUid = tree.data.uid
-        localNode =
-          (this.mindMap.renderer.findNodeByUid &&
-            this.mindMap.renderer.findNodeByUid(localUid)) ||
-          this._findDataChild(localParent, localUid)
-        usedLocal.add(localUid)
+        this._applyRemote(() => {
+          this.mindMap.execCommand(
+            'INSERT_MULTI_CHILD_NODE',
+            [localParent],
+            [tree],
+            { preserveView: true }
+          )
+        })
         // 整树已插入，不必再递归 children
         continue
       }
 
       usedLocal.add(localUid)
-      if (typeof localNode.getData === 'function') {
-        const peerText = stripHtml(peerChild.data.text)
-        if (peerText && stripHtml(localNode.getData('text')) !== peerText) {
-          this.mindMap.renderer.setNodeDataRender(localNode, {
-            text: peerText,
-            richText: false,
-            resetRichText: true
+      const patch = {}
+      const peerText = stripHtml(peerChild.data.text)
+      if (peerText && stripHtml(localNode.getData('text')) !== peerText) {
+        Object.assign(patch, { text: peerText, richText: false, resetRichText: true })
+      }
+      const peerNote = peerChild.data.note || ''
+      if (peerNote !== (localNode.getData('note') || '')) patch.note = peerNote
+      if (Object.keys(patch).length) {
+        // 折叠节点只有树数据，没有 SVG 实例，等它展开时再绘制。
+        if (typeof localNode.reRender === 'function') {
+          this._applyRemote(() => {
+            this.mindMap.renderer.setNodeDataRender(localNode, patch)
           })
-        }
-        const peerNote = peerChild.data.note || ''
-        if (peerNote !== (localNode.getData('note') || '')) {
-          this.mindMap.execCommand('SET_NODE_NOTE', localNode, peerNote)
+        } else {
+          localNode.setData(patch)
         }
       }
-      await this._syncChildren(
+      const childSynced = await this._syncChildren(
         localNode,
         peerChild.children || [],
         reverse,
-        host
+        host,
+        canRemove
       )
+      if (!childSynced) synced = false
     }
 
-    // 本地多出来的、且在 uidMap 里的 → 对端已删，本地也删
-    for (const kid of localKids) {
-      if (!kid || typeof kid.getData !== 'function') continue
-      const uid = String(kid.getData('uid') || '')
+    if (!canRemove || this._stopped) return synced
+    // 源子树完整时，才能把缺席的映射节点视为已删除。
+    for (const child of localKids) {
+      const uid = child && child.data && String(child.data.uid || '')
       if (!uid || usedLocal.has(uid)) continue
       if (!(host.ref.uidMap && host.ref.uidMap[uid])) continue
+      const kid = this._findDataChild(localParent, uid)
+      if (!kid) continue
       try {
-        this.mindMap.execCommand('REMOVE_NODE', [kid])
+        this._applyRemote(() => {
+          if (typeof kid.reRender === 'function') {
+            this.mindMap.execCommand('REMOVE_NODE', [kid])
+          } else {
+            detachNodeFromParent(kid)
+            this.mindMap.render()
+          }
+        })
         delete host.ref.uidMap[uid]
       } catch (e) {
         /* ignore */
       }
     }
+    return synced
   }
 
   _findDataChild(parent, uid) {

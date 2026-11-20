@@ -34,6 +34,41 @@ function walkTree(root, visit) {
   }
 }
 
+// 旧镜像和 MCP 植入的节点可能没有个人偏好。按宿主的 uidMap 定位镜像成员，
+// 只对镜像分支采用收起默认值，个人保存的展开状态优先。
+export function applyTreeExpandState(root, state, protect = new Set()) {
+  if (!root || !state) return false
+  let changed = false
+  const stack = [{ node: root, mirrorUidMap: null }]
+  while (stack.length) {
+    const { node, mirrorUidMap } = stack.pop()
+    const data = nodeDataOf(node)
+    const children = childrenOf(node)
+    const uid = data && data.uid
+    if (uid) {
+      const saved = Object.prototype.hasOwnProperty.call(state, uid)
+      const mirrorBranch = mirrorUidMap &&
+        Object.prototype.hasOwnProperty.call(mirrorUidMap, uid) &&
+        (children.length > 0 || Number(data.childCount) > 0)
+      if (saved || mirrorBranch) {
+        const next = saved && state[uid] !== false
+        if ((data.expand !== false) !== next && (next || !protect.has(uid))) {
+          data.expand = next
+          changed = true
+        }
+      }
+    }
+    const ref = data && data.mapRef
+    const childUidMap = ref && ref.syncMode === 'mirror' && ref.uidMap
+      ? ref.uidMap
+      : mirrorUidMap
+    for (let i = children.length - 1; i >= 0; i -= 1) {
+      if (children[i]) stack.push({ node: children[i], mirrorUidMap: childUidMap })
+    }
+  }
+  return changed
+}
+
 export function loadPersonalExpandState(roomKey, userId) {
   if (!roomKey) return {}
   try {
@@ -106,19 +141,6 @@ export function applyPersonalExpandState(mindMap, state, options = {}) {
     options.protectUids instanceof Set
       ? options.protectUids
       : new Set(options.protectUids || [])
-  let changed = false
-  walkTree(renderer && renderer.renderTree, node => {
-    const data = nodeDataOf(node)
-    const uid = data && data.uid
-    if (!uid || !Object.prototype.hasOwnProperty.call(state, uid)) return
-    const next = state[uid] !== false
-    if ((data.expand !== false) !== next) {
-      // 保护路径只挡「收起」，仍允许按偏好展开
-      if (!next && protect.has(uid)) return
-      data.expand = next
-      changed = true
-    }
-  })
-  return changed
+  return applyTreeExpandState(renderer && renderer.renderTree, state, protect)
 }
 
