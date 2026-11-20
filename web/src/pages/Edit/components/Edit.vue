@@ -93,6 +93,7 @@
 <script>
 import MobileEditorControls from './MobileEditorControls.vue'
 import MindMap from 'simple-mind-map'
+import { nodeRichTextToTextWithWrap } from 'simple-mind-map/src/utils/index.js'
 import { startPerformanceDiagnostics } from '@/utils/performanceDiagnostics'
 import MiniMap from 'simple-mind-map/src/plugins/MiniMap.js'
 import Watermark from 'simple-mind-map/src/plugins/Watermark.js'
@@ -511,10 +512,24 @@ export default {
     this._pendingSaveData = null
     this.mindMap = null
     this.mindMapData = null
+    document.title = 'WCPD'
   },
   methods: {
     onRoomCanvasReady() {
       this.roomCanvasPending = false
+      this.syncPageTitle()
+    },
+
+    syncPageTitle() {
+      if (this._editorDisposed || this.roomCanvasPending || !this.mindMap) return
+      const root = this.mindMap.renderer && this.mindMap.renderer.renderTree
+      if (!root || !root.data) return
+      const data = root.data
+      const text = String(data.text == null ? '' : data.text)
+      const title = (data.richText ? nodeRichTextToTextWithWrap(text) : text)
+        .replace(/\s+/g, ' ')
+        .trim() || '未命名脑图'
+      if (document.title !== title) document.title = title
     },
 
     openHyperlink(value) {
@@ -1436,6 +1451,10 @@ export default {
           this.$bus.$emit(event, ...args)
         })
       })
+      // Use the root label for this tab, including imports and collaborative edits.
+      this.mindMap.on('data_change', this.syncPageTitle)
+      this.mindMap.on('node_tree_render_end', this.syncPageTitle)
+      this.syncPageTitle()
       this.bindSaveEvent()
       // 如果应用被接管，那么抛出事件传递思维导图实例
       if (window.takeOverApp) {
