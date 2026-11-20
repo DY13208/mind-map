@@ -98,20 +98,24 @@ cases.push({ id: 'R34', name: 'destroy discards lazy command and expand continua
   observe: page => page.evaluate(async () => {
     const f = rendererFixture, mm = await f.create(f.wideLayered(1))
     const leaf = mm.renderer.findNodeByUid('b0l0')
-    let resolve, callbacks = 0, repairs = 0
+    const raw = leaf.nodeData
+    let resolve, callbacks = 0
     const pending = new Promise(done => { resolve = done })
     // The delayed hydration service is the boundary. Renderer continuations,
     // commands, instances and lifecycle are the real implementations.
     mm.cooperate = { nodeNeedsHydrate: () => true, hydrateLazyChildren: () => pending,
-      hydrateTreeToLevel: () => pending, repairEmptyExpand: () => { repairs++ } }
-    leaf.nodeData.data.childCount = 1
+      hydrateTreeToLevel: () => pending }
+    raw.data.childCount = 1
+    raw.data.expand = false
     mm.renderer.runAfterHydrate([leaf], () => { callbacks++ }, 'INSERT_CHILD_NODE')
     mm.renderer.hydrateThen(mm.renderer.renderTree, 2, {}, () => { callbacks++ })
     mm.renderer.setNodeExpand(leaf, true)
-    mm.destroy(); resolve(); await f.delay(60)
-    return { callbacks, repairs, retainedTree: !!mm.renderer.renderTree }
-  }), checks: [{ name: 'destroyed renderer invokes neither callback nor repair', assert: (x,a) => {
-    a.equal(x.callbacks,0); a.equal(x.repairs,0); a.equal(x.retainedTree,false)
+    mm.destroy()
+    raw.children.push({ data: { uid: 'late-child' }, children: [] })
+    resolve(); await f.delay(60)
+    return { callbacks, expanded: raw.data.expand, retainedTree: !!mm.renderer.renderTree }
+  }), checks: [{ name: 'destroyed renderer discards late expansion and callbacks', assert: (x,a) => {
+    a.equal(x.callbacks,0); a.equal(x.expanded,false); a.equal(x.retainedTree,false)
   } }]
 })
 cases.push({ id: 'R36', name: 'custom left-side leaf resize keeps the incoming connector on its facing edge',

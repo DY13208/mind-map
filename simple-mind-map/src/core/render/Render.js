@@ -155,6 +155,7 @@ class Render {
     this.renderTree = this.mindMap.opt.data
       ? merge({}, this.mindMap.opt.data)
       : null
+    this.pendingNodeExpands = new WeakMap()
     // 是否重新渲染
     this.reRender = false
     // 是否正在渲染中
@@ -3135,70 +3136,72 @@ class Render {
   //  设置节点是否展开
   setNodeExpand(node, expand) {
     if (this._destroyed) return
-    const wasCollapsed = node.getData('expand') === false
-    const apply = nextExpand => {
-      const collapsedChildren =
-        nextExpand && wasCollapsed ? this.collapseChildrenOf(node) : false
-      this.mindMap.execCommand('SET_NODE_DATA', node, {
-        expand: nextExpand
-      })
-      if (collapsedChildren) this.mindMap.emit('personal_expand_change')
+    const data = node.nodeData
+    const live = (data.children || []).length
+    const onlyNextLevel = expand && (node.getData('expand') === false || !live)
+    const apply = target => {
+      const collapsedUids = onlyNextLevel ? this.collapseChildrenOf(target) : []
+      this.mindMap.execCommand('SET_NODE_DATA', target, { expand: !!expand })
+      if (collapsedUids.length) {
+        this.mindMap.emit('personal_expand_change', { collapsedUids })
+      }
       this.mindMap.render()
     }
-    if (!expand) {
-      apply(false)
-      return
-    }
-    const live =
-      node.nodeData && node.nodeData.children && node.nodeData.children.length
     const cooperate = this.mindMap.cooperate
-    if (live || !cooperate || typeof cooperate.hydrateLazyChildren !== 'function') {
-      apply(true)
+    const needsHydration = expand && cooperate &&
+      typeof cooperate.hydrateLazyChildren === 'function' &&
+      (!live || (cooperate.nodeNeedsHydrate && cooperate.nodeNeedsHydrate(node)))
+    if (!needsHydration) {
+      this.pendingNodeExpands.delete(data)
+      apply(node)
       return
     }
-    const after = () => {
-      if (this._destroyed) return
-      const hasKids =
-        node.nodeData && node.nodeData.children && node.nodeData.children.length
-      if (hasKids) {
-        apply(true)
+
+    const tree = this.renderTree
+    const operationId = this._expandOperationId
+    const pending = this.pendingNodeExpands.get(data)
+    if (pending && pending.tree === tree && pending.operationId === operationId) return
+    const request = { tree, operationId }
+    this.pendingNodeExpands.set(data, request)
+    const uid = node.getData('uid')
+    const finish = err => {
+      if (this.pendingNodeExpands.get(data) !== request) return
+      this.pendingNodeExpands.delete(data)
+      if (this._destroyed || this.renderTree !== tree || this._expandOperationId !== operationId) return
+      if (err) {
+        console.error('[mind-map] load children failed', err)
         return
       }
-      const childCount = Number(node.getData && node.getData('childCount')) || 0
-      if (
-        childCount > 0 &&
-        cooperate &&
-        typeof cooperate.repairEmptyExpand === 'function'
-      ) {
-        cooperate.repairEmptyExpand(node)
+      const current = this.findNodeByUid(uid)
+      if (!current || current.nodeData !== data) return
+      const loaded = (data.children || []).length
+      const total = Number(current.getData('childCount')) || 0
+      // A response interrupted by a concurrent edit may still be incomplete.
+      if (loaded && (!cooperate.httpFetchSubtree || loaded >= total)) {
+        apply(current)
+      } else if (total === 0) {
+        this.mindMap.render()
       }
     }
     const hydrated = cooperate.hydrateLazyChildren(node)
     if (hydrated && typeof hydrated.then === 'function') {
-      hydrated.then(after).catch(err => {
-        if (this._destroyed) return
-        console.error('[mind-map] load children failed', err)
-        if (typeof cooperate.repairEmptyExpand === 'function') {
-          cooperate.repairEmptyExpand(node)
-        }
-      })
+      hydrated.then(() => finish(), finish)
       return
     }
-    after()
+    finish()
   }
 
   // 从收起状态展开时只露出下一级，子节点不沿用收起前的展开状态
   collapseChildrenOf(node) {
     const children = (node.nodeData && node.nodeData.children) || []
-    let changed = false
+    const collapsedUids = []
     children.forEach(child => {
       if (!child || !child.data || !this.nodeHasChildren(child)) return
-      if (child.data.expand !== false) {
-        child.data.expand = false
-        changed = true
-      }
+      child.data.expand = false
+      // A hydrated stub can already be folded while its saved preference is open.
+      if (child.data.uid) collapsedUids.push(child.data.uid)
     })
-    return changed
+    return collapsedUids
   }
 
   nodeHasChildren(node) {

@@ -1215,18 +1215,6 @@ export default {
       }
       this.personalExpandOnCommand = (name, ...args) => {
         if (this.personalExpandOverviewFrozen) return
-        if (name === 'SET_NODE_EXPAND') {
-          const node = args[0]
-          const uid =
-            node && node.getData && node.getData('uid')
-              ? node.getData('uid')
-              : node && node.data && node.data.uid
-          if (uid) {
-            this.$set(this.personalExpandState, uid, args[1] !== false)
-            persist()
-          }
-          return
-        }
         if (
           name === 'EXPAND_ALL' ||
           name === 'UNEXPAND_ALL' ||
@@ -1254,15 +1242,22 @@ export default {
         }
       }
       this.personalExpandOnChange = (meta = {}) => {
+        const collapsedUids = meta.collapsedUids || []
         if (
           !shouldPersistExpandChange(meta, {
             overviewFrozen: this.personalExpandOverviewFrozen,
-            applying: this.personalExpandApplying
+            applying: this.personalExpandApplying && !collapsedUids.length
           })
         ) {
           return
         }
-        snapshotNow()
+        if (collapsedUids.length) {
+          // Save the explicit next-level boundary even during async restoration.
+          collapsedUids.forEach(uid => this.$set(this.personalExpandState, uid, false))
+          persist()
+        } else {
+          snapshotNow()
+        }
       }
       this.mindMap.on('personal_expand_change', this.personalExpandOnChange)
       this.personalExpandOnRender = (meta = {}) => {

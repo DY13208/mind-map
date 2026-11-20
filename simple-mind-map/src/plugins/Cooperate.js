@@ -1678,8 +1678,6 @@ class Cooperate {
     this.onBeforeExecCommand = this.onBeforeExecCommand.bind(this)
     this.mindMap.on('beforeExecCommand', this.onBeforeExecCommand)
     setCollabTraceSnapshotProvider(() => this.persistTraceSnapshot())
-    this.onExpandBtnClick = this.onExpandBtnClick.bind(this)
-    this.mindMap.on('expand_btn_click', this.onExpandBtnClick)
     this.onBeforeShowTextEdit = this.onBeforeShowTextEdit.bind(this)
     this.onHideTextEdit = this.onHideTextEdit.bind(this)
     this.mindMap.on('before_show_text_edit', this.onBeforeShowTextEdit)
@@ -1744,7 +1742,6 @@ class Cooperate {
     if (this.onBeforeExecCommand) {
       this.mindMap.off('beforeExecCommand', this.onBeforeExecCommand)
     }
-    this.mindMap.off('expand_btn_click', this.onExpandBtnClick)
     if (this.onBeforeShowTextEdit) {
       this.mindMap.off('before_show_text_edit', this.onBeforeShowTextEdit)
     }
@@ -2607,37 +2604,6 @@ class Cooperate {
         this.waitNodeUidMap[uid].push(userInfo)
       }
     })
-  }
-
-  onExpandBtnClick(node) {
-    if (!node) return
-    const live =
-      node.nodeData && node.nodeData.children && node.nodeData.children.length
-    const childCount = Number(node.getData && node.getData('childCount')) || 0
-    if (!live && childCount > 0) {
-      this.repairEmptyExpand(node)
-    }
-  }
-
-  async repairEmptyExpand(node) {
-    if (!node || this._repairingExpand) return
-    const childCount = Number(node.getData && node.getData('childCount')) || 0
-    const live =
-      node.nodeData && node.nodeData.children && node.nodeData.children.length
-    if (live || childCount <= 0) return
-    const uid = node.getData && node.getData('uid')
-    if (uid) this.hydrateFailedUids.delete(uid)
-    this._repairingExpand = true
-    try {
-      await this.hydrateLazyChildren(node)
-      if (node.nodeData && node.nodeData.children && node.nodeData.children.length) {
-        this.mindMap.execCommand('SET_NODE_EXPAND', node, true)
-      }
-    } catch (err) {
-      console.error('[mind-map] load children failed', err)
-    } finally {
-      this._repairingExpand = false
-    }
   }
 
   // 节点树渲染完毕事件

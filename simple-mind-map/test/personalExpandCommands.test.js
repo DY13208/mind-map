@@ -220,7 +220,7 @@ async function main() {
   vm.runInContext(fs.readFileSync(require.resolve('../../web/src/utils/expandRestoreGate.js'), 'utf8').replace('export function', 'function'), sandbox)
   vm.runInContext(fs.readFileSync(require.resolve('../../web/src/utils/personalViewPolicy.js'), 'utf8').replace(/export /g, ''), sandbox)
   Object.assign(sandbox, {
-    loadPersonalExpandState: () => ({ branch: true }),
+    loadPersonalExpandState: () => ({ branch: true, deep: true }),
     savePersonalExpandState() {}, bindPersonalAppearance: () => () => {},
     getPersonalViewState: () => new Promise(resolve => { remoteReady = resolve }),
     savePersonalViewState: async () => {},
@@ -234,13 +234,18 @@ async function main() {
     $set(state, uid, value) { state[uid] = value }, personalExpandApplying: true }
   bind.call(component)
   listeners.afterExecCommand('SET_NODE_EXPAND', { data: { uid: 'branch' } }, false)
-  assert.strictEqual(component.personalExpandState.branch, false, 'user commands during restore must be recorded')
+  assert.strictEqual(component.personalExpandState.branch, true, 'pending commands are not saved')
+  listeners.afterExecCommand('SET_NODE_DATA', { data: { uid: 'branch' } }, { expand: false })
+  assert.strictEqual(component.personalExpandState.branch, false, 'completed user commands during restore must be recorded')
   remoteReady({ state: { expand: { branch: true } } })
   await Promise.resolve(); await Promise.resolve()
   assert.strictEqual(component.personalExpandState.branch, false, 'late initial preferences must not overwrite user input')
   f.branch.data.expand = true
   listeners.personal_expand_change()
   assert.strictEqual(component.personalExpandState.branch, false, 'restore renders are not saved as user preferences')
+  listeners.personal_expand_change({ collapsedUids: ['deep'] })
+  assert.strictEqual(component.personalExpandState.deep, false, 'explicit child collapse wins during restore')
+  assert.strictEqual(component.personalExpandState.branch, false, 'targeted changes do not snapshot other branches')
   component.personalExpandApplying = false
   listeners.personal_expand_change()
   assert.strictEqual(component.personalExpandState.branch, true, 'async batch event updates personal preferences')
@@ -307,12 +312,15 @@ async function main() {
     const parentData = { data: { uid: 'p', expand: parentExpand }, children: [child, leafChild] }
     const events = []
     const r = {
+      pendingNodeExpands: new WeakMap(),
+      renderTree: parentData,
+      findNodeByUid: uid => uid === 'p' ? node : undefined,
       nodeHasChildren: node => node.children.length > 0 || Number(node.data.childCount) > 0,
       collapseChildrenOf: collapseChildren,
       mindMap: {
         cooperate: null,
         execCommand(name, node, patch) { node.nodeData.data.expand = patch.expand },
-        emit(name) { events.push(name) },
+        emit(name, { collapsedUids }) { events.push([name, Array.from(collapsedUids)]) },
         render() {}
       }
     }
@@ -325,11 +333,57 @@ async function main() {
   assert.strictEqual(c.child.data.expand, false, 'expanding a collapsed node must collapse its child branches')
   assert.strictEqual(c.grandchild.data.expand, true, 'only the next level is reset')
   assert.strictEqual(c.leafChild.data.expand, undefined, 'leaf children stay untouched')
-  assert.deepStrictEqual(c.events, ['personal_expand_change'], 'child collapse must be persisted')
+  assert.deepStrictEqual(c.events, [['personal_expand_change', ['c']]], 'child collapse must be persisted')
   c = makeExpandCase(true)
   setExpand.call(c.r, c.node, true)
   assert.strictEqual(c.child.data.expand, true, 're-expanding an already expanded node must not reset children')
   assert.deepStrictEqual(c.events, [])
-  console.log('Personal expansion async batch, collapse, level, and cancellation regressions passed')
+
+  c = makeExpandCase(false)
+  c.child.data.expand = false
+  c.parentData.data.childCount = 3
+  const loadedChild = { data: { uid: 'loaded', childCount: 1, expand: false }, children: [] }
+  let hydrationCalls = 0
+  let finishSingleHydration
+  c.r.mindMap.cooperate = {
+    httpFetchSubtree: () => {},
+    nodeNeedsHydrate: node => node.nodeData.children.length < node.getData('childCount'),
+    hydrateLazyChildren() {
+      hydrationCalls++
+      return new Promise(resolve => { finishSingleHydration = resolve })
+    }
+  }
+  setExpand.call(c.r, c.node, true)
+  setExpand.call(c.r, c.node, true)
+  assert.strictEqual(hydrationCalls, 1, 'rapid repeat clicks reuse the pending expansion')
+  assert.strictEqual(c.parentData.data.expand, false, 'the partially loaded level stays hidden')
+  finishSingleHydration()
+  await Promise.resolve()
+  assert.strictEqual(c.parentData.data.expand, false, 'an incomplete response can be retried')
+  setExpand.call(c.r, c.node, true)
+  assert.strictEqual(hydrationCalls, 2)
+  c.parentData.children.push(loadedChild)
+  finishSingleHydration()
+  await Promise.resolve()
+  assert.strictEqual(c.parentData.data.expand, true)
+  assert.deepStrictEqual(c.events, [['personal_expand_change', ['c', 'loaded']]],
+    'already folded child stubs must override old saved expansion flags')
+
+  c.parentData.children.pop()
+  setExpand.call(c.r, c.node, false)
+  setExpand.call(c.r, c.node, true)
+  setExpand.call(c.r, c.node, false)
+  c.parentData.children.push(loadedChild)
+  finishSingleHydration()
+  await Promise.resolve()
+  assert.strictEqual(c.parentData.data.expand, false, 'a later collapse cancels an outstanding open')
+  c.parentData.children.pop()
+  setExpand.call(c.r, c.node, true)
+  c.r.renderTree = { data: { uid: 'new-root' }, children: [] }
+  c.parentData.children.push(loadedChild)
+  finishSingleHydration()
+  await Promise.resolve()
+  assert.strictEqual(c.parentData.data.expand, false, 'late hydration cannot open a detached branch')
+  console.log('Personal expansion async batch, single-level, restore, and cancellation regressions passed')
 }
 main().catch(err => { console.error(err); process.exitCode = 1 })
