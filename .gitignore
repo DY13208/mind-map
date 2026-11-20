@@ -59,6 +59,7 @@ output/*.py
 /data/unove/
 /data/zizhi/
 /data/local-knowledge-cache/
+/simple-mind-map/data/local-knowledge-cache/
 # Local development tests: keep on disk, exclude new test files from Git.
 /tests/
 /simple-mind-map/test/

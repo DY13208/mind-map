@@ -661,7 +661,8 @@ export default {
     missingNode: '目標節點不存在，已打開導圖根節點',
     noPermission: '沒有訪問該導圖的權限',
     saved: '已插入子腦圖',
-    savedTip: '已插入子腦圖：節點應變為灰底卡片+紫色圖標，雙擊打開編輯（F2 可改名）',
+    savedTip:
+      '已插入子腦圖，點擊紫色圖示可在新分頁開啟（F2 可改名）',
     mirrorSavedTip:
       '已定位到節點並同步子樹：可在本圖展開編輯，修改會與原圖雙向同步',
     mirrorSavedWithAttachments:
@@ -673,6 +674,7 @@ export default {
       '目標子樹過大，已同步前 {n} 個節點（深度最多 12 層）；其餘未同步',
     applyFailed: '插入失敗，請重新選中節點後再試',
     removed: '已移除子腦圖引用（本地子節點已保留，不再跨圖同步）',
+    popupBlocked: '瀏覽器封鎖了新分頁，請允許此網站開啟彈出式視窗後重試',
     openFailed: '無法打開引用的導圖',
     currentMap: '不能引用當前導圖',
     previewTitle: '子腦圖預覽',

@@ -657,7 +657,7 @@ export default {
     noPermission: 'Bạn không có quyền truy cập sơ đồ này',
     saved: 'Đã chèn sơ đồ con',
     savedTip:
-      'Đã chèn sơ đồ con: nút sẽ thành thẻ xám + icon tím; nhấp đúp để xem (F2 để đổi tên)',
+      'Đã chèn sơ đồ con. Nhấp vào biểu tượng tím để mở trong thẻ mới (F2 để đổi tên).',
     mirrorSavedTip:
       'Đã định vị nút và đồng bộ cây con: mở rộng và sửa tại đây; thay đổi đồng bộ hai chiều với sơ đồ gốc',
     mirrorSavedWithAttachments:
@@ -671,6 +671,7 @@ export default {
     applyFailed: 'Chèn thất bại; hãy chọn lại nút rồi thử',
     removed:
       'Đã xóa tham chiếu sơ đồ con (giữ nút con cục bộ; dừng đồng bộ liên sơ đồ)',
+    popupBlocked: 'Trình duyệt đã chặn thẻ mới. Hãy cho phép cửa sổ bật lên và thử lại.',
     openFailed: 'Không mở được sơ đồ được tham chiếu',
     currentMap: 'Không thể tham chiếu sơ đồ hiện tại',
     previewTitle: 'Xem trước sơ đồ con',

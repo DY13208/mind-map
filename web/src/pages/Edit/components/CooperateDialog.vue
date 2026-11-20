@@ -323,7 +323,6 @@ import { countNodes, stubImportedTree } from '@/utils/importTree'
 import {
   captureMapView,
   inspectMapRef,
-  isMirrorMapRef,
   loadMapView,
   normalizeMapRef,
   restoreMapView,
@@ -331,12 +330,7 @@ import {
 } from '@/utils/mapRefNav'
 import { MapRefMirrorSync } from '@/utils/mapRefMirror'
 import { MapTitleSync, resolveInitialMapRefTitles } from '@/utils/mapTitleSync'
-import {
-  buildChildTrail,
-  consumeMapNavViewRestore,
-  ensureEntryNav,
-  writeChildEntryNav
-} from '@/utils/mapNavTrail'
+import { consumeMapNavViewRestore } from '@/utils/mapNavTrail'
 import {
   applyPersonalExpandState,
   applyTreeExpandState,
@@ -1568,16 +1562,11 @@ export default {
       if (gen !== this._mapOpenGen) return
       // 从子脑图「返回上级」：恢复离开时的画布位置和选中，不按 URL 里的 focus 重新定位
       if (consumeMapNavViewRestore(this.roomName)) {
-        this._pendingShallowExpand = 0
         this.clearShallowExpandQuery()
         await this.restoreOpenedMapView({ exactView: true })
         return
       }
-      const shallow =
-        Number(this.$route.query.shallowExpand) ||
-        Number(this._pendingShallowExpand) ||
-        0
-      this._pendingShallowExpand = 0
+      const shallow = Number(this.$route.query.shallowExpand) || 0
       if (shallow > 0) {
         await this.applyMapRefShallowExpand(shallow)
         this.clearShallowExpandQuery()
@@ -1596,39 +1585,12 @@ export default {
       await this.restoreOpenedMapView()
     },
 
-    async onMapRefClick(node, ref) {
+    async onMapRefClick(_node, ref) {
       const normalized = normalizeMapRef(ref)
       if (!normalized) {
         this.$message.warning(this.$t('mapRef.openFailed'))
         return
       }
-      // 镜像模式：在本图展开宿主节点，不跳转
-      if (isMirrorMapRef(normalized)) {
-        const host =
-          node ||
-          (normalized.mirrorRootUid &&
-            this.mindMap &&
-            this.mindMap.renderer &&
-            this.mindMap.renderer.findNodeByUid &&
-            this.mindMap.renderer.findNodeByUid(normalized.mirrorRootUid))
-        if (host && typeof host.setData === 'function') {
-          host.setData({ expand: true })
-          if (this.mindMap && this.mindMap.renderer) {
-            this.mindMap.render()
-          }
-          const uid =
-            (host.getData && host.getData('uid')) || normalized.mirrorRootUid
-          if (uid && this.mindMap && this.mindMap.cooperate) {
-            try {
-              await this.mindMap.cooperate.revealUid(uid)
-            } catch (e) {
-              /* ignore */
-            }
-          }
-        }
-        return
-      }
-      // 导航模式：跳转目标导图
       await this.navigateToMapRef(normalized)
     },
 
@@ -1683,8 +1645,7 @@ export default {
     },
 
     async navigateToMapRef(ref) {
-      // 双击子脑图节点会同时触发 node_dblclick 和 map_ref_click：只处理第一次，
-      // 否则第二次会拿跳转前的房间号把子脑图条目的返回路径覆盖掉
+      // 双击可能同时触发节点和图标事件。
       if (this._mapRefNavigating) return
       this._mapRefNavigating = true
       try {
@@ -1695,10 +1656,41 @@ export default {
     },
 
     async openMapRefTarget(ref) {
-      const current = roomFromLocation(this.$route)
-      // 必须在任何 await 之前读：此刻 history.state 一定还是上级脑图自己的条目
-      const parentNav = ensureEntryNav(current)
-      this.persistCurrentMapView()
+      const normalized = normalizeMapRef(ref)
+      if (!normalized) return
+      const { path, query: currentQuery } = this.$route
+      const query = {
+        ...currentQuery,
+        room: normalized.mapId,
+        shallowExpand: '2'
+      }
+      delete query.focus
+
+      // 在点击事件内预先打开标签页，避免异步权限检查触发弹窗拦截。
+      const tab = window.open('about:blank', '_blank')
+      if (!tab) {
+        this.$message.warning(this.$t('mapRef.popupBlocked'))
+        return
+      }
+      tab.opener = null
+      let opened = false
+      try {
+        const info = await this.inspectMapRefTarget(normalized)
+        if (!info || tab.closed) return
+        if (normalized.nodeId && info.nodeExists !== false) {
+          query.focus = normalized.nodeId
+        }
+        const { href } = this.$router.resolve({ path, query })
+        tab.location.replace(new URL(href, window.location.href).href)
+        opened = true
+      } catch (err) {
+        this.$message.warning(this.$t('mapRef.openFailed'))
+      } finally {
+        if (!opened && !tab.closed) tab.close()
+      }
+    },
+
+    async inspectMapRefTarget(ref) {
       let info
       try {
         info = await inspectMapRef(ref)
@@ -1730,48 +1722,10 @@ export default {
         this.$message.warning(this.$t('mapRef.missingMap'))
         return
       }
-      const normalized = normalizeMapRef(ref)
-      if (!normalized) return
-      if (normalized.nodeId && info.nodeExists === false) {
+      if (ref.nodeId && info.nodeExists === false) {
         this.$message.warning(this.$t('mapRef.missingNode'))
       }
-      // 子脑图跳转默认只展开到 2 级，防止大图卡死
-      const shallowLevel = 2
-      this._pendingShallowExpand = shallowLevel
-      const query = {
-        ...this.$route.query,
-        room: normalized.mapId,
-        shallowExpand: String(shallowLevel)
-      }
-      if (normalized.nodeId && info.nodeExists !== false) {
-        query.focus = normalized.nodeId
-      } else {
-        delete query.focus
-      }
-      if (normalized.mapId === current) {
-        await this.applyMapRefShallowExpand(shallowLevel)
-        this._pendingShallowExpand = 0
-        if (
-          normalized.nodeId &&
-          info.nodeExists !== false &&
-          this.mindMap &&
-          this.mindMap.cooperate
-        ) {
-          await this.mindMap.cooperate.revealUid(normalized.nodeId)
-        }
-        return
-      }
-      // 等待期间用户已经切到别的脑图：不再跳转，也不写返回路径
-      if (roomFromLocation(this.$route) !== current) return
-      const childTrail = buildChildTrail(parentNav, normalized.mapId)
-      try {
-        await this.$router.push({ query })
-      } catch (err) {
-        return
-      }
-      if (roomFromLocation(this.$route) !== normalized.mapId) return
-      if (childTrail.length) writeChildEntryNav(normalized.mapId, childTrail)
-      this.$bus.$emit('map_nav_context_change')
+      return info
     },
 
     tryAutoJoin() {

@@ -684,7 +684,7 @@ export default {
     noPermission: 'You do not have access to this map',
     saved: 'Sub-map inserted',
     savedTip:
-      'Sub-map inserted: node should become a gray card with a purple icon; double-click to open editor (F2 to rename)',
+      'Sub-map inserted. Click the purple icon to open it in a new tab (F2 to rename).',
     mirrorSavedTip:
       'Node located and subtree mirrored: expand and edit here; changes sync both ways with the source map',
     mirrorSavedWithAttachments:
@@ -698,6 +698,7 @@ export default {
     applyFailed: 'Insert failed; select the node and try again',
     removed:
       'Sub-map reference removed (local children kept; cross-map sync stopped)',
+    popupBlocked: 'Your browser blocked the new tab. Allow pop-ups for this site and try again.',
     openFailed: 'Could not open the referenced map',
     currentMap: 'Cannot reference the current map',
     previewTitle: 'Sub-map preview',

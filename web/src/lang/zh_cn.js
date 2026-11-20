@@ -661,7 +661,8 @@ export default {
     missingNode: '目标节点不存在，已打开导图根节点',
     noPermission: '没有访问该导图的权限',
     saved: '已插入子脑图',
-    savedTip: '已插入子脑图：节点应变为灰底卡片+紫色图标，双击打开编辑（F2 可改名）',
+    savedTip:
+      '已插入子脑图，点击紫色图标可在新标签页打开（F2 可改名）',
     mirrorSavedTip:
       '已定位到节点并同步子树：可在本图展开编辑，修改会与原图双向同步',
     mirrorSavedWithAttachments:
@@ -673,6 +674,7 @@ export default {
       '目标子树过大，已同步前 {n} 个节点（深度最多 12 层）；其余未同步',
     applyFailed: '插入失败，请重新选中节点后再试',
     removed: '已移除子脑图引用（本地子节点已保留，不再跨图同步）',
+    popupBlocked: '浏览器拦截了新标签页，请允许此网站打开弹窗后重试',
     openFailed: '无法打开引用的导图',
     currentMap: '不能引用当前导图',
     previewTitle: '子脑图预览',
