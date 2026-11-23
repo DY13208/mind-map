@@ -580,11 +580,12 @@ async function testPerFileOverrideModel() {
   assert.strictEqual(access.role, 'editor')
   assert.strictEqual(access.overrideActive, true)
 
-  // Removing a file member revokes access, including historical inherited access.
+  // Removing the file override falls back to the still-valid folder grant.
   await roomAcl.removeMember(db, 'room-x', 'carol', '', 'owner')
   access = await roomAcl.getAccess(db, 'room-x', 'carol')
-  assert.strictEqual(access.role, null)
+  assert.strictEqual(access.role, 'viewer')
   assert.strictEqual(access.overrideActive, false)
+  await assert.rejects(roomAcl.removeMember(db, 'room-x', 'carol', '', 'owner'), { code: 'INHERITED_PERMISSION' })
 
   // One member's setting does not leak to other members.
   assert.strictEqual(

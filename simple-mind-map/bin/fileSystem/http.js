@@ -1,6 +1,7 @@
 const { sendJson, readBody, safeRoomKey } = require('../storage')
 const { isAuthEnabled } = require('../auth')
 const roomAcl = require('../roomAcl')
+const { inheritedMembers, withInheritanceTransaction } = require('./folderInheritance')
 
 async function listFolderMembersWithOwner(store, folderId) {
   const folder = await store.getFolder(folderId)
@@ -244,21 +245,24 @@ async function handleFileSystemApi(req, res, options = {}) {
         typeof fs.store.listFolderSubtreeIds === 'function'
           ? await fs.store.listFolderSubtreeIds(transferFolderId)
           : [transferFolderId]
-      for (const id of folderIds) {
-        if (typeof fs.store.updateFolderOwner === 'function') {
-          await fs.store.updateFolderOwner(id, targetId)
-        } else {
-          await fs.store.query(
-            `update folders set created_by = $2, updated_at = now()
-             where id = $1 and deleted_at is null`,
-            [id, targetId]
-          )
+      await withInheritanceTransaction(fs.store, async (db, refresh) => {
+        for (const id of folderIds) {
+          if (typeof fs.store.updateFolderOwner === 'function') {
+            await fs.store.updateFolderOwner(id, targetId)
+          } else {
+            await db.query(
+              `update folders set created_by = $2, updated_at = now()
+               where id = $1 and deleted_at is null`,
+              [id, targetId]
+            )
+          }
+          await fs.store.removeFolderMember(id, targetId, db)
+          if (previousOwner && previousOwner !== targetId) {
+            await fs.store.setFolderMember(id, previousOwner, 'manager', db)
+          }
         }
-        await fs.store.removeFolderMember(id, targetId).catch(() => {})
-        if (previousOwner && previousOwner !== targetId) {
-          await fs.store.setFolderMember(id, previousOwner, 'manager')
-        }
-      }
+        await refresh({ folderId: transferFolderId })
+      })
       const list = await listFolderMembersWithOwner(fs.store, transferFolderId)
       sendJson(res, 200, { ok: true, list, ownerId: targetId })
       return true
@@ -271,7 +275,7 @@ async function handleFileSystemApi(req, res, options = {}) {
       const role = String(body.role || '').trim().toLowerCase()
       if (!['manager', 'editor', 'viewer'].includes(role)) throw Object.assign(new Error('文件夹权限必须是可管理、可编辑或可查看'), { code: 'BAD_REQUEST', statusCode: 400 })
       const actorMember = !bypass && userId && fs.store.listFolderMembers
-        ? (await fs.store.listFolderMembers(bulkFolderId)).find(item => item.user_id === userId)
+        ? (await inheritedMembers(fs.store, bulkFolderId)).find(item => item.user_id === userId)
         : null
       const isOwner = bypass || folder.created_by === userId
       const isManager = !!(actorMember && actorMember.role === 'manager')
@@ -336,13 +340,14 @@ async function handleFileSystemApi(req, res, options = {}) {
         userIds = userIds.filter(id => !protectedIds.has(id) && !unchanged.has(id))
       }
       if (fs.store.kind === 'pg' && userIds.length) {
-        await fs.store.withTx(async db => {
+        await withInheritanceTransaction(fs.store, async (db, refresh) => {
           await db.query(
             `insert into folder_members(folder_id, user_id, role)
              select $1, user_id, $3 from unnest($2::text[]) as target(user_id)
              on conflict(folder_id, user_id) do update set role = excluded.role, updated_at = now()`,
             [bulkFolderId, userIds, role]
           )
+          await refresh({ folderId: bulkFolderId })
         })
       }
       sendJson(res, 200, {
@@ -359,7 +364,7 @@ async function handleFileSystemApi(req, res, options = {}) {
       const folder = await fs.store.getFolder(folderAcl.id)
       if (!folder) throw Object.assign(new Error('文件夹不存在'), { code: 'FOLDER_NOT_FOUND', statusCode: 404 })
       const folderMember = !bypass && userId && fs.store.listFolderMembers
-        ? (await fs.store.listFolderMembers(folderAcl.id)).find(item => item.user_id === userId)
+        ? (await inheritedMembers(fs.store, folderAcl.id)).find(item => item.user_id === userId)
         : null
       const canManage = bypass || folder.created_by === userId || (folderMember && folderMember.role === 'manager')
       if (!canManage && method !== 'GET') {
@@ -397,7 +402,10 @@ async function handleFileSystemApi(req, res, options = {}) {
         if (currentMember && currentMember.role === 'owner') {
           throw Object.assign(new Error('文件夹所有者权限不能修改'), { code: 'FORBIDDEN', statusCode: 403 })
         }
-        await fs.store.setFolderMember(folderAcl.id, targetId, role)
+        await withInheritanceTransaction(fs.store, async (db, refresh) => {
+          await fs.store.setFolderMember(folderAcl.id, targetId, role, db)
+          await refresh({ folderId: folderAcl.id })
+        })
         const list = await listFolderMembersWithOwner(fs.store, folderAcl.id)
         sendJson(res, 200, { ok: true, list })
         return true
@@ -408,7 +416,10 @@ async function handleFileSystemApi(req, res, options = {}) {
           folderAcl.userId,
           req.authUser && req.authUser.corpId
         )
-        await fs.store.removeFolderMember(folderAcl.id, targetId)
+        await withInheritanceTransaction(fs.store, async (db, refresh) => {
+          await fs.store.removeFolderMember(folderAcl.id, targetId, db)
+          await refresh({ folderId: folderAcl.id })
+        })
         sendJson(res, 200, { ok: true })
         return true
       }

@@ -306,7 +306,7 @@
                   v-else-if="!readOnly"
                   class="removeBtn"
                   :disabled="isInheritedOnly(member)"
-                  :title="isInheritedOnly(member) ? '该成员的权限来自继承，请到来源处调整' : '移除该成员对此文件的访问权限'"
+                  :title="isInheritedOnly(member) ? '该成员的权限来自继承，请到来源处调整' : member.folderRole ? '移除单独授权；文件夹继承权限仍保留' : '移除该成员对此文件的访问权限'"
                   :aria-label="`移除${member.name || member.id}的单独授权`"
                   type="button"
                   @click="remove(member)"
@@ -518,8 +518,8 @@ export default {
       if (this.adapter) return this.adapter.description || ''
       if (this.isTeam) return '权限应用于团队空间；其中的脑图分别授权'
       return this.isRoom
-        ? '当前脑图独立授权；文件夹和团队成员不会自动获得内容访问权限'
-        : '权限仅应用于当前文件夹；其中的脑图和子文件夹分别授权'
+        ? '脑图继承所在文件夹的权限，也可单独设置成员权限'
+        : '权限向下应用于子文件夹及其中的脑图；文件夹可管理人员获得脑图编辑权限'
     },
     roleOptions() {
       if (this.adapter) return this.adapter.roleOptions
@@ -1177,12 +1177,15 @@ export default {
     },
     isInheritedOnly(member) {
       if (this.adapter) return !!(member && member.inheritedOnly)
-      return false
+      return this.isRoom && !!(member.folderRole || member.teamRole) &&
+        !(member.aclV2 ? member.overrideRole : member.directRole) && !this.isOwnerRole(member.role)
     },
     memberSourceLabel(member) {
       if (this.adapter) return (member && member.sourceLabel) || ''
       if (!this.isRoom) return ''
-      return '本图独立授权'
+      if (this.isOwnerRole(member.role)) return '所有者'
+      if (this.isInheritedOnly(member)) return member.folderRole ? '继承自文件夹' : '继承自团队'
+      return member.folderRole ? '本图单独授权 · 同时继承文件夹权限' : '本图单独授权'
     },
     needsRoleChange(member) {
       if (!member) return true
@@ -1515,7 +1518,7 @@ export default {
     async run(action, requestedRole, removedId) {
       if (this.readOnly || this.busy || this.loadFailed) return
       if (this.isRoom && String(requestedRole).toLowerCase() === 'inherit') {
-        this.$message.error('脑图采用独立授权，请选择具体权限')
+        this.$message.error('请选择具体权限；继承权限请到来源文件夹调整')
         return
       }
       const version = this.loadVersion
@@ -1527,7 +1530,10 @@ export default {
         if (version !== this.loadVersion) return
         this.$emit('changed')
         if (this.isRoom && removedId) {
-          this.$message.success('已移除该成员的本图访问权限')
+          const remaining = this.members.find(member => member.id === removedId)
+          this.$message.success(remaining && remaining.folderRole
+            ? '已移除单独授权，仍可通过文件夹继承访问'
+            : '已移除该成员的本图访问权限')
         } else {
           this.$message.success(`${this.resourceLabel}权限已更新`)
         }

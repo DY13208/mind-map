@@ -1,4 +1,5 @@
 const roomAcl = require('../roomAcl')
+const { inheritedMembers, withInheritanceTransaction } = require('./folderInheritance')
 const {
   DEFAULT_METADATA,
   fsError,
@@ -142,7 +143,7 @@ function createFileSystem(options = {}) {
       }
     }
     const graph = defaultRootGraph(title)
-    const created = await store.withTx(async db => {
+    const created = await withInheritanceTransaction(store, async (db, refresh) => {
       const row = await store.insertRoom(
         {
           room_key: roomKey,
@@ -164,6 +165,7 @@ function createFileSystem(options = {}) {
           db
         )
       }
+      if (folderId) await refresh({ roomKey })
       return row
     })
     let historyBaseline = null
@@ -534,7 +536,7 @@ function createFileSystem(options = {}) {
     // Callers must still enforce FOLDER_TEAM_MISMATCH so personal rooms cannot enter team folders.
     if (folder.team_id) return
     if (folder.created_by && folder.created_by === userId) return
-    const members = await store.listFolderMembers(folderId)
+    const members = await inheritedMembers(store, folderId)
     const mine = members.find(member => member.user_id === userId)
     if (mine && folderMemberCanWrite(mine.role)) return
     // Ancestor owners can still write into descendant folders created by collaborators.
@@ -573,10 +575,11 @@ function createFileSystem(options = {}) {
       }
       await assertFolderEditable(folderId, userId, bypass)
     }
-    const moved =
-      typeof store.withTx === 'function'
-        ? await store.withTx(db => store.updateFolder(roomKey, folderId, db))
-        : await store.updateFolder(roomKey, folderId)
+    const moved = await withInheritanceTransaction(store, async (db, refresh) => {
+      const result = await store.updateFolder(roomKey, folderId, db)
+      await refresh({ roomKey })
+      return result
+    })
     if (!moved || !moved.row) throw fsError('ROOM_NOT_FOUND', 'room not found', 404)
     return {
       file: publicFile(
@@ -614,7 +617,7 @@ function createFileSystem(options = {}) {
           throw fsError('FORBIDDEN', '没有权限在该文件夹中创建子文件夹', 403)
         }
       } else if (userId && parent.created_by && parent.created_by !== userId && !input.bypass) {
-        const members = await store.listFolderMembers(parentId)
+        const members = await inheritedMembers(store, parentId)
         const canEdit = members.some(
           member => member.user_id === userId && folderMemberCanWrite(member.role)
         )
@@ -695,10 +698,26 @@ function createFileSystem(options = {}) {
           .map(item => item.room_key)
       )
       accessibleFolderIds = new Set((store.folderMembers || []).filter(m => m.user_id === userId).map(m => m.folder_id))
+      // Empty descendants must remain navigable too, before a file is created.
+      let changed = true
+      while (changed) {
+        changed = false
+        rows.forEach(row => {
+          if (accessibleFolderIds.has(row.parent_id) && !accessibleFolderIds.has(row.id)) {
+            accessibleFolderIds.add(row.id)
+            changed = true
+          }
+        })
+      }
       rooms.forEach(room => {
         const allowed = mine.has(room.room_key)
         if (allowed && room.folder_id) accessibleFolderIds.add(room.folder_id)
       })
+      for (const row of rows) {
+        const mine = (await inheritedMembers(store, row.id)).find(member => member.user_id === userId)
+        row.folder_role = mine ? mine.role : null
+        row.can_manage = row.created_by === userId || !!(mine && mine.role === 'manager')
+      }
     }
     const visible = rows.filter(row => {
       if (bypass || teamId || store.kind === 'pg') return true
@@ -733,7 +752,7 @@ function createFileSystem(options = {}) {
       throw fsError('FORBIDDEN', '没有权限执行该操作', 403)
     }
     if (!teamId && userId && folder.created_by && folder.created_by !== userId && !input.bypass) {
-      const members = await store.listFolderMembers(id)
+      const members = await inheritedMembers(store, id)
       const canManage = members.some(
         member => member.user_id === userId && member.role === 'manager'
       )
@@ -1027,7 +1046,11 @@ function createFileSystem(options = {}) {
       const folder = await store.getFolder(folderId)
       if (!folder) folderId = null
     }
-    const row = await store.restoreRoom(roomKey, folderId)
+    const row = await withInheritanceTransaction(store, async (db, refresh) => {
+      const restored = await store.restoreRoom(roomKey, folderId, db)
+      await refresh({ roomKey })
+      return restored
+    })
     if (!row) throw fsError('ROOM_NOT_FOUND', 'room not found', 404)
     notifyStorage(roomKey, 'restore')
     return publicFile(

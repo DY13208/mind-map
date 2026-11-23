@@ -54,7 +54,9 @@ test('move preserves nested folders, content/version and independent grants', as
   const old = f.store.members.find(m => m.user_id === 'old')
   assert.equal(old.direct_role, 'editor')
   assert.equal(old.folder_role, null)
-  assert.equal(f.store.members.find(m => m.user_id === 'new'), undefined)
+  for (const key of [f.direct, f.nested]) {
+    assert.equal(f.store.members.find(m => m.user_id === 'new' && m.room_key === key).folder_role, 'viewer')
+  }
 })
 
 test('trash includes nested maps, preserves data and allows restoration to root', async () => {

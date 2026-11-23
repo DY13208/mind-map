@@ -1,5 +1,6 @@
 const crypto = require('crypto')
 const roomAcl = require('./roomAcl')
+const { lockInheritance, refreshFolderFileRoles } = require('./fileSystem/folderInheritance')
 
 const ROLES = ['owner', 'admin', 'member']
 
@@ -39,7 +40,9 @@ function name(value) {
 }
 
 async function transaction(db, fn) {
-  if (typeof db.connect !== 'function') return fn(db)
+  // A checked-out pg client also has connect(), but nested folder assignment
+  // must reuse its existing transaction rather than reconnecting that client.
+  if (typeof db.connect !== 'function' || typeof db.release === 'function') return fn(db)
   const client = await db.connect()
   try {
     await client.query('begin')
@@ -459,7 +462,8 @@ async function listRooms(db, who, id, filters = {}) {
 async function assignRoom(db, who, id, roomKey) {
   const key = String(roomKey || '').trim()
   if (!key) throw error(400, 'BAD_REQUEST', 'Ã§Â¼ÂºÃ¥Â°ÂÃ¨ÂÂÃ¥ÂÂ¾Ã¦Â ÂÃ¨Â¯Â')
-  return transaction(db, async tx => {
+  const result = await transaction(db, async tx => {
+    await lockInheritance(tx)
     await getTeam(tx, who.corpId, id, who.userId, teamAccessOpts(who))
     const room = await tx.query(
       `select room_key, owner_id, team_id, folder_id, deleted_at from rooms where room_key = $1 for update`,
@@ -491,15 +495,20 @@ async function assignRoom(db, who, id, roomKey) {
       `update rooms set team_id = $2, folder_id = null, updated_at = now() where room_key = $1`,
       [key, id]
     )
+    await refreshFolderFileRoles({ kind: 'pg' }, tx, { roomKey: key })
     await tx.query(`update teams set updated_at = now() where id = $1`, [id])
     return { roomKey: key, teamId: id }
   })
+  roomAcl.notifyAclChanged(key)
+  return result
 }
 
 async function assignFolder(db, who, id, folderId) {
   const root = String(folderId || '').trim()
   if (!root) throw error(400, 'BAD_REQUEST', 'Ã§Â¼ÂºÃ¥Â°ÂÃ¦ÂÂÃ¤Â»Â¶Ã¥Â¤Â¹Ã¦Â ÂÃ¨Â¯Â')
-  return transaction(db, async tx => {
+  let affected = []
+  const result = await transaction(db, async tx => {
+    await lockInheritance(tx)
     manager(await getTeam(tx, who.corpId, id, who.userId, teamAccessOpts(who)))
     const folders = await tx.query(`
       with recursive subtree as (
@@ -524,8 +533,11 @@ async function assignFolder(db, who, id, folderId) {
     await tx.query(`update folders set team_id = $2,
       parent_id = case when id = $3 then null else parent_id end,
       updated_at = now() where id = any($1::uuid[])`, [ids, id, root])
+    affected = await refreshFolderFileRoles({ kind: 'pg' }, tx, { folderId: root })
     return { ok: true, folderId: root, teamId: id, folderCount: ids.length, roomCount: rooms.rows.length }
   })
+  affected.forEach(key => roomAcl.notifyAclChanged(key))
+  return result
 }
 
 async function creationMembers(db, who, id) {

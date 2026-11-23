@@ -179,11 +179,11 @@ function mockRes() {
   const childRoom = await folderAccess.fs.createRoom({
     title: 'shared-child-file', folderId: sharedChild.id, userId: OWNER
   })
-  // Container grants never authorize either direct files or child folders.
+  // Folder grants reach direct files and descendants without copying members.
   assert.deepStrictEqual(await folderAccess.store.listFolderMembers(sharedChild.id), [])
-  assert.ok(!folderAccess.store.members.some(m => m.room_key === sharedRoom.room.roomKey && m.user_id === VIEWER))
-  assert.ok(!folderAccess.store.members.some(m => m.room_key === childRoom.room.roomKey && m.user_id === VIEWER))
-  assert.ok(!(await folderAccess.fs.listFolders({ userId: VIEWER })).list.some(f => f.id === sharedChild.id))
+  assert.ok(folderAccess.store.members.some(m => m.room_key === sharedRoom.room.roomKey && m.user_id === VIEWER && m.folder_role === 'viewer'))
+  assert.ok(folderAccess.store.members.some(m => m.room_key === childRoom.room.roomKey && m.user_id === VIEWER && m.folder_role === 'viewer'))
+  assert.ok((await folderAccess.fs.listFolders({ userId: VIEWER })).list.some(f => f.id === sharedChild.id))
   const folderCounts = await folderAccess.fs.listFolders({ userId: OWNER })
   assert.strictEqual(
     folderCounts.list.find(item => item.id === sharedParent.id).roomCount,
@@ -280,12 +280,12 @@ function mockRes() {
   const editorMem = store.members.find(
     m => m.room_key === solo.room.roomKey && m.user_id === EDITOR
   )
-  assert.strictEqual(editorMem.folder_role, null)
+  assert.strictEqual(editorMem.folder_role, 'editor')
   assert.strictEqual(editorMem.direct_role, 'editor')
   const viewerMem = store.members.find(
     m => m.room_key === solo.room.roomKey && m.user_id === VIEWER
   )
-  assert.strictEqual(viewerMem, undefined)
+  assert.strictEqual(viewerMem.folder_role, 'viewer')
   await fs.moveRoom(solo.room.roomKey, 'root', {
     access: { canEdit: true, role: 'owner' },
     userId: OWNER
@@ -743,7 +743,7 @@ function mockRes() {
     teamChild.id
   )
 
-  // Folder management and file content access are independent
+  // Folder managers inherit file editing, without file ownership/management.
   const mgrFs = engineWith()
   const mgrFolder = await mgrFs.fs.createFolder({ name: 'mgr-folder', userId: OWNER })
   await mgrFs.store.setFolderMember(mgrFolder.id, EDITOR, 'manager')
@@ -755,7 +755,8 @@ function mockRes() {
   const mgrMem = mgrFs.store.members.find(
     item => item.room_key === mgrOwned.room.roomKey && item.user_id === EDITOR
   )
-  assert.strictEqual(mgrMem, undefined, 'folder managers do not inherit file access')
+  assert.strictEqual(mgrMem.folder_role, 'manager')
+  assert.strictEqual(mgrMem.role, 'editor')
   await mgrFs.fs.moveRoom(mgrOwned.room.roomKey, 'root', {
     access: { canEdit: true, role: 'owner' },
     userId: OWNER
@@ -767,7 +768,8 @@ function mockRes() {
   const afterMove = mgrFs.store.members.find(
     item => item.room_key === mgrOwned.room.roomKey && item.user_id === EDITOR
   )
-  assert.strictEqual(afterMove, undefined, 'moving a file cannot introduce folder grants')
+  assert.strictEqual(afterMove.folder_role, 'manager')
+  assert.strictEqual(afterMove.role, 'editor')
   const mgrChild = await mgrFs.fs.createFolder({
     name: 'mgr-child',
     parentId: mgrFolder.id,

@@ -1,5 +1,6 @@
 const { createHash } = require('crypto')
 const roomAcl = require('../roomAcl')
+const { inheritedMembers, withInheritanceTransaction } = require('./folderInheritance')
 const { fsError, parseFolderId } = require('./model')
 
 function createFolderDeletion(store, notifyStorage) {
@@ -55,7 +56,7 @@ function createFolderDeletion(store, notifyStorage) {
     if (input.action === 'move' && !Object.prototype.hasOwnProperty.call(input, 'targetFolderId')) {
       throw fsError('BAD_REQUEST', '请选择移动目标', 400)
     }
-    const result = await store.withTx(async db => {
+    const result = await withInheritanceTransaction(store, async (db, refresh) => {
       const state = await inspect(id, input, db)
       const { contents, root, userId, bypass } = state
       if (state.preview.revision !== input.revision) {
@@ -79,7 +80,7 @@ function createFolderDeletion(store, notifyStorage) {
         if ((target.team_id || null) !== (root.team_id || null)) {
           throw fsError('FOLDER_TEAM_MISMATCH', '请选择同一空间中的文件夹', 400)
         }
-        targetMembers = await store.listFolderMembers(targetId, db)
+        targetMembers = await inheritedMembers(store, targetId, db)
         let writable = bypass || target.created_by === userId || targetMembers.some(m =>
           m.user_id === userId && ['manager', 'editor'].includes(m.role))
         const visited = new Set([targetId])
@@ -103,6 +104,9 @@ function createFolderDeletion(store, notifyStorage) {
         }
       }
       await store.finishFolderDeletion(id, contents, { action: input.action, targetId, userId }, db)
+      if (input.action === 'move') {
+        for (const room of contents.rooms) await refresh({ roomKey: room.room_key })
+      }
       return { ...state.preview, action: input.action, targetFolderId: targetId,
         deletedFolderIds: input.action === 'move' ? [id] : state.preview.excludedFolderIds,
         trashedRoomKeys: input.action === 'trash' ? contents.rooms.map(r => r.room_key) : [] }

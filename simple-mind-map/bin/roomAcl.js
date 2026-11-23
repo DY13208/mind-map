@@ -1235,6 +1235,26 @@ async function removeMember(db, roomKey, targetUserId, corpId = '', actorUserId 
       throw aclError(400, 'LAST_OWNER', '不能删除最后一个所有者')
     }
   }
+  if (currentRow.folder_role && currentEffective !== 'owner') {
+    if (!currentRow.direct_role && !(currentRow.acl_v2 && currentRow.override_role)) {
+      throw aclError(403, 'INHERITED_PERMISSION', '该成员的权限继承自文件夹，请到来源文件夹调整')
+    }
+    // Removing a direct file share must not erase a still-valid folder grant.
+    if (Array.isArray(db.members)) {
+      Object.assign(currentRow, {
+        direct_role: null, override_role: null, acl_v2: false,
+        role: effectiveRole(null, currentRow.team_role, currentRow.folder_role),
+        source: sourceForRoles(null, currentRow.team_role, currentRow.folder_role)
+      })
+    } else {
+      await db.query(`update room_members set direct_role = null, override_role = null, acl_v2 = false,
+        role = ${sqlEffectiveRole('null::text', 'team_role', 'folder_role')},
+        source = ${sqlPrimarySource('null::text', 'team_role', 'folder_role')}, updated_at = now()
+        where room_key = $1 and user_id = $2`, [roomKey, uid])
+    }
+    notifyAclChanged(roomKey)
+    return { ok: true, user_id: uid, inherited: true }
+  }
   const result = await db.query(
     `delete from room_members where room_key = $1 and user_id = $2 and (not $3::boolean or role <> 'owner')`,
     [roomKey, uid, managerActor]

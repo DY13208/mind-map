@@ -1896,6 +1896,13 @@ async function initSchemaOnce() {
   await historySchema.initHistorySchema(pool)
   const teamSpace = require('./teamSpace')
   await teamSpace.initSchema(pool)
+  // Reconcile existing files as well as future live grants. Do not run the old
+  // migration that converted matching direct shares into folder-only grants.
+  const folderInheritance = require('./fileSystem/folderInheritance')
+  const inheritanceStore = require('./fileSystem/pgStore').createPgFileStore(pool)
+  await folderInheritance.withInheritanceTransaction(inheritanceStore, async (db, refresh) => {
+    await refresh({})
+  })
   const nodeKnowledge = require('./nodeKnowledge')
   await nodeKnowledge.initSchema(pool)
   await require('./checkRuns/store').initSchema(pool)

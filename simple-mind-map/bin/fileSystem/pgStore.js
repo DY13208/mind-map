@@ -232,9 +232,9 @@ function createPgFileStore(pool) {
       )
       return res.rows
     },
-    async setFolderMember(id, userId, role) {
+    async setFolderMember(id, userId, role, db) {
       queryCount += 1
-      const res = await pool.query(
+      const res = await (db || pool).query(
         `insert into folder_members(folder_id, user_id, role) values($1,$2,$3)
          on conflict(folder_id, user_id) do update set role = excluded.role, updated_at = now()
          returning *`,
@@ -242,9 +242,9 @@ function createPgFileStore(pool) {
       )
       return res.rows[0]
     },
-    async removeFolderMember(id, userId) {
+    async removeFolderMember(id, userId, db) {
       queryCount += 1
-      await pool.query(`delete from folder_members where folder_id = $1 and user_id = $2`, [id, userId])
+      await (db || pool).query(`delete from folder_members where folder_id = $1 and user_id = $2`, [id, userId])
       return true
     },
     async roomKeysInFolder(id) {
@@ -350,7 +350,20 @@ function createPgFileStore(pool) {
       const params = [userId]
       const team = teamClause(params)
       const res = await pool.query(
-        `select f.*,
+        `with recursive folder_access as (
+           select f.id as folder_id, f.team_id, fm.role
+           from folders f join folder_members fm on fm.folder_id = f.id
+           where fm.user_id = $1 and f.deleted_at is null
+           union
+           select f.id, f.team_id, a.role from folders f
+           join folder_access a on f.parent_id = a.folder_id
+           where f.deleted_at is null and f.team_id is not distinct from a.team_id
+         ), effective_members as (
+           select folder_id, $1::text as user_id,
+             case max(case role when 'manager' then 3 when 'editor' then 2 else 1 end)
+               when 3 then 'manager' when 2 then 'editor' else 'viewer' end as role
+           from folder_access group by folder_id
+         ) select f.*,
                 (f.created_by = $1 or fm.role = 'manager') as can_manage,
                 fm.role as folder_role,
                 coalesce(cu.name, f.created_by, '') as created_by_name,
@@ -362,7 +375,7 @@ function createPgFileStore(pool) {
                     and r.deleted_at is null
                 ) as room_count
          from folders f
-         left join folder_members fm on fm.folder_id = f.id and fm.user_id = $1
+         left join effective_members fm on fm.folder_id = f.id
          left join wecom_users cu on cu.user_id = f.created_by
          where f.deleted_at is null
            ${team.sql}
@@ -519,9 +532,9 @@ function createPgFileStore(pool) {
       )
       return res.rows[0] || null
     },
-    async restoreRoom(roomKey, folderId) {
+    async restoreRoom(roomKey, folderId, db) {
       queryCount += 1
-      const res = await pool.query(
+      const res = await (db || pool).query(
         `update rooms
          set folder_id = $2,
              deleted_at = null,
