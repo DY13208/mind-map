@@ -2,6 +2,7 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const vm = require('node:vm')
+const { EventEmitter } = require('node:events')
 const compiler = require('vue-template-compiler')
 const load = require('./loadAttachmentUtils.cjs')
 const { readBoundedAttachmentResponse } = load('boundedAttachmentRead')
@@ -51,6 +52,69 @@ async function test() {
     assert.equal(viewer.visible, true)
     assert.deepEqual(viewer.loadedPreview, { componentKind: kind, requestId: 0 })
   }
-  console.log('PASS external CSV/PPTX/PDF routing, URL names, bounded reads, HTTP/CORS failures, cancellation and stored API preservation')
+
+  const editSource = fs.readFileSync(path.join(__dirname, '../src/pages/Edit/components/Edit.vue'), 'utf8')
+  const openMethodStart = editSource.indexOf('    openHyperlink(')
+  const openMethodEnd = editSource.indexOf('  /**', openMethodStart)
+  const openMethodScope = {
+    URL,
+    window: {
+      location: { href: 'https://mind.example.test/?room=one' },
+      open: (...args) => opened.push(args)
+    }
+  }
+  vm.runInNewContext('methods = ({' + editSource.slice(openMethodStart, openMethodEnd) + '})', openMethodScope)
+  const opened = []
+  const emitted = []
+  const warnings = []
+  const editor = {
+    $bus: { $emit: (...args) => emitted.push(args) },
+    $message: { warning: message => warnings.push(message) }
+  }
+  const node = { getData: key => key === 'hyperlinkTitle' ? '百度搜索' : '' }
+  openMethodScope.methods.openHyperlink.call(editor, 'https://www.baidu.com/search?q=mind-map', node)
+  assert.deepEqual(opened, [], 'normal hyperlink opening must stay inside the mind-map page')
+  assert.equal(emitted[0][0], 'node_hyperlinkPreview')
+  assert.deepEqual(JSON.parse(JSON.stringify(emitted[0][1])), {
+    url: 'https://www.baidu.com/search?q=mind-map',
+    title: '百度搜索'
+  })
+  openMethodScope.methods.openHyperlink.call(editor, 'javascript:alert(1)', node)
+  openMethodScope.methods.openHyperlink.call(editor, 'not a url', node)
+  assert.equal(emitted.length, 1, 'unsafe or malformed URLs must not reach the preview frame')
+  assert.equal(warnings.length, 2)
+
+  const previewScope = { setTimeout, clearTimeout, URL, window: scope.window }
+  vm.runInNewContext(parsed.script.content.replace(/^import .*$/gm, '').replace('export default', 'component ='), previewScope)
+  const previewComponent = previewScope.component
+  const bus = new EventEmitter()
+  bus.$on = bus.on.bind(bus)
+  bus.$off = bus.off.bind(bus)
+  bus.$emit = bus.emit.bind(bus)
+  const hyperlinkViewer = {
+    ...previewComponent.data(), ...previewComponent.methods,
+    $bus: bus, $route: {}, $message: { warning: message => warnings.push(message) }
+  }
+  for (const name of Object.keys(previewComponent.methods)) {
+    hyperlinkViewer[name] = hyperlinkViewer[name].bind(hyperlinkViewer)
+  }
+  previewComponent.created.call(hyperlinkViewer)
+  bus.$emit('node_hyperlinkPreview', { url: 'https://www.baidu.com/', title: '百度搜索' })
+  assert.equal(hyperlinkViewer.visible, true)
+  assert.equal(hyperlinkViewer.externalUrl, 'https://www.baidu.com/')
+  assert.equal(hyperlinkViewer.title, '百度搜索')
+  assert.equal(hyperlinkViewer.previewMode, 'hyperlink')
+  assert.equal(previewComponent.computed.typeLabel.call(hyperlinkViewer), '网页')
+  assert.equal(previewComponent.computed.fileSize.call(hyperlinkViewer), '')
+  assert.match(parsed.template.content, /allow-scripts/, 'embedded web pages need script support')
+  assert.match(parsed.template.content, /openExternal/, 'the shared viewer must retain an external-open fallback')
+  assert.match(parsed.template.content, /newWindowIcon/, 'the fallback uses the standard external-link icon')
+  assert.match(parsed.template.content, /新窗口打开/, 'the fallback clearly describes opening a new window')
+  previewComponent.beforeDestroy.call(hyperlinkViewer)
+  hyperlinkViewer.visible = false
+  bus.$emit('node_hyperlinkPreview', { url: 'https://example.test/' })
+  assert.equal(hyperlinkViewer.visible, false, 'destroyed viewers must release the hyperlink event listener')
+
+  console.log('PASS external attachment sources and hyperlinks use bounded, validated shared preview flows with external fallbacks')
 }
 test().catch(error => { console.error(error); process.exitCode = 1 })

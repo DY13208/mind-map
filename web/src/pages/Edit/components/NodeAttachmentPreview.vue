@@ -7,14 +7,21 @@
       <div class="attachmentFileIcon"><span class="attachmentFileIconSvg" aria-hidden="true" v-html="fileIconSvg"></span></div>
       <div class="attachmentFileInfo">
         <h2 :title="title">{{ title }}</h2>
-        <p><span>{{ fileSize }}</span><span class="fileMetaDivider">·</span><span>{{ typeLabel }}</span></p>
+        <p><span v-if="fileSize">{{ fileSize }}</span><span v-if="fileSize" class="fileMetaDivider">·</span><span>{{ typeLabel }}</span></p>
       </div>
       <div class="attachmentViewerActions" role="toolbar" aria-label="附件操作">
         <el-button size="small" icon="el-icon-full-screen" :aria-label="isMaximized ? '还原预览窗口' : '最大化预览窗口'" @click="toggleMaximize">
           <span class="actionLabel">{{ isMaximized ? '还原' : '最大化' }}</span>
         </el-button>
         <el-button v-if="attachmentId" size="small" type="primary" icon="el-icon-download" @click="download">下载</el-button>
-        <el-button v-else-if="externalUrl" size="small" type="primary" icon="el-icon-top-right" @click="openExternal">外部打开</el-button>
+        <el-button v-else-if="externalUrl" class="newWindowButton" size="small" type="primary" @click="openExternal">
+          <svg class="newWindowIcon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M14 3h7v7"></path>
+            <path d="M21 3l-9 9"></path>
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+          </svg>
+          <span>新窗口打开</span>
+        </el-button>
         <el-button class="attachmentCloseButton" size="small" icon="el-icon-close" aria-label="关闭附件预览" @click="visible = false"></el-button>
       </div>
     </header>
@@ -29,7 +36,7 @@
       </div>
       <component v-if="source && previewComponent" :is="previewComponent" :key="requestId" :source="source" :kind="kind" @download="download" />
       <div v-else-if="externalUrl" class="attachmentExternal">
-        <iframe :src="externalUrl" :title="title" sandbox="allow-same-origin allow-popups allow-forms allow-downloads" referrerpolicy="no-referrer"></iframe>
+        <iframe :src="externalUrl" :title="title" sandbox="allow-same-origin allow-scripts allow-popups allow-forms allow-downloads" referrerpolicy="no-referrer"></iframe>
       </div>
       <div v-else class="attachmentViewerState">
         <span class="attachmentFileIconSvg is-large" aria-hidden="true" v-html="fileIconSvg"></span><strong>暂不支持在线预览此文件类型</strong><p>{{ typeLabel }} · {{ fileSize }}</p>
@@ -85,11 +92,15 @@ export default {
     visible: false, loading: false, title: '附件预览', attachmentId: '', attachment: null,
     kind: 'unsupported', source: null, previewComponent: null, previewLoadAttempt: 0, previewLoadFailed: false,
     externalUrl: '', error: '', requestId: 0,
-    isMaximized: false, selectedData: null,
+    isMaximized: false, selectedData: null, previewMode: 'attachment',
     errorDialog: { visible: false, node: null, data: null, editable: false }
   }),
   computed: {
-    fileSize() { return formatPreviewBytes(this.attachment && this.attachment.byteSize) },
+    fileSize() {
+      return this.previewMode === 'hyperlink'
+        ? ''
+        : formatPreviewBytes(this.attachment && this.attachment.byteSize)
+    },
     extractionWarning() {
       const attachment = this.attachment || {}
       const selected = this.selectedData || {}
@@ -105,6 +116,7 @@ export default {
         : '原文件可以打开，但文字提取失败。'
     },
     typeLabel() {
+      if (this.previewMode === 'hyperlink') return '网页'
       const ext = this.title.includes('.') ? this.title.split('.').pop().toUpperCase() : ''
       return ext || '文件'
     },
@@ -136,10 +148,12 @@ export default {
   created() {
     this.$bus.$on('node_attachmentClick', this.onAttachmentClick)
     this.$bus.$on('node_attachmentContextmenu', this.onAttachmentContextmenu)
+    this.$bus.$on('node_hyperlinkPreview', this.onHyperlinkPreview)
   },
   beforeDestroy() {
     this.$bus.$off('node_attachmentClick', this.onAttachmentClick)
     this.$bus.$off('node_attachmentContextmenu', this.onAttachmentContextmenu)
+    this.$bus.$off('node_hyperlinkPreview', this.onHyperlinkPreview)
     this.resetPreview()
   },
   methods: {
@@ -211,6 +225,31 @@ export default {
       if (data.attachmentId) this.openStoredAttachment(data)
       else this.openExternalAttachment(data)
     },
+    onHyperlinkPreview(payload = {}) {
+      const input = String(payload.url || '').trim()
+      if (!input || /\s/.test(input)) {
+        this.$message.warning('链接地址无效，请检查超链接设置')
+        return
+      }
+      let url
+      try {
+        url = new URL(input, window.location.href)
+      } catch (_) {
+        this.$message.warning('链接地址无效，请检查超链接设置')
+        return
+      }
+      if (!['http:', 'https:'].includes(url.protocol)) {
+        this.$message.warning('仅支持 HTTP 或 HTTPS 链接')
+        return
+      }
+      this.resetPreview()
+      this.previewMode = 'hyperlink'
+      this.selectedData = null
+      this.externalUrl = url.href
+      this.title = String(payload.title || '').trim() || url.hostname || '网页预览'
+      this.kind = 'external'
+      this.visible = true
+    },
     openUrlInNewPage(url) { if (url) window.open(url, '_blank', 'noopener') },
     openHtmlInNewPage(data) {
       const room = roomFromLocation(this.$route)
@@ -228,6 +267,7 @@ export default {
       this.attachment = null
       this.attachmentId = ''
       this.externalUrl = ''
+      this.previewMode = 'attachment'
     },
     async loadPreviewComponent(kind = this.kind, requestId = this.requestId) {
       const loaders = this._previewModuleLoaders || PREVIEW_MODULE_LOADERS

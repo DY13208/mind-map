@@ -532,10 +532,15 @@ export default {
       if (document.title !== title) document.title = title
     },
 
-    openHyperlink(value) {
+    openHyperlink(value, node) {
       let url = null
+      const input = String(value || '').trim()
+      if (!input || /\s/.test(input)) {
+        this.$message.warning('链接地址无效，请检查超链接设置')
+        return
+      }
       try {
-        url = new URL(String(value || '').trim(), window.location.href)
+        url = new URL(input, window.location.href)
       } catch (_) {
         this.$message.warning('链接地址无效，请检查超链接设置')
         return
@@ -544,11 +549,10 @@ export default {
         this.$message.warning('仅支持 HTTP 或 HTTPS 链接')
         return
       }
-      // 普通新标签页，不用弹层，也不另开小窗口。脑图留在当前标签页。
-      const tab = window.open(url.href, '_blank', 'noopener,noreferrer')
-      if (!tab) {
-        this.$message.warning('浏览器拦截了新标签页，请允许弹窗后再打开')
-      }
+      const title = node && typeof node.getData === 'function'
+        ? String(node.getData('hyperlinkTitle') || '').trim()
+        : ''
+      this.$bus.$emit('node_hyperlinkPreview', { url: url.href, title })
     },
   /**
    * 协作服务连不上时的数据兜底。
@@ -1295,7 +1299,7 @@ export default {
           openBlankMode: false
         },
         ...(config || {}),
-        customHyperlinkJump: url => this.openHyperlink(url),
+        customHyperlinkJump: (url, node) => this.openHyperlink(url, node),
         // 选中状态直接使用节点自身的边框。
         hoverRectColor: '#246bff',
         hoverRectPadding: 0,
