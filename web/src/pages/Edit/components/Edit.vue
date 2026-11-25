@@ -203,6 +203,10 @@ import {
   inspectJobResult
 } from '@/utils/jobResultWriter'
 import { roomFromLocation } from '@/utils/roomLocation'
+import {
+  isThirdPartyAuthUrl,
+  openThirdPartyAuthLink
+} from '@/utils/externalHyperlink'
 
 // 注册插件
 MindMap.usePlugin(MiniMap)
@@ -532,6 +536,67 @@ export default {
       if (document.title !== title) document.title = title
     },
 
+    async copyTextToClipboard(text) {
+      // 优先使用现代剪贴板 API 复制链接
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        try {
+          await navigator.clipboard.writeText(text)
+          return true
+        } catch (_) {
+          // 剪贴板 API 在非安全上下文或容器受限时降级为 execCommand
+        }
+      }
+      // 降级使用隐藏文本域完成复制
+      const textarea = document.createElement('textarea')
+      textarea.value = text
+      textarea.setAttribute('readonly', '')
+      textarea.style.position = 'fixed'
+      textarea.style.opacity = '0'
+      document.body.appendChild(textarea)
+      textarea.select()
+      let copied = false
+      try {
+        copied = document.execCommand('copy')
+      } catch (_) {
+        copied = false
+      }
+      document.body.removeChild(textarea)
+      return copied
+    },
+    showManualCopyLinkDialog(href, inWorkBuddy) {
+      // 区分 WorkBuddy 容器与普通浏览器的提示文案
+      const tip = inWorkBuddy
+        ? '当前 WorkBuddy 环境暂不支持直接拉起默认浏览器，请复制下方网址到浏览器中打开：'
+        : '新窗口被浏览器拦截，请复制下方网址到浏览器中打开：'
+      // 使用 VNode 渲染提示与可全选只读网址框
+      const h = this.$createElement
+      const content = h('div', null, [
+        h('p', { style: 'margin: 0 0 10px; line-height: 1.5;' }, tip),
+        h('input', {
+          attrs: { type: 'text', readonly: true },
+          domProps: { value: href },
+          style: 'width: 100%; box-sizing: border-box; padding: 6px 8px; border: 1px solid #dcdfe6; border-radius: 4px; font-size: 13px; color: #303133;',
+          on: {
+            focus: e => e.target.select()
+          }
+        })
+      ])
+      // 弹出对话框并提供一键复制入口
+      this.$confirm(content, '请在浏览器中打开链接', {
+        confirmButtonText: '复制链接',
+        cancelButtonText: '关闭',
+        type: 'info',
+        closeOnClickModal: true
+      })
+        .then(async () => {
+          const ok = await this.copyTextToClipboard(href)
+          if (ok) this.$message.success('链接已复制，请粘贴到浏览器打开')
+          else this.$message.warning('自动复制失败，请手动选中弹窗中的网址复制')
+        })
+        .catch(() => {
+          // 用户主动关闭弹窗时无需额外处理
+        })
+    },
     openHyperlink(value, node) {
       let url = null
       const input = String(value || '').trim()
@@ -547,6 +612,14 @@ export default {
       }
       if (!['http:', 'https:'].includes(url.protocol)) {
         this.$message.warning('仅支持 HTTP 或 HTTPS 链接')
+        return
+      }
+      // 命中第三方登录类域名时跳出 iframe，避免跨站 Cookie 导致扫码死循环
+      if (isThirdPartyAuthUrl(url)) {
+        const result = openThirdPartyAuthLink(url.href)
+        if (!result.opened) {
+          this.showManualCopyLinkDialog(url.href, result.inWorkBuddy)
+        }
         return
       }
       const title = node && typeof node.getData === 'function'
