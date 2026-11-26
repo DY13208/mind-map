@@ -3,7 +3,7 @@
     <div class="imgUploadPanel">
       <div class="upBtn" v-if="!value">
         <label
-          for="imgUploadInput"
+          :for="inputId"
           class="imgUploadInputArea"
           @dragenter.stop.prevent
           @dragover.stop.prevent
@@ -13,7 +13,8 @@
         <input
           type="file"
           accept="image/*"
-          id="imgUploadInput"
+          :id="inputId"
+          class="imgUploadInput"
           @change="onImgUploadInputChange"
         />
       </div>
@@ -43,6 +44,12 @@ export default {
   data() {
     return {
       file: null
+    }
+  },
+  computed: {
+    // 为每个上传组件实例生成唯一的 input id，避免多实例 label for 冲突
+    inputId() {
+      return `imgUploadInput_${this._uid}`
     }
   },
   methods: {
