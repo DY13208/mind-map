@@ -77,24 +77,26 @@ export default {
     generateColorByContent,
 
     handleNodeActive(...args) {
-      this.activeNodes = [...args[1]]
-      if (this.activeNodes.length > 0) {
-        let firstNode = this.activeNodes[0]
-        this.tagArr = firstNode.getData('tag') || []
-      } else {
-        this.tagArr = []
-        this.tag = ''
-      }
+      this.activeNodes = [...(args[1] || [])]
+      this.resetDraft()
     },
 
     handleShowNodeTag() {
       this.$bus.$emit('startTextEdit')
+      this.resetDraft()
       this.dialogVisible = true
+    },
+
+    resetDraft() {
+      const firstNode = this.activeNodes[0]
+      const tags = firstNode ? firstNode.getData('tag') : []
+      this.tagArr = Array.isArray(tags) ? [...tags] : []
+      this.tag = ''
     },
 
     add() {
       const text = this.tag.trim()
-      if (!text) return
+      if (!text || this.tagArr.length >= this.max) return
       this.tagArr.push(text)
       this.tag = ''
     },
@@ -104,12 +106,14 @@ export default {
     },
 
     cancel() {
+      this.resetDraft()
       this.dialogVisible = false
     },
 
     confirm() {
+      this.add()
       this.activeNodes.forEach(node => {
-        node.setTag(this.tagArr)
+        node.setTag([...this.tagArr])
       })
       this.cancel()
     }
