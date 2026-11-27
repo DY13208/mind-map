@@ -2967,6 +2967,10 @@ class Cooperate {
       if (['node.move', 'node.moved', 'node.reorder', 'node.reordered'].includes(name) && body && body.uid) {
         placementEvents.push({ type: 'node.moved', payload: body })
       }
+      // 收集本地删除 ACK，确保权威缓存同步移除已删节点
+      if (['node.delete', 'node.deleted'].includes(name) && body && body.uid) {
+        placementEvents.push({ type: 'node.deleted', payload: body })
+      }
     }
     if (Array.isArray(committedPayload.events)) {
       committedPayload.events.forEach(item => collectPlacementAck(item.type, item.payload))
@@ -3042,6 +3046,7 @@ class Cooperate {
       }
       placementEvents.forEach(event => {
         if (event.type === 'node.inserted') this.acknowledgeLocalNodeCreation(event, committedRev)
+        else if (event.type === 'node.deleted') this.acknowledgeLocalNodeDeletion(event, committedRev)
         else this.acknowledgeLocalNodePlacement(event, committedRev)
       })
       const renderer = this.mindMap && this.mindMap.renderer
@@ -3122,12 +3127,56 @@ class Cooperate {
     })
   }
 
+  acknowledgeLocalNodeDeletion(event, revision) {
+    const payload = (event && event.payload) || {}
+    const uid = String(payload.uid || '')
+    if (!uid || !this.currentData || !Number.isSafeInteger(revision) || revision <= 0) return
+    if (!this._structuralGuardRevisions) this._structuralGuardRevisions = new Map()
+    // 已有更高版本结构变更（如后续恢复）时，不重放旧删除 ACK
+    if ((this._structuralGuardRevisions.get(uid) || 0) > revision) return
+    const rawRemoved = Array.isArray(payload.removed) && payload.removed.length
+      ? payload.removed
+      : Array.isArray(payload.deletedUids) && payload.deletedUids.length
+        ? payload.deletedUids
+        : [uid]
+    const removed = rawRemoved.filter(id => (this._structuralGuardRevisions.get(String(id)) || 0) <= revision)
+    if (!removed.length) return
+    // 将本地删除同步到权威缓存 currentData，避免父级 children 残留幽灵节点导致后续新增按 index 错位
+    this.currentData = applyCollabEvent(this.currentData, {
+      ...event,
+      type: 'node.deleted',
+      payload: { ...payload, removed }
+    }, { allowPartial: true })
+    removed.forEach(id => {
+      const key = String(id)
+      this._structuralGuardRevisions.set(key, Math.max(this._structuralGuardRevisions.get(key) || 0, revision))
+      if (typeof this.bumpAuthoritativeUidRev === 'function') this.bumpAuthoritativeUidRev(key, revision)
+    })
+  }
+
   acknowledgeLocalNodeCreation(event, revision) {
     const payload = event && event.payload || {}
     const uid = String(payload.uid || '')
     const data = payload.data
     if (!uid || !data || !this.currentData || !Number.isSafeInteger(revision) || revision <= 0) return
     if (this.isTombstonedUid(uid)) return
+    const parentUidForPrune = payloadParentUid(payload)
+    // 清理父级权威列表里残留的已删除墓碑节点，防止无 position 退回按 index 插入时发生前移错位
+    if (
+      parentUidForPrune &&
+      this.currentData[parentUidForPrune] &&
+      Array.isArray(this.currentData[parentUidForPrune].children)
+    ) {
+      const liveChildren = this.currentData[parentUidForPrune].children.filter(
+        id => !this.isTombstonedUid(String(id))
+      )
+      if (liveChildren.length !== this.currentData[parentUidForPrune].children.length) {
+        this.currentData[parentUidForPrune] = {
+          ...this.currentData[parentUidForPrune],
+          children: liveChildren
+        }
+      }
+    }
     const existing = this.currentData[uid]
     const structureRevision = this._structuralGuardRevisions && this._structuralGuardRevisions.get(uid) || 0
     if (!existing && structureRevision > revision) return
@@ -4079,7 +4128,9 @@ class Cooperate {
     const parent = renderer && renderer.findNodeByUid && renderer.findNodeByUid(parentUid)
     const children = parent && parent.nodeData && parent.nodeData.children
     if (!Array.isArray(children)) return false
-    const canonical = new Set(entry.children.map(String))
+    // 仅以存活的权威子节点顺序为准，排除已标记删除的残留墓碑 UID
+    const liveCanonicalChildren = entry.children.filter(uid => !this.isTombstonedUid(String(uid)))
+    const canonical = new Set(liveCanonicalChildren.map(String))
     // 懒加载补入画布的旧节点可能还没有合并进 currentData.children。
     // 此时按缓存中的少数新节点排序，会把新节点排到全部旧节点前面。
     // 保留命令/服务端 index 已确定的顺序，等缓存完整后再投影。
@@ -4094,10 +4145,10 @@ class Cooperate {
       return false
     }
     const loaded = new Set(children.map(node => String(node && node.data && node.data.uid || '')))
-    if (entry.children.every(uid => loaded.has(String(uid))) && this._pendingChildOrderParents) {
+    if (liveCanonicalChildren.every(uid => loaded.has(String(uid))) && this._pendingChildOrderParents) {
       this._pendingChildOrderParents.delete(parentUid)
     }
-    const ranks = new Map(entry.children.map((uid, index) => [String(uid), index]))
+    const ranks = new Map(liveCanonicalChildren.map((uid, index) => [String(uid), index]))
     const ordered = children.map((node, index) => {
       const uid = String(node && node.data && node.data.uid || '')
       const canonical = this.currentData[uid]
@@ -7410,8 +7461,17 @@ class Cooperate {
       if (this.abandonedInsertUids) this.abandonedInsertUids.delete(u)
       if (this.recentHttpDeleted) this.recentHttpDeleted.delete(u)
       // currentData 是服务端行树的镜像；行删了镜像也要同步少掉，
-      // 否则 hasServerNodeRow 会拿 stale 信号把纯虚拟节点再判成有行。
-      if (this.currentData) delete this.currentData[u]
+      // 否则 hasServerNodeRow 会拿 stale 信号把纯虚拟节点再判成有行，
+      // 且父级 children 残留该 uid 会导致后续同级新增按 index 错位。
+      if (this.currentData) {
+        Object.keys(this.currentData).forEach(key => {
+          const entry = this.currentData[key]
+          if (entry && Array.isArray(entry.children) && entry.children.includes(u)) {
+            entry.children = entry.children.filter(id => id !== u)
+          }
+        })
+        delete this.currentData[u]
+      }
     })
     const owner = generalizationScopeOwner(node)
     // 服务端删除是受保护写入：必须带 expected（uid + subtree_token），
