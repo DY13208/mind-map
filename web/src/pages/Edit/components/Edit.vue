@@ -566,7 +566,7 @@ export default {
     showManualCopyLinkDialog(href, inWorkBuddy) {
       // 区分 WorkBuddy 容器与普通浏览器的提示文案
       const tip = inWorkBuddy
-        ? '当前 WorkBuddy 环境暂不支持直接拉起默认浏览器，请复制下方网址到浏览器中打开：'
+        ? 'WorkBuddy 内不支持直接打开外部登录链接，请复制下方网址到浏览器中打开：'
         : '新窗口被浏览器拦截，请复制下方网址到浏览器中打开：'
       // 使用 VNode 渲染提示与可全选只读网址框
       const h = this.$createElement
